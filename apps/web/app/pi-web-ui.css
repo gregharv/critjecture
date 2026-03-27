@@ -1,0 +1,22 @@
+/*
+ * Critjecture package overrides for @mariozechner/pi-web-ui.
+ *
+ * Keep this file small and additive. The generated base stylesheet lives in
+ * pi-web-ui.generated.css and should be refreshed from upstream with:
+ *
+ * pnpm --filter web sync:pi-web-ui-css
+ */
+
+.user-message-container {
+  position: relative;
+  max-width: 100%;
+  border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border) 65%);
+  background:
+    linear-gradient(135deg, rgb(66 153 225 / 0.12), rgb(37 99 235 / 0.08)),
+    linear-gradient(180deg, rgb(17 24 39 / 0.82), rgb(15 23 42 / 0.94));
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}

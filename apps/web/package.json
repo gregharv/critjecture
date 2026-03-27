@@ -1,0 +1,30 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "sync:pi-web-ui-css": "node ./scripts/sync-pi-web-ui-css.mjs"
+  },
+  "dependencies": {
+    "@mariozechner/mini-lit": "^0.2.0",
+    "@mariozechner/pi-agent-core": "0.63.1",
+    "@mariozechner/pi-ai": "0.63.1",
+    "@mariozechner/pi-web-ui": "0.63.1",
+    "lit": "^3.3.1",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "16.2.1",
+    "typescript": "^5.9.3"
+  }
+}
