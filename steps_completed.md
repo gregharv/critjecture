@@ -132,3 +132,56 @@ Step 2 was implemented as an RBAC-aware local knowledge search flow on top of th
 - The frontend keeps the existing `pi-web-ui` chat surface and server-side OpenAI streaming pattern.
 - The role selector is page-owned UI, while tool execution remains inside the client agent session.
 - Package upgrade risk was reduced by limiting custom `pi-web-ui` styling to a generated upstream base plus a very small override file.
+
+## Step 3: The `uv` Python Sandbox (Polars Environment)
+
+### What Was Implemented
+
+Step 3 was implemented as a real Python analysis tool on top of the existing Step 2 chat architecture, including the isolated runtime, backend execution bridge, tool registration, and a custom UI renderer for analysis calls.
+
+- Added a standalone `uv` project at `packages/python-sandbox`.
+- Installed `polars` into the sandbox package and committed its `uv.lock`.
+- Added the server-only sandbox wrapper in `apps/web/lib/python-sandbox.ts`.
+  - Resolves the hardcoded interpreter path at `packages/python-sandbox/.venv/bin/python`
+  - Runs Python via `execFile(...)`
+  - Strips inherited environment variables
+  - Forces execution inside `/tmp/workspace`
+  - Returns structured stdout/stderr and raises clear execution errors
+- Added the backend route at `apps/web/app/api/data-analysis/run/route.ts`.
+  - Validates `code`
+  - Executes the sandboxed Python command
+  - Returns structured stdout/stderr plus a summary string
+  - Detects the common "no stdout" case and tells the model to `print(...)` the final answer explicitly
+- Updated `apps/web/components/chat-shell.tsx`.
+  - Registers the new `run_data_analysis` tool
+  - Keeps `search_company_knowledge` in place
+  - Updates the system prompt so the model uses Python for computations and analytical tasks
+  - Instructs the model to write complete Python, print final answers to stdout, and prefer a single JSON object for multi-value results
+  - Removes the temporary smoke-test prompt once the tool path was working reliably
+- Added a custom tool renderer in `apps/web/lib/tool-renderers.ts`.
+  - Replaces the default raw JSON tool view for `run_data_analysis`
+  - Shows the generated Python code in a proper code block
+  - Separates stdout and stderr into distinct panels
+  - Shows execution status, summary text, and sandbox metadata in a more readable card
+- Updated app-owned UI styling.
+  - Added analysis tool card styling in `apps/web/app/pi-web-ui.css`
+  - Fixed the `/chat` shell layout in `apps/web/app/globals.css` so the frame fills the page height instead of leaving dead space below the composer
+
+### Current Step 3 Behavior
+
+- The browser still does not execute Python directly.
+- The client tool calls a Next.js backend route, and the backend owns process spawning.
+- The Python interpreter is fixed to the local sandbox package `.venv`, not the system Python.
+- The sandbox writes only inside `/tmp/workspace`.
+- Analytical questions can now trigger `run_data_analysis` and display:
+  - the Python code sent to the sandbox
+  - the captured stdout
+  - any stderr output
+  - a short execution summary
+
+### Important Implementation Details
+
+- `run_data_analysis` is intentionally generic and accepts raw Python code so Step 4 can reuse it for Polars-based CSV analysis.
+- Errors from Python are returned clearly instead of being swallowed by the tool layer.
+- The tool contract now depends on stdout for useful answers, so prompt quality matters: the model must `print(...)` the final result.
+- The custom renderer improves readability, but it does not yet render charts or files. That remains Step 5 work.

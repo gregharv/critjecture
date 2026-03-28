@@ -1,6 +1,6 @@
 # Critjecture
 
-Step 2 extends the `pnpm` monorepo with an RBAC-aware local search tool for mock company files.
+Step 3 extends the `pnpm` monorepo with an RBAC-aware local search tool plus an isolated `uv` Python sandbox for deterministic data analysis.
 
 The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/pi-web-ui`.
 
@@ -8,12 +8,14 @@ The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/
 
 - Node.js 20.9 or newer
 - `pnpm` 10.x
+- `uv` 0.11 or newer
 - `OPENAI_API_KEY` for live chat verification
 
 ## Quick Start
 
 ```bash
 pnpm install
+uv sync --project packages/python-sandbox
 cp apps/web/.env.local.example apps/web/.env.local
 pnpm dev
 ```
@@ -53,6 +55,29 @@ Suggested checks:
 
 - As `Intern`, ask `What is our profit?`
 - As `Owner`, ask `What is our profit?`
+
+## Step 3 Sandbox
+
+The repo now includes a standalone Python sandbox project at:
+
+- `packages/python-sandbox`
+
+The Next.js backend executes Python from the hardcoded project interpreter:
+
+- `packages/python-sandbox/.venv/bin/python`
+
+The sandbox runs with:
+
+- working directory fixed to `/tmp/workspace`
+- a stripped environment so app secrets are not passed into Python
+- `polars` installed for tabular analysis
+
+Suggested Step 3 smoke check:
+
+- Start a fresh chat session.
+- Send any first message in `/chat`.
+- The temporary Step 3 smoke-test prompt will force a `run_data_analysis` tool call that executes `import polars as pl; print(2 + 2)`.
+- Success is the assistant returning `4`.
 
 ## Environment
 

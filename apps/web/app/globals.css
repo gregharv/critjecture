@@ -51,6 +51,7 @@
 
 html,
 body {
+  height: 100%;
   margin: 0;
   min-height: 100%;
   background: var(--shell-page-background);
@@ -67,11 +68,19 @@ a {
 }
 
 .shell-page {
+  display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   padding: 0;
 }
 
 .shell-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 100%;
   width: 100%;
 }
 
@@ -113,8 +122,8 @@ a {
 }
 
 .shell-body {
-  height: min(74vh, 860px);
-  min-height: 560px;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0 0 12px;
 }
 
@@ -202,7 +211,7 @@ a {
   }
 
   .shell-body {
-    min-height: 70vh;
+    min-height: 0;
     padding: 0;
   }
 

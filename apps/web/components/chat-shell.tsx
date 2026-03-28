@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type ChatShellState = {
@@ -20,6 +21,15 @@ type SearchToolResponse = {
   summary: string;
 };
 
+type SandboxToolResponse = {
+  exitCode: number;
+  pythonExecutable: string;
+  stderr: string;
+  stdout: string;
+  summary: string;
+  workspaceDir: string;
+};
+
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
@@ -31,6 +41,11 @@ function getSystemPrompt(role: UserRole) {
     "You are a concise, reliable assistant for a property management workflow prototype.",
     `Current user role: ${roleLabel}.`,
     "Use the search_company_knowledge tool whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
+    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
+    "When you use run_data_analysis, write complete Python 3.13 code that prints the final answer to stdout.",
+    "Never rely on a trailing expression like `mean, median`; use print(...).",
+    "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
+    "Never claim that you cannot execute Python. You can execute Python through the available tool.",
     scopeRule,
     "If the tool returns no matches, say you could not find that information in the current access scope.",
   ].join(" ");
@@ -71,8 +86,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: "critjecture-step-2",
-          version: 2,
+          dbName: "critjecture-step-3",
+          version: 3,
           stores: [
             settings.getConfig(),
             providerKeys.getConfig(),
@@ -96,6 +111,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             backend,
           ),
         );
+
+        registerCritjectureToolRenderers(webUi);
 
         const searchCompanyKnowledgeTool = {
           name: "search_company_knowledge",
@@ -142,13 +159,59 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           },
         };
 
+        const runDataAnalysisTool = {
+          name: "run_data_analysis",
+          label: "Run Data Analysis",
+          description:
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers.",
+          parameters: Type.Object({
+            code: Type.String({
+              description:
+                "The Python code to execute inside the sandbox. Use polars for tabular work when relevant. Always print the final answer to stdout. For multiple values, print a single JSON object.",
+              minLength: 1,
+            }),
+          }),
+          async execute(_toolCallId: string, params: { code: string }, signal?: AbortSignal) {
+            const response = await fetch("/api/data-analysis/run", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code: params.code,
+              }),
+              signal,
+            });
+
+            const data = (await response.json()) as SandboxToolResponse | { error: string };
+
+            if (!response.ok) {
+              throw new Error(
+                "error" in data ? data.error : "Sandbox execution request failed.",
+              );
+            }
+
+            const result = data as SandboxToolResponse;
+
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: result.summary,
+                },
+              ],
+              details: result,
+            };
+          },
+        };
+
         const agent = new Agent({
           initialState: {
             systemPrompt: getSystemPrompt(role),
             model: getModel("openai", "gpt-4o-mini"),
             thinkingLevel: "off",
             messages: [],
-            tools: [searchCompanyKnowledgeTool],
+            tools: [searchCompanyKnowledgeTool, runDataAnalysisTool],
           },
           streamFn: (model, context, options) =>
             streamProxy(model, context, {
@@ -180,7 +243,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           return;
         }
 
-        agent.setTools([searchCompanyKnowledgeTool]);
+        agent.setTools([searchCompanyKnowledgeTool, runDataAnalysisTool]);
         hostRef.current.replaceChildren(element);
         cleanup = () => {
           agent.abort();
