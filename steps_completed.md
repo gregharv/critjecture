@@ -442,3 +442,41 @@ Step 7 was implemented as a planner-backed multi-file selection flow, plus a fol
 - The planner state is session-local and is cleared once the pending selection is resolved.
 - Sandbox tools now reject execution while planner selection is pending, which prevents the model from racing ahead with incomplete file context.
 - The audit fix works by routing synthetic continuation prompts through the underlying prompt path rather than the audited wrapper, so the continuation reuses the original prompt log row.
+
+## Step 8: Audit Timeline Ordering & Filtering
+
+### What Was Implemented
+
+Step 8 was implemented as an audit-log chronology update for the owner dashboard, replacing the older split assistant/tool detail view with a single merged event timeline per prompt card.
+
+- Updated `apps/web/components/admin-logs-page-client.tsx`.
+  - Normalizes each prompt into one combined timeline of assistant response events and tool-call events
+  - Sorts those merged events by `createdAt` ascending so the expanded audit card reflects the real execution order
+  - Adds a per-card filter with `All`, `Assistant`, and `Tools`
+  - Keeps tool detail rendering intact for parameters, accessed files, result summaries, and errors
+- Updated `apps/web/app/globals.css`.
+  - Adds styles for the new timeline header, segmented filter control, and timeline item presentation
+  - Keeps the existing audit card visual language while making assistant and tool entries distinguishable
+
+### Current Step 8 Behavior
+
+- `Owner`
+  - Still sees the same newest-first collapsed prompt feed on `/admin/logs`
+  - Can expand a prompt card and review one chronological timeline instead of separate assistant and tool sections
+  - Sees `All` by default, with the option to filter to only assistant responses or only tool calls for that card
+- Example session
+  - Session `04c2400a-44df-400d-8f06-a5ac3fe7d6c9` now displays in the actual recorded order:
+    - `search_company_knowledge`
+    - the assistant file-selection response
+    - `run_data_analysis`
+    - the final assistant response listing the contractors
+- Empty-state handling
+  - Cards with only assistant entries or only tool entries still render correctly
+  - Filter-specific empty messages appear when the selected filter has no matching events
+
+### Important Implementation Details
+
+- Step 8 uses the existing audit data model. No schema or API changes were needed because assistant trace events and tool-call rows already stored timestamps.
+- The merged timeline currently includes only `assistant-text` trace events from the trace table. Other trace kinds remain excluded from the owner-facing chronology view.
+- Tool timeline placement is based on tool start time (`createdAt`), while tool cards still show completion status and end time when available.
+- Per-card filter state is local UI state only and resets on reload.
