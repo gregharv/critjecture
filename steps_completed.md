@@ -332,29 +332,43 @@ Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated
   - `apps/web/lib/audit-db.ts`
   - `apps/web/lib/audit-log.ts`
   - `apps/web/drizzle/0000_step6_audit_logging.sql`
+  - `apps/web/drizzle/0001_step6_trace_events.sql`
 - Added audit API routes:
   - `apps/web/app/api/audit/prompts/route.ts`
   - `apps/web/app/api/audit/tool-calls/start/route.ts`
   - `apps/web/app/api/audit/tool-calls/finish/route.ts`
+  - `apps/web/app/api/audit/trace-events/route.ts`
   - `apps/web/app/api/admin/logs/route.ts`
 - Updated `apps/web/components/chat-shell.tsx`.
   - Generates a stable client session id for each mounted chat session
   - Logs each real user prompt before the first proxied OpenAI stream for that request
-  - Uses `beforeToolCall` and `afterToolCall` to persist exact tool args plus completion/error summaries
+  - Uses `beforeToolCall` and `afterToolCall` to persist exact tool args, accessed data files, and completion/error summaries
+  - Captures assistant response text as a lightweight trace for each audited interaction
   - Keeps ambiguous file-picker continuation prompts attached to the original human prompt instead of creating a second prompt log row
 - Added shared app chrome for `/chat` and `/admin/logs`:
   - `apps/web/components/workspace-shell.tsx`
   - `apps/web/components/chat-page-client.tsx`
   - `apps/web/components/admin-logs-page-client.tsx`
 - Added the owner-gated audit dashboard route at `apps/web/app/admin/logs/page.tsx`.
+- Reworked the dashboard interaction cards.
+  - Each audited interaction is now collapsible
+  - Cards are collapsed by default
+  - The collapsed header shows the role, date, question, and accessed company data files
+  - The expanded view separates assistant response trace from tool-call details to avoid duplicated tool information
+- Tightened the dashboard refresh behavior.
+  - The page fetches once on load
+  - It only repolls when a recent interaction still appears active or incomplete
+  - Otherwise the owner uses a manual `Refresh` button
 - Updated app-owned global styling and README guidance for Step 6.
 
 ### Current Step 6 Behavior
 
 - `Owner`
   - Can open `/admin/logs?role=owner`
-  - Sees a newest-first feed of prompts, roles, tool statuses, exact parameters, and summaries
-  - Gets auto-refresh polling every 5 seconds while the dashboard is open
+  - Sees a newest-first feed of collapsible prompt cards
+  - Can scan collapsed headers for role, timestamp, question, and accessed data files
+  - Can expand a card to inspect the assistant response trace plus exact tool-call parameters and summaries
+  - Only gets background refreshes while recent interactions still look active or incomplete
 - `Intern`
   - Can still use `/chat`
   - Cannot view the audit feed on `/admin/logs`; the page shows an owner-only state and skips the fetch
@@ -366,6 +380,7 @@ Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated
 
 - Step 6 does not move tool execution to the server. Prompt and tool-call auditing is initiated from the client agent lifecycle because that is where tool execution actually occurs.
 - The audit database is initialized lazily and applies committed SQL migrations on first use.
-- Tool-call rows store the validated tool arguments as JSON text so raw search queries, Python code, and `inputFiles` are fully inspectable in the dashboard.
+- Tool-call rows store the validated tool arguments as JSON text and track accessed company-data files so the dashboard can surface file access directly in the collapsed header and per-tool detail view.
+- The trace section now intentionally records only assistant response text. Tool-call and tool-result detail stays in the tool section so the audit view does not duplicate the same execution information twice.
 - The dashboard is an MVP UI gate based on the existing role selector, not a real authentication system.
 - `better-sqlite3` is a native dependency; when `pnpm` blocks native install scripts, `pnpm approve-builds --all` is required before the audit database can load at runtime.

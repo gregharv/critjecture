@@ -9,6 +9,7 @@ import {
 export const runtime = "nodejs";
 
 type FinishAuditToolCallBody = {
+  accessedFiles?: unknown;
   errorMessage?: unknown;
   promptId?: unknown;
   resultSummary?: unknown;
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
     typeof body.resultSummary === "string" ? body.resultSummary.trim() : null;
   const errorMessage =
     typeof body.errorMessage === "string" ? body.errorMessage.trim() : null;
+  const accessedFiles = Array.isArray(body.accessedFiles)
+    ? body.accessedFiles
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter(Boolean)
+    : [];
 
   if (!promptId || !toolCallId) {
     return jsonError("promptId and toolCallId must both be non-empty strings.", 400);
@@ -53,6 +59,7 @@ export async function POST(request: Request) {
 
   try {
     await finishAuditToolCallLog({
+      accessedFiles,
       errorMessage,
       promptId,
       resultSummary,

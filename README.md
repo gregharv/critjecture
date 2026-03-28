@@ -218,12 +218,18 @@ The Step 6 audit flow logs:
 - each real user prompt
 - the active role
 - the exact tool arguments for every executed tool call
+- the company data files accessed during each interaction
+- assistant response text for the final audit trace view
 - tool completion or error summaries
 
 Notes:
 
 - file-picker continuation prompts are treated as synthetic follow-ups and stay attached to the original human prompt
 - `/admin/logs` is gated by the current MVP role selector, not real auth
+- the audit dashboard is collapsed by default so the owner can scan interactions quickly
+- each collapsed card shows the role, date, question, and accessed company data files
+- expanding a card shows the assistant response trace plus the full tool-call trace
+- the logs page fetches once on load, repolls only while a recent interaction still appears active or incomplete, and otherwise relies on a manual `Refresh` button
 - `better-sqlite3` is a native dependency; if install scripts are skipped, run:
 
 ```bash
@@ -232,7 +238,9 @@ pnpm approve-builds --all
 
 ### Suggested Step 6 Checks
 
-- As `Intern`, ask `What is our profit?` and confirm `/admin/logs?role=owner` shows the prompt plus a `search_company_knowledge` entry.
-- As `Owner`, ask `Create a bar chart of the top 3 contractor payouts.` and confirm the dashboard shows both the search and graph tool calls with raw parameters.
+- As `Intern`, ask `What is our profit?` and confirm `/admin/logs?role=owner` shows a collapsed card with the role, date, question, and no admin data files.
+- As `Owner`, ask `Create a bar chart of the top 3 contractor payouts.` and confirm the collapsed header shows the contractor CSV file and the expanded view shows the tool calls with raw parameters.
 - Ask `contractor payouts`, choose one of the two files, and confirm the later analysis/graph tool call stays attached to the original prompt row instead of creating a second prompt entry.
+- Expand a completed interaction and confirm the trace section shows only the assistant response, while the tool section shows the tool-call details.
 - Open `/admin/logs?role=intern` and confirm the page shows the owner-only access state without fetching the logs.
+- Leave `/admin/logs?role=owner` open after all runs have completed and confirm it stops repeated background fetches until you click `Refresh`.

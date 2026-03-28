@@ -4,8 +4,12 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { getAuditDatabase } from "@/lib/audit-db";
-import { auditPrompts, auditToolCalls } from "@/lib/audit-schema";
-import type { AuditPromptLog, AuditToolCallStatus } from "@/lib/audit-types";
+import { auditPrompts, auditToolCalls, auditTraceEvents } from "@/lib/audit-schema";
+import type {
+  AuditPromptLog,
+  AuditToolCallStatus,
+  AuditTraceEventKind,
+} from "@/lib/audit-types";
 import type { UserRole } from "@/lib/roles";
 
 function normalizeLimit(limit: number) {
@@ -49,6 +53,7 @@ export async function startAuditToolCallLog(input: {
     toolCallId: input.toolCallId,
     toolName: input.toolName,
     parametersJson: input.parametersJson,
+    accessedFilesJson: "[]",
     status: "started",
     resultSummary: null,
     errorMessage: null,
@@ -57,7 +62,12 @@ export async function startAuditToolCallLog(input: {
   });
 }
 
+function normalizeAccessedFiles(accessedFiles: string[] | undefined) {
+  return [...new Set((accessedFiles ?? []).map((entry) => entry.trim()).filter(Boolean))];
+}
+
 export async function finishAuditToolCallLog(input: {
+  accessedFiles?: string[];
   errorMessage?: string | null;
   promptId: string;
   resultSummary?: string | null;
@@ -69,6 +79,7 @@ export async function finishAuditToolCallLog(input: {
   await db
     .update(auditToolCalls)
     .set({
+      accessedFilesJson: JSON.stringify(normalizeAccessedFiles(input.accessedFiles)),
       completedAt: Date.now(),
       errorMessage: input.errorMessage ?? null,
       resultSummary: input.resultSummary ?? null,
@@ -80,6 +91,30 @@ export async function finishAuditToolCallLog(input: {
         eq(auditToolCalls.toolCallId, input.toolCallId),
       ),
     );
+}
+
+export async function createAuditTraceEventLog(input: {
+  content: string;
+  kind: AuditTraceEventKind;
+  promptId: string;
+  title: string;
+}) {
+  const db = await getAuditDatabase();
+  const content = input.content.trim();
+  const title = input.title.trim();
+
+  if (!content || !title) {
+    return;
+  }
+
+  await db.insert(auditTraceEvents).values({
+    id: randomUUID(),
+    promptId: input.promptId,
+    kind: input.kind,
+    title,
+    content,
+    createdAt: Date.now(),
+  });
 }
 
 export async function listRecentAuditPromptLogs(limit = 50): Promise<AuditPromptLog[]> {
@@ -101,6 +136,11 @@ export async function listRecentAuditPromptLogs(limit = 50): Promise<AuditPrompt
     .from(auditToolCalls)
     .where(inArray(auditToolCalls.promptId, promptIds))
     .orderBy(desc(auditToolCalls.createdAt));
+  const traceEventRows = await db
+    .select()
+    .from(auditTraceEvents)
+    .where(inArray(auditTraceEvents.promptId, promptIds))
+    .orderBy(desc(auditTraceEvents.createdAt));
 
   return promptRows.map((promptRow) => ({
     createdAt: promptRow.createdAt,
@@ -108,9 +148,20 @@ export async function listRecentAuditPromptLogs(limit = 50): Promise<AuditPrompt
     promptText: promptRow.promptText,
     role: promptRow.role,
     sessionId: promptRow.sessionId,
+    traceEvents: traceEventRows
+      .filter((traceEventRow) => traceEventRow.promptId === promptRow.id)
+      .map((traceEventRow) => ({
+        content: traceEventRow.content,
+        createdAt: traceEventRow.createdAt,
+        id: traceEventRow.id,
+        kind: traceEventRow.kind,
+        promptId: traceEventRow.promptId,
+        title: traceEventRow.title,
+      })),
     toolCalls: toolCallRows
       .filter((toolCallRow) => toolCallRow.promptId === promptRow.id)
       .map((toolCallRow) => ({
+        accessedFiles: JSON.parse(toolCallRow.accessedFilesJson) as string[],
         completedAt: toolCallRow.completedAt,
         createdAt: toolCallRow.createdAt,
         errorMessage: toolCallRow.errorMessage,

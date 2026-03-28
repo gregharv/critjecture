@@ -241,9 +241,8 @@ a {
 }
 
 .audit-card {
-  display: grid;
-  gap: 18px;
-  padding: 22px;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--shell-panel-border);
   border-radius: 24px;
   background:
@@ -252,11 +251,54 @@ a {
   box-shadow: 0 20px 60px -40px var(--shell-panel-shadow);
 }
 
-.audit-card__header {
+.audit-card__summary {
   display: flex;
+  list-style: none;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  padding: 22px;
+  cursor: pointer;
+}
+
+.audit-card__summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-card__summary-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.audit-card__summary-side {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+  min-width: min(320px, 45%);
+}
+
+.audit-card__body {
+  display: grid;
+  gap: 18px;
+  padding: 0 22px 22px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent 45%);
+}
+
+.audit-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted-foreground);
+  font-size: 0.88rem;
+}
+
+.audit-section__header h3 {
+  margin: 0;
+  color: var(--shell-title-ink);
+  font-size: 1rem;
 }
 
 .audit-card__meta {
@@ -280,8 +322,14 @@ a {
   text-transform: uppercase;
 }
 
+.audit-badge--trace {
+  border-color: color-mix(in oklab, var(--border) 70%, transparent 30%);
+  background: color-mix(in oklab, var(--card) 78%, transparent 22%);
+  font-size: 0.72rem;
+}
+
 .audit-card__title {
-  margin: 10px 0 0;
+  margin: 0;
   color: var(--shell-title-ink);
   font-size: 1.12rem;
   letter-spacing: -0.02em;
@@ -293,8 +341,60 @@ a {
   text-align: right;
 }
 
+.audit-card__files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.audit-file-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in oklab, var(--primary) 26%, transparent 74%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 65%, transparent 35%);
+  color: var(--shell-title-ink);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.audit-file-badge--empty {
+  border-color: color-mix(in oklab, var(--border) 70%, transparent 30%);
+  background: color-mix(in oklab, var(--card) 82%, transparent 18%);
+  color: var(--muted-foreground);
+}
+
 .audit-card__tools {
   display: grid;
+  gap: 12px;
+}
+
+.audit-trace {
+  display: grid;
+  gap: 12px;
+  padding-top: 18px;
+}
+
+.audit-trace__list {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-trace__event {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent 30%);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+}
+
+.audit-trace__event-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
 }
 
@@ -503,14 +603,30 @@ a {
 
   .audit-card,
   .audit-empty {
+    padding: 0;
+  }
+
+  .audit-empty {
     padding: 18px;
   }
 
-  .audit-card__header {
+  .audit-card__summary,
+  .audit-card__body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .audit-card__summary {
     flex-direction: column;
   }
 
+  .audit-card__summary-side,
   .audit-card__session {
     text-align: left;
+    justify-items: start;
+  }
+
+  .audit-card__files {
+    justify-content: flex-start;
   }
 }

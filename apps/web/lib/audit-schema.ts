@@ -19,6 +19,7 @@ export const auditToolCalls = sqliteTable(
     toolCallId: text("tool_call_id").notNull().unique(),
     toolName: text("tool_name").notNull(),
     parametersJson: text("parameters_json").notNull(),
+    accessedFilesJson: text("accessed_files_json").notNull().default("[]"),
     status: text("status", { enum: ["started", "completed", "error"] }).notNull(),
     resultSummary: text("result_summary"),
     errorMessage: text("error_message"),
@@ -32,3 +33,22 @@ export const auditToolCalls = sqliteTable(
     ),
   ],
 );
+
+export const auditTraceEvents = sqliteTable("audit_trace_events", {
+  id: text("id").primaryKey(),
+  promptId: text("prompt_id")
+    .notNull()
+    .references(() => auditPrompts.id, { onDelete: "cascade" }),
+  kind: text("kind", {
+    enum: [
+      "assistant-text",
+      "assistant-thinking",
+      "assistant-tool-plan",
+      "tool-call",
+      "tool-result",
+    ],
+  }).notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  createdAt: integer("created_at").notNull(),
+});

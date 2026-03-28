@@ -57,6 +57,14 @@ function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { ro
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
 }
 
+function isAssistantAgentMessage(
+  value: unknown,
+): value is Extract<AgentMessage, { role: "assistant" }> {
+  return (
+    typeof value === "object" && value !== null && "role" in value && value.role === "assistant"
+  );
+}
+
 function extractUserTextContent(value: unknown) {
   if (typeof value === "string") {
     return value.trim();
@@ -151,6 +159,103 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
   }
 
   return fallbackMessage;
+}
+
+function getContentString(entry: unknown, key: string) {
+  if (typeof entry === "object" && entry !== null) {
+    const record = entry as Record<string, unknown>;
+
+    if (typeof record[key] === "string") {
+      return record[key].trim();
+    }
+  }
+
+  return "";
+}
+
+function extractAssistantTraceEntries(message: AgentMessage) {
+  if (!isAssistantAgentMessage(message) || !Array.isArray(message.content)) {
+    return [];
+  }
+
+  return message.content.flatMap<{
+    content: string;
+    kind: "assistant-text";
+    title: string;
+  }>((entry) => {
+    if (typeof entry !== "object" || entry === null || !("type" in entry)) {
+      return [];
+    }
+
+    if (entry.type === "text") {
+      const content = getContentString(entry, "text");
+
+      return content
+        ? [
+            {
+              content,
+              kind: "assistant-text" as const,
+              title: "Assistant Response",
+            },
+          ]
+        : [];
+    }
+
+    return [];
+  });
+}
+
+function extractAccessedFiles(
+  args: unknown,
+  result: {
+    details?: unknown;
+  },
+) {
+  const files = new Set<string>();
+
+  if (
+    typeof args === "object" &&
+    args !== null &&
+    "inputFiles" in args &&
+    Array.isArray(args.inputFiles)
+  ) {
+    for (const entry of args.inputFiles) {
+      if (typeof entry === "string" && entry.trim()) {
+        files.add(entry.trim());
+      }
+    }
+  }
+
+  if (
+    typeof result.details === "object" &&
+    result.details !== null &&
+    "selectedFile" in result.details &&
+    typeof result.details.selectedFile === "string" &&
+    result.details.selectedFile.trim()
+  ) {
+    files.add(result.details.selectedFile.trim());
+  }
+
+  if (
+    typeof result.details === "object" &&
+    result.details !== null &&
+    "stagedFiles" in result.details &&
+    Array.isArray(result.details.stagedFiles)
+  ) {
+    for (const stagedFile of result.details.stagedFiles) {
+      if (
+        typeof stagedFile === "object" &&
+        stagedFile !== null &&
+        "sourcePath" in stagedFile &&
+        typeof stagedFile.sourcePath === "string" &&
+        stagedFile.sourcePath.trim()
+      ) {
+        files.add(stagedFile.sourcePath.trim());
+      }
+    }
+  }
+
+  return [...files];
 }
 
 function getSystemPrompt(role: UserRole) {
@@ -555,7 +660,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
           return undefined;
         });
-        agent.setAfterToolCall(async ({ isError, result, toolCall }) => {
+        agent.setAfterToolCall(async ({ args, isError, result, toolCall }) => {
           const promptId = activePromptIdRef.current;
 
           if (!promptId) {
@@ -563,11 +668,13 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           }
 
           const resultSummary = getToolResultSummary(result);
+          const accessedFiles = extractAccessedFiles(args, result);
           const status: AuditToolCallStatus = isError ? "error" : "completed";
           const errorMessage = isError ? resultSummary || "Tool execution failed." : null;
 
           try {
             await postAuditJson<{ ok: true }>("/api/audit/tool-calls/finish", {
+              accessedFiles,
               errorMessage,
               promptId,
               resultSummary: resultSummary || null,
@@ -604,6 +711,26 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         }
 
         const unsubscribe = agent.subscribe((event) => {
+          if (event.type === "message_end" && activePromptIdRef.current) {
+            const promptId = activePromptIdRef.current;
+            const traceEntries = extractAssistantTraceEntries(event.message);
+
+            if (traceEntries.length > 0) {
+              void Promise.all(
+                traceEntries.map((traceEntry) =>
+                  postAuditJson<{ ok: true }>("/api/audit/trace-events", {
+                    content: traceEntry.content,
+                    kind: traceEntry.kind,
+                    promptId,
+                    title: traceEntry.title,
+                  }).catch((caughtError) => {
+                    console.error("Failed to audit assistant trace event.", caughtError);
+                  }),
+                ),
+              );
+            }
+          }
+
           if (event.type === "agent_end") {
             if (awaitingFileSelectionRef.current || pendingSelectionRef.current) {
               return;
