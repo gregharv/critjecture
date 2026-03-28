@@ -31,21 +31,21 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     })
     .join("\n");
 
-  if (result.selectedFile) {
-    const selectedCandidate = result.candidateFiles.find(
-      (candidate) => candidate.file === result.selectedFile,
+  if (result.selectedFiles.length > 0) {
+    const selectedCandidate = result.candidateFiles.find((candidate) =>
+      result.selectedFiles.includes(candidate.file),
     );
     const citations = selectedCandidate?.matches.length
       ? selectedCandidate.matches
           .slice(0, 4)
           .map((match) => `- [${match.file}:${match.line}] ${match.text}`)
           .join("\n")
-      : `- ${result.selectedFile}`;
+      : result.selectedFiles.map((file) => `- ${file}`).join("\n");
 
     const selectionLine =
       result.selectionReason === "unique-year-match"
-        ? `Automatically selected ${result.selectedFile} because it was the only candidate matching the requested year.`
-        : `Automatically selected ${result.selectedFile} because it was the only candidate file found.`;
+        ? `Automatically selected ${result.selectedFiles.join(", ")} because it was the only candidate matching the requested year.`
+        : `Automatically selected ${result.selectedFiles.join(", ")} because it was the only candidate file found.`;
 
     return [
       `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
@@ -56,10 +56,16 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     ].join("\n");
   }
 
+  const recommendedLine =
+    result.recommendedFiles.length > 0
+      ? `Recommended files: ${result.recommendedFiles.join(", ")}.`
+      : "No files were preselected yet.";
+
   return [
     `Found ${result.candidateFiles.length} candidate files for "${query}" in ${result.scopeDescription}.`,
     `Role: ${roleLabel}.`,
-    "Selection required. Do not call a Python sandbox tool yet. Wait for the user to choose from the file picker.",
+    "Selection pending. A multi-select file picker will appear after the assistant finishes gathering candidates. Do not call a Python sandbox tool yet.",
+    recommendedLine,
     candidateLines,
   ].join("\n");
 }

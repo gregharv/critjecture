@@ -15,6 +15,7 @@ import {
   FILE_SELECTION_EVENT,
   markFileSelectionSelected,
   registerCritjectureMessageRenderers,
+  type FileSelectionCandidate,
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
 import type {
@@ -36,8 +37,9 @@ type ChatShellState = {
 type SearchToolResponse = {
   candidateFiles: CompanyKnowledgeCandidateFile[];
   matches: CompanyKnowledgeMatch[];
+  recommendedFiles: string[];
   role: UserRole;
-  selectedFile?: string;
+  selectedFiles: string[];
   selectionReason:
     | "single-candidate"
     | "unique-year-match"
@@ -51,6 +53,14 @@ type SearchToolResponse = {
 type PendingAuditPrompt = {
   promptText: string;
   synthetic: boolean;
+};
+
+type PendingPlannerSearch = {
+  candidateFiles: CompanyKnowledgeCandidateFile[];
+  query: string;
+  recommendedFiles: string[];
+  selectedFiles: string[];
+  selectionRequired: boolean;
 };
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
@@ -161,6 +171,91 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
   return fallbackMessage;
 }
 
+function getUniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function createPlannerSelectionMessage(searches: PendingPlannerSearch[]) {
+  const hasPendingSelection = searches.some(
+    (search) => search.selectionRequired && search.candidateFiles.length > 0,
+  );
+
+  if (!hasPendingSelection) {
+    return null;
+  }
+
+  const candidatesByFile = new Map<string, FileSelectionCandidate>();
+
+  for (const search of searches) {
+    for (const candidate of search.candidateFiles) {
+      const existing = candidatesByFile.get(candidate.file);
+      const mergedMatches = new Map<string, CompanyKnowledgeMatch>();
+
+      for (const match of existing?.matches ?? []) {
+        mergedMatches.set(`${match.file}:${match.line}:${match.text}`, match);
+      }
+
+      for (const match of candidate.matches) {
+        mergedMatches.set(`${match.file}:${match.line}:${match.text}`, match);
+      }
+
+      candidatesByFile.set(candidate.file, {
+        ...candidate,
+        matchedQueries: getUniqueStrings([
+          ...(existing?.matchedQueries ?? []),
+          search.query,
+        ]),
+        matchedTerms: getUniqueStrings([
+          ...(existing?.matchedTerms ?? []),
+          ...candidate.matchedTerms,
+        ]).sort(),
+        matches: [...mergedMatches.values()].sort((left, right) => {
+          if (left.line === right.line) {
+            return left.text.localeCompare(right.text);
+          }
+
+          return left.line - right.line;
+        }),
+        recommendedByQueries: search.recommendedFiles.includes(candidate.file)
+          ? getUniqueStrings([...(existing?.recommendedByQueries ?? []), search.query])
+          : existing?.recommendedByQueries ?? [],
+        score: Math.max(existing?.score ?? 0, candidate.score),
+        selectedByQueries: search.selectedFiles.includes(candidate.file)
+          ? getUniqueStrings([...(existing?.selectedByQueries ?? []), search.query])
+          : existing?.selectedByQueries ?? [],
+      });
+    }
+  }
+
+  const selectedFiles = getUniqueStrings(
+    searches.flatMap((search) => [...search.selectedFiles, ...search.recommendedFiles]),
+  );
+  const candidates = [...candidatesByFile.values()].sort((left, right) => {
+    const leftSelected = selectedFiles.includes(left.file);
+    const rightSelected = selectedFiles.includes(right.file);
+
+    if (leftSelected !== rightSelected) {
+      return leftSelected ? -1 : 1;
+    }
+
+    if (left.score === right.score) {
+      return left.file.localeCompare(right.file);
+    }
+
+    return right.score - left.score;
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return createFileSelectionMessage({
+    candidates,
+    queries: getUniqueStrings(searches.map((search) => search.query)),
+    selectedFiles,
+  });
+}
+
 function getContentString(entry: unknown, key: string) {
   if (typeof entry === "object" && entry !== null) {
     const record = entry as Record<string, unknown>;
@@ -229,11 +324,14 @@ function extractAccessedFiles(
   if (
     typeof result.details === "object" &&
     result.details !== null &&
-    "selectedFile" in result.details &&
-    typeof result.details.selectedFile === "string" &&
-    result.details.selectedFile.trim()
+    "selectedFiles" in result.details &&
+    Array.isArray(result.details.selectedFiles)
   ) {
-    files.add(result.details.selectedFile.trim());
+    for (const entry of result.details.selectedFiles) {
+      if (typeof entry === "string" && entry.trim()) {
+        files.add(entry.trim());
+      }
+    }
   }
 
   if (
@@ -275,7 +373,7 @@ function getSystemPrompt(role: UserRole) {
     "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
     "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
     "When you use generate_visual_graph or generate_document on company files, pass those same relative paths in inputFiles.",
-    "The search tool may return an auto-selected file or require user selection. If selection is required, do not call any Python sandbox tool yet. Wait for the user to choose a file first.",
+    "The search tool may return auto-selected files or trigger a planner-level multi-select picker after the assistant finishes gathering candidates. If selection is pending, do not call any Python sandbox tool yet. Wait for the user to confirm the picker first.",
     "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout.",
     "Never rely on a trailing expression like `mean, median`; use print(...).",
     "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
@@ -301,6 +399,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
   const awaitingFileSelectionRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const pendingAuditPromptRef = useRef<PendingAuditPrompt | null>(null);
+  const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const syntheticContinuationRef = useRef(false);
   const [{ error, ready }, setState] = useState<ChatShellState>({
@@ -391,6 +490,10 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         ) => {
           const promptText = extractPromptText(input);
 
+          if (!synthetic) {
+            plannerSearchesRef.current = [];
+          }
+
           if (!promptText) {
             return;
           }
@@ -421,6 +524,48 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           await originalPrompt(input as never);
         };
 
+        const hasPendingPlannerSelection = () =>
+          plannerSearchesRef.current.some(
+            (search) => search.selectionRequired && search.candidateFiles.length > 0,
+          );
+
+        const pushPlannerSearch = (search: PendingPlannerSearch) => {
+          const alreadyTracked = plannerSearchesRef.current.some((existing) => {
+            return (
+              existing.query === search.query &&
+              existing.selectionRequired === search.selectionRequired &&
+              JSON.stringify(existing.candidateFiles.map((candidate) => candidate.file)) ===
+                JSON.stringify(search.candidateFiles.map((candidate) => candidate.file)) &&
+              JSON.stringify(existing.selectedFiles) === JSON.stringify(search.selectedFiles) &&
+              JSON.stringify(existing.recommendedFiles) ===
+                JSON.stringify(search.recommendedFiles)
+            );
+          });
+
+          if (alreadyTracked) {
+            return;
+          }
+
+          plannerSearchesRef.current = [...plannerSearchesRef.current, search];
+        };
+
+        const flushPendingPlannerSelection = () => {
+          if (!agent || agent.state.isStreaming || awaitingFileSelectionRef.current) {
+            return false;
+          }
+
+          const selectionMessage = createPlannerSelectionMessage(plannerSearchesRef.current);
+          plannerSearchesRef.current = [];
+
+          if (!selectionMessage) {
+            return false;
+          }
+
+          awaitingFileSelectionRef.current = true;
+          agent.appendMessage(selectionMessage);
+          return true;
+        };
+
         const flushPendingSelection = async () => {
           if (!agent || !pendingSelectionRef.current || agent.state.isStreaming) {
             return;
@@ -430,8 +575,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           pendingSelectionRef.current = null;
           awaitingFileSelectionRef.current = false;
           await runPromptWithAudit(
-            agent.prompt.bind(agent),
-            buildFileSelectionPrompt(selection.file),
+            originalPrompt,
+            buildFileSelectionPrompt(selection.files),
             true,
           );
         };
@@ -470,6 +615,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             params: { code: string; inputFiles?: string[] },
             signal?: AbortSignal,
           ) {
+            if (awaitingFileSelectionRef.current || hasPendingPlannerSelection()) {
+              throw new Error(
+                "File selection is pending. Wait for the user to confirm the multi-select picker before using a Python sandbox tool.",
+              );
+            }
+
             const response = await fetch(options.route, {
               method: "POST",
               headers: {
@@ -509,7 +660,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           name: "search_company_knowledge",
           label: "Search Company Knowledge",
           description:
-            "Search company_data using short keywords, filenames, or years. The tool may auto-select one candidate file or require user selection when multiple files match.",
+            "Search company_data using short keywords, filenames, or years. The tool may auto-select files or trigger a planner-level multi-select picker when multiple files are relevant.",
           parameters: Type.Object({
             query: Type.String({
               description:
@@ -538,11 +689,19 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
             const result = data as SearchToolResponse;
 
-            if (result.selectionRequired && result.candidateFiles.length > 0 && agent) {
-              awaitingFileSelectionRef.current = true;
-              agent.appendMessage(
-                createFileSelectionMessage(params.query, result.candidateFiles),
-              );
+            if (
+              result.candidateFiles.length > 0 &&
+              (result.selectionRequired ||
+                result.selectedFiles.length > 0 ||
+                result.recommendedFiles.length > 0)
+            ) {
+              pushPlannerSearch({
+                candidateFiles: result.candidateFiles,
+                query: params.query,
+                recommendedFiles: result.recommendedFiles,
+                selectedFiles: result.selectedFiles,
+                selectionRequired: result.selectionRequired,
+              });
             }
 
             return {
@@ -732,7 +891,16 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           }
 
           if (event.type === "agent_end") {
-            if (awaitingFileSelectionRef.current || pendingSelectionRef.current) {
+            if (flushPendingPlannerSelection()) {
+              return;
+            }
+
+            if (pendingSelectionRef.current) {
+              void flushPendingSelection();
+              return;
+            }
+
+            if (awaitingFileSelectionRef.current) {
               return;
             }
 
@@ -741,7 +909,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             }
 
             activePromptIdRef.current = null;
-            void flushPendingSelection();
+            plannerSearchesRef.current = [];
           }
         });
         const handleFileSelection = (event: Event) => {
@@ -752,7 +920,11 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           const selection = event.detail as FileSelectionEventDetail;
 
           agent.replaceMessages(
-            markFileSelectionSelected(agent.state.messages as AgentMessage[], selection.selectionId, selection.file),
+            markFileSelectionSelected(
+              agent.state.messages as AgentMessage[],
+              selection.selectionId,
+              selection.files,
+            ),
           );
 
           if (agent.state.isStreaming) {
@@ -762,8 +934,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
           awaitingFileSelectionRef.current = false;
           void runPromptWithAudit(
-            agent.prompt.bind(agent),
-            buildFileSelectionPrompt(selection.file),
+            originalPrompt,
+            buildFileSelectionPrompt(selection.files),
             true,
           );
         };
@@ -806,6 +978,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
       activePromptIdRef.current = null;
       awaitingFileSelectionRef.current = false;
       pendingAuditPromptRef.current = null;
+      plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
       syntheticContinuationRef.current = false;
       cleanup?.();

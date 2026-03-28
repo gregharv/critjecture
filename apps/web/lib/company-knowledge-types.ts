@@ -32,9 +32,10 @@ export type CompanyKnowledgeSelectionReason =
 export type CompanyKnowledgeSearchResult = {
   candidateFiles: CompanyKnowledgeCandidateFile[];
   matches: CompanyKnowledgeMatch[];
+  recommendedFiles: string[];
   searchedDirectory: string;
   scopeDescription: string;
-  selectedFile?: string;
+  selectedFiles: string[];
   selectionReason: CompanyKnowledgeSelectionReason;
   selectionRequired: boolean;
 };

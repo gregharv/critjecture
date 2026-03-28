@@ -4,6 +4,8 @@ Step 5 extends the `pnpm` monorepo with RBAC-aware local search, an isolated `uv
 
 Step 6 adds a local SQLite audit log, client-side tool execution auditing, and an owner-gated `/admin/logs` dashboard.
 
+Step 7 adds planner-backed multi-file selection, keeps picker continuations attached to the original audit card, and tightens chat overflow handling for wide tables and long tool output.
+
 The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/pi-web-ui`.
 
 ## Requirements
@@ -97,7 +99,7 @@ Step 4 now combines three behaviors:
 - returns compact previews for candidate files
 - auto-selects a file only when there is a clear winner
 
-When multiple files are still plausible, the chat UI renders a picker so the user can choose the file before analysis continues.
+When multiple files are still plausible, the chat UI now uses a planner-style multi-select picker so the user can confirm one or more files before analysis continues.
 
 ### Analysis
 
@@ -136,7 +138,7 @@ The current ambiguous search demo uses:
 - Confirm the staged file list includes `admin/contractors_new.csv`.
 - Confirm the final answer reports an average payout of `1500`.
 - Ask `contractor payouts` and confirm the UI shows both contractor CSV files with a picker before analysis runs.
-- Click each candidate once and confirm the analysis uses only the selected file.
+- Confirm the picker allows multi-select and requires an explicit confirmation before analysis continues.
 - As `Intern`, ask the same question and confirm the assistant reports that the data is unavailable in the current access scope.
 
 ### UI Notes
@@ -244,3 +246,32 @@ pnpm approve-builds --all
 - Expand a completed interaction and confirm the trace section shows only the assistant response, while the tool section shows the tool-call details.
 - Open `/admin/logs?role=intern` and confirm the page shows the owner-only access state without fetching the logs.
 - Leave `/admin/logs?role=owner` open after all runs have completed and confirm it stops repeated background fetches until you click `Refresh`.
+
+## Step 7 Multi-File Planning and Chat Polish
+
+Step 7 adds:
+
+- a planner-level multi-file selection flow for ambiguous company-data questions
+- preselected recommended files in the picker when search confidence is high
+- synthetic picker continuations that remain attached to the original audit prompt row
+- chat styling fixes for wide markdown tables and long tool summary/path output
+
+The Step 7 planner flow now:
+
+- accumulates ambiguous search results across the current assistant turn
+- shows one consolidated multi-select picker instead of one picker per search
+- blocks sandbox tools until the user confirms the file set
+- injects one synthetic continuation prompt containing the final confirmed `inputFiles`
+
+The Step 7 chat styling now:
+
+- keeps assistant markdown tables inside the chat column with horizontal scrolling
+- wraps long tool summaries, staged file paths, and workspace metadata instead of letting them overflow
+
+### Suggested Step 7 Checks
+
+- As `Owner`, ask `what contractors did we use in 2025 and 2026`.
+- Confirm the UI shows one consolidated multi-select picker with the likely contractor files preselected.
+- Confirm selecting both files leads to one follow-up analysis run that stages both `admin/contractors.csv` and `admin/contractors_new.csv`.
+- Open `/admin/logs?role=owner` and confirm the whole interaction appears as one prompt card, not two separate cards.
+- In chat, confirm the tool summary and final markdown table stay inside the message width without pushing the layout horizontally.

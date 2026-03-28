@@ -384,3 +384,61 @@ Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated
 - The trace section now intentionally records only assistant response text. Tool-call and tool-result detail stays in the tool section so the audit view does not duplicate the same execution information twice.
 - The dashboard is an MVP UI gate based on the existing role selector, not a real authentication system.
 - `better-sqlite3` is a native dependency; when `pnpm` blocks native install scripts, `pnpm approve-builds --all` is required before the audit database can load at runtime.
+
+## Step 7: Multi-File Planning & Chat Polish
+
+### What Was Implemented
+
+Step 7 was implemented as a planner-backed multi-file selection flow, plus a follow-up audit correlation fix and chat overflow cleanup.
+
+- Reworked the company-knowledge selection contract:
+  - `apps/web/lib/company-knowledge-types.ts`
+  - `apps/web/lib/company-knowledge.ts`
+  - `apps/web/app/api/company-knowledge/search/route.ts`
+- The search flow now:
+  - returns `selectedFiles` instead of a single `selectedFile`
+  - returns `recommendedFiles` for high-confidence ambiguous results
+  - keeps true auto-selection for single-candidate or unique-year matches
+  - marks broader ambiguous searches as planner-required instead of forcing immediate single-file selection
+- Reworked the custom file picker in:
+  - `apps/web/lib/file-selection-messages.ts`
+  - `apps/web/app/pi-web-ui.css`
+- The picker now:
+  - supports multi-select with checkboxes
+  - prechecks recommended files
+  - shows which search queries contributed to each candidate
+  - requires an explicit `Use Selected Files` confirmation step before analysis continues
+- Updated `apps/web/components/chat-shell.tsx`.
+  - Accumulates ambiguous search results across the current assistant turn
+  - Consolidates them into one planner-level picker instead of emitting one picker per search
+  - Blocks sandbox tools while planner selection is pending
+  - Sends one synthetic continuation prompt containing the full confirmed file set so later tools can pass those exact paths in `inputFiles`
+- Fixed audit prompt correlation in `apps/web/components/chat-shell.tsx`.
+  - Synthetic picker-confirmation continuations now stay attached to the original human prompt
+  - This prevents the audit dashboard from showing a second prompt card for the same interaction
+- Tightened app-owned chat styling in `apps/web/app/pi-web-ui.css`.
+  - Markdown tables in assistant responses now scroll horizontally inside the chat message
+  - Long summary text, staged file paths, and tool metadata now wrap instead of overflowing the message column
+
+### Current Step 7 Behavior
+
+- `Owner`
+  - Can ask broad comparison or aggregation questions such as `what contractors did we use in 2025 and 2026`
+  - Gets one consolidated multi-select picker when multiple files are relevant
+  - Sees likely files preselected, but can adjust the file set before continuing
+  - Can confirm multiple files and have the follow-up analysis run against all selected paths
+  - Sees one audit card for the original question, even when the workflow pauses for file confirmation
+- `Intern`
+  - Still respects the earlier RBAC limits
+  - Only sees planner candidates inside the allowed public search scope
+- Chat layout
+  - Wide assistant tables no longer push the whole chat column wider than the viewport
+  - Long tool summaries and workspace/file path strings stay inside the tool card bounds
+
+### Important Implementation Details
+
+- Step 7 keeps the current client-side `pi-ai` orchestration model. The planner flow is implemented in the chat session layer, not as a new backend planner service.
+- The multi-file picker remains a UI-only custom message that is filtered out of LLM context. Only the synthetic post-confirmation prompt is sent back into the model conversation.
+- The planner state is session-local and is cleared once the pending selection is resolved.
+- Sandbox tools now reject execution while planner selection is pending, which prevents the model from racing ahead with incomplete file context.
+- The audit fix works by routing synthetic continuation prompts through the underlying prompt path rather than the audited wrapper, so the continuation reuses the original prompt log row.

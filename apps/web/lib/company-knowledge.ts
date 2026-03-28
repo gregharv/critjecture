@@ -310,7 +310,8 @@ function pickSelectedFile(
 ) {
   if (candidateFiles.length === 0) {
     return {
-      selectedFile: undefined,
+      recommendedFiles: [],
+      selectedFiles: [],
       selectionReason: "no-match" as const,
       selectionRequired: false,
     };
@@ -318,7 +319,8 @@ function pickSelectedFile(
 
   if (candidateFiles.length === 1) {
     return {
-      selectedFile: candidateFiles[0]?.file,
+      recommendedFiles: [candidateFiles[0]!.file],
+      selectedFiles: [candidateFiles[0]!.file],
       selectionReason: "single-candidate" as const,
       selectionRequired: false,
     };
@@ -338,7 +340,8 @@ function pickSelectedFile(
 
     if (informativeYearCandidates.length === 1) {
       return {
-        selectedFile: informativeYearCandidates[0]?.file,
+        recommendedFiles: [informativeYearCandidates[0]!.file],
+        selectedFiles: [informativeYearCandidates[0]!.file],
         selectionReason: "unique-year-match" as const,
         selectionRequired: false,
       };
@@ -346,15 +349,24 @@ function pickSelectedFile(
 
     if (matchingYearCandidates.length === 1) {
       return {
-        selectedFile: matchingYearCandidates[0]?.file,
+        recommendedFiles: [matchingYearCandidates[0]!.file],
+        selectedFiles: [matchingYearCandidates[0]!.file],
         selectionReason: "unique-year-match" as const,
         selectionRequired: false,
       };
     }
   }
 
+  const [topCandidate, secondCandidate] = candidateFiles;
+  const recommendedFiles =
+    topCandidate &&
+    (!secondCandidate || topCandidate.score >= secondCandidate.score + 10)
+      ? [topCandidate.file]
+      : [];
+
   return {
-    selectedFile: undefined,
+    recommendedFiles,
+    selectedFiles: [],
     selectionReason: "multiple-candidates" as const,
     selectionRequired: true,
   };
@@ -431,9 +443,10 @@ export async function searchCompanyKnowledge(
   return {
     candidateFiles,
     matches: candidateFiles.flatMap((candidate) => candidate.matches),
+    recommendedFiles: selection.recommendedFiles,
     searchedDirectory,
     scopeDescription: getScopeDescription(role),
-    selectedFile: selection.selectedFile,
+    selectedFiles: selection.selectedFiles,
     selectionReason: selection.selectionReason,
     selectionRequired: selection.selectionRequired,
   };

@@ -7,16 +7,22 @@ import type { CompanyKnowledgeCandidateFile } from "@/lib/company-knowledge-type
 export const FILE_SELECTION_EVENT = "critjecture:file-selection";
 
 export type FileSelectionEventDetail = {
-  file: string;
-  query: string;
+  files: string[];
   selectionId: string;
+};
+
+export type FileSelectionCandidate = CompanyKnowledgeCandidateFile & {
+  matchedQueries: string[];
+  recommendedByQueries: string[];
+  selectedByQueries: string[];
 };
 
 export interface FileSelectionMessage {
   role: "file-selection";
-  candidates: CompanyKnowledgeCandidateFile[];
-  query: string;
-  selectedFile?: string;
+  candidates: FileSelectionCandidate[];
+  confirmed: boolean;
+  queries: string[];
+  selectedFiles: string[];
   selectionId: string;
   timestamp: number;
 }
@@ -27,7 +33,7 @@ declare module "@mariozechner/pi-agent-core" {
   }
 }
 
-function renderPreview(candidate: CompanyKnowledgeCandidateFile) {
+function renderPreview(candidate: FileSelectionCandidate) {
   if (candidate.preview.kind === "csv") {
     return html`
       <div class="crit-selection__table-wrap">
@@ -60,65 +66,136 @@ function renderPreview(candidate: CompanyKnowledgeCandidateFile) {
   `;
 }
 
+function getConfirmedSelectionFiles(root: HTMLElement | null) {
+  if (!root) {
+    return [];
+  }
+
+  return [...root.querySelectorAll<HTMLInputElement>(".crit-selection__checkbox")]
+    .filter((input) => input.checked)
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+}
+
 const fileSelectionRenderer: MessageRenderer<FileSelectionMessage> = {
   render(message) {
-    const hasSelection = Boolean(message.selectedFile);
+    const confirmedSelection = message.confirmed;
 
     return html`
-      <div class="crit-selection">
+      <div class="crit-selection" data-selection-id=${message.selectionId}>
         <div class="crit-selection__header">
-          <div class="crit-selection__eyebrow">File Selection</div>
-          <div class="crit-selection__title">Choose A File For Analysis</div>
+          <div class="crit-selection__eyebrow">File Planner</div>
+          <div class="crit-selection__title">Review Files For Analysis</div>
           <p class="crit-selection__copy">
-            Multiple company files matched <code>${message.query}</code>. Pick the
-            file to use before analysis continues.
+            The assistant found overlapping candidate files while gathering evidence.
+            Confirm one or more files before analysis continues.
           </p>
+          <div class="crit-selection__query-list">
+            ${message.queries.map(
+              (query) => html`<span class="crit-selection__query-chip">${query}</span>`,
+            )}
+          </div>
+        </div>
+
+        <div class="crit-selection__actions">
+          <button
+            class="crit-selection__confirm"
+            ?disabled=${confirmedSelection}
+            type="button"
+            @click=${(event: Event) => {
+              const root =
+                ((event.currentTarget as HTMLElement | null)?.closest(
+                  ".crit-selection",
+                ) as HTMLElement | null) ?? null;
+              const files = getConfirmedSelectionFiles(root);
+
+              if (files.length === 0) {
+                return;
+              }
+
+              if (root) {
+                root
+                  .querySelectorAll<HTMLInputElement>(
+                    ".crit-selection__checkbox, .crit-selection__confirm",
+                  )
+                  .forEach((element) => {
+                    element.disabled = true;
+                  });
+              }
+
+              window.dispatchEvent(
+                new CustomEvent<FileSelectionEventDetail>(FILE_SELECTION_EVENT, {
+                  detail: {
+                    files,
+                    selectionId: message.selectionId,
+                  },
+                }),
+              );
+            }}
+          >
+            ${confirmedSelection ? "Files Confirmed" : "Use Selected Files"}
+          </button>
         </div>
 
         <div class="crit-selection__list">
           ${message.candidates.map((candidate) => {
-            const isSelected = message.selectedFile === candidate.file;
+            const isSelected = message.selectedFiles.includes(candidate.file);
 
             return html`
               <section class="crit-selection__card">
-                <div class="crit-selection__card-header">
-                  <div>
+                <label class="crit-selection__card-header">
+                  <div class="crit-selection__toggle">
+                    <input
+                      class="crit-selection__checkbox"
+                      ?checked=${isSelected}
+                      ?disabled=${confirmedSelection}
+                      type="checkbox"
+                      value=${candidate.file}
+                    />
+                  </div>
+
+                  <div class="crit-selection__card-copy">
                     <div class="crit-selection__path">${candidate.file}</div>
                     <div class="crit-selection__terms">
-                      Matched: ${candidate.matchedTerms.join(", ") || "preview only"}
+                      Matched terms: ${candidate.matchedTerms.join(", ") || "preview only"}
                     </div>
+                    <div class="crit-selection__meta-row">
+                      ${candidate.matchedQueries.map(
+                        (query) =>
+                          html`<span class="crit-selection__meta-chip">${query}</span>`,
+                      )}
+                    </div>
+                    ${
+                      candidate.selectedByQueries.length > 0 ||
+                      candidate.recommendedByQueries.length > 0
+                        ? html`
+                            <div class="crit-selection__meta-row">
+                              ${candidate.selectedByQueries.map(
+                                (query) =>
+                                  html`
+                                    <span
+                                      class="crit-selection__meta-chip crit-selection__meta-chip--selected"
+                                    >
+                                      Auto-selected by ${query}
+                                    </span>
+                                  `,
+                              )}
+                              ${candidate.recommendedByQueries.map(
+                                (query) =>
+                                  html`
+                                    <span
+                                      class="crit-selection__meta-chip crit-selection__meta-chip--recommended"
+                                    >
+                                      Recommended by ${query}
+                                    </span>
+                                  `,
+                              )}
+                            </div>
+                          `
+                        : null
+                    }
                   </div>
-                  <button
-                    class="crit-selection__button"
-                    ?disabled=${hasSelection}
-                    type="button"
-                    @click=${(event: Event) => {
-                      const card = (event.currentTarget as HTMLElement | null)?.closest(
-                        ".crit-selection",
-                      );
-
-                      if (card) {
-                        card
-                          .querySelectorAll<HTMLButtonElement>(".crit-selection__button")
-                          .forEach((button) => {
-                            button.disabled = true;
-                          });
-                      }
-
-                      window.dispatchEvent(
-                        new CustomEvent<FileSelectionEventDetail>(FILE_SELECTION_EVENT, {
-                          detail: {
-                            file: candidate.file,
-                            query: message.query,
-                            selectionId: message.selectionId,
-                          },
-                        }),
-                      );
-                    }}
-                  >
-                    ${isSelected ? "Selected" : "Use This File"}
-                  </button>
-                </div>
+                </label>
 
                 ${renderPreview(candidate)}
               </section>
@@ -142,13 +219,14 @@ export function registerCritjectureMessageRenderers(registry: MessageRendererReg
 }
 
 export function createFileSelectionMessage(
-  query: string,
-  candidates: CompanyKnowledgeCandidateFile[],
+  input: Pick<FileSelectionMessage, "candidates" | "queries" | "selectedFiles">,
 ): FileSelectionMessage {
   return {
     role: "file-selection",
-    candidates,
-    query,
+    candidates: input.candidates,
+    confirmed: false,
+    queries: input.queries,
+    selectedFiles: input.selectedFiles,
     selectionId:
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
@@ -160,7 +238,7 @@ export function createFileSelectionMessage(
 export function markFileSelectionSelected(
   messages: AgentMessage[],
   selectionId: string,
-  selectedFile: string,
+  selectedFiles: string[],
 ) {
   return messages.map((message) => {
     if (message.role !== "file-selection" || message.selectionId !== selectionId) {
@@ -169,13 +247,16 @@ export function markFileSelectionSelected(
 
     return {
       ...message,
-      selectedFile,
+      confirmed: true,
+      selectedFiles,
     };
   });
 }
 
-export function buildFileSelectionPrompt(file: string) {
-  return `Use company file ${file} for the pending request. If a Python sandbox tool is needed next, pass that exact path in inputFiles.`;
+export function buildFileSelectionPrompt(files: string[]) {
+  const uniqueFiles = [...new Set(files.map((file) => file.trim()).filter(Boolean))];
+
+  return `Use these company files for the pending request: ${uniqueFiles.join(", ")}. If a Python sandbox tool is needed next, pass the exact same paths in inputFiles.`;
 }
 
 export function critjectureConvertToLlm(
