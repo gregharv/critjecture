@@ -2,6 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type { Agent, AgentMessage } from "@mariozechner/pi-web-ui";
+
+import type {
+  CompanyKnowledgeCandidateFile,
+  CompanyKnowledgeMatch,
+} from "@/lib/company-knowledge-types";
+import {
+  buildFileSelectionPrompt,
+  createFileSelectionMessage,
+  critjectureConvertToLlm,
+  FILE_SELECTION_EVENT,
+  markFileSelectionSelected,
+  registerCritjectureMessageRenderers,
+  type FileSelectionEventDetail,
+} from "@/lib/file-selection-messages";
 import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
@@ -11,12 +26,16 @@ type ChatShellState = {
 };
 
 type SearchToolResponse = {
-  matches: Array<{
-    file: string;
-    line: number;
-    text: string;
-  }>;
+  candidateFiles: CompanyKnowledgeCandidateFile[];
+  matches: CompanyKnowledgeMatch[];
   role: UserRole;
+  selectedFile?: string;
+  selectionReason:
+    | "single-candidate"
+    | "unique-year-match"
+    | "multiple-candidates"
+    | "no-match";
+  selectionRequired: boolean;
   scopeDescription: string;
   summary: string;
 };
@@ -24,6 +43,10 @@ type SearchToolResponse = {
 type SandboxToolResponse = {
   exitCode: number;
   pythonExecutable: string;
+  stagedFiles: Array<{
+    sourcePath: string;
+    stagedPath: string;
+  }>;
   stderr: string;
   stdout: string;
   summary: string;
@@ -40,11 +63,15 @@ function getSystemPrompt(role: UserRole) {
   return [
     "You are a concise, reliable assistant for a property management workflow prototype.",
     `Current user role: ${roleLabel}.`,
-    "Use the search_company_knowledge tool whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
+    "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
+    "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
+    "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
+    "The search tool may return an auto-selected file or require user selection. If selection is required, do not call run_data_analysis. Wait for the user to choose a file first.",
     "When you use run_data_analysis, write complete Python 3.13 code that prints the final answer to stdout.",
     "Never rely on a trailing expression like `mean, median`; use print(...).",
     "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
+    "For CSV analysis, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
     "Never claim that you cannot execute Python. You can execute Python through the available tool.",
     scopeRule,
     "If the tool returns no matches, say you could not find that information in the current access scope.",
@@ -61,6 +88,7 @@ type ChatShellProps = {
 
 export function ChatShellWithRole({ role }: ChatShellProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const [{ error, ready }, setState] = useState<ChatShellState>({
     error: null,
     ready: false,
@@ -69,6 +97,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
   useEffect(() => {
     let mounted = true;
     let cleanup: (() => void) | undefined;
+    let agent: Agent | null = null;
 
     setState({ error: null, ready: false });
 
@@ -86,8 +115,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: "critjecture-step-3",
-          version: 3,
+          dbName: "critjecture-step-4",
+          version: 4,
           stores: [
             settings.getConfig(),
             providerKeys.getConfig(),
@@ -113,16 +142,27 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         );
 
         registerCritjectureToolRenderers(webUi);
+        registerCritjectureMessageRenderers(webUi);
+
+        const flushPendingSelection = async () => {
+          if (!agent || !pendingSelectionRef.current || agent.state.isStreaming) {
+            return;
+          }
+
+          const selection = pendingSelectionRef.current;
+          pendingSelectionRef.current = null;
+          await agent.prompt(buildFileSelectionPrompt(selection.file));
+        };
 
         const searchCompanyKnowledgeTool = {
           name: "search_company_knowledge",
           label: "Search Company Knowledge",
           description:
-            "Search the local company_data files for exact keywords or short phrases and return cited matches.",
+            "Search company_data using short keywords, filenames, or years. The tool may auto-select one candidate file or require user selection when multiple files match.",
           parameters: Type.Object({
             query: Type.String({
               description:
-                "The exact keyword or short phrase to search for, such as profit, schedule, tenant name, or contractor payout.",
+                "A short keyword, filename, or year such as profit, payout, contractor, contractors.csv, or 2026.",
               minLength: 1,
             }),
           }),
@@ -147,6 +187,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
             const result = data as SearchToolResponse;
 
+            if (result.selectionRequired && result.candidateFiles.length > 0 && agent) {
+              agent.appendMessage(
+                createFileSelectionMessage(params.query, result.candidateFiles),
+              );
+            }
+
             return {
               content: [
                 {
@@ -167,11 +213,24 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           parameters: Type.Object({
             code: Type.String({
               description:
-                "The Python code to execute inside the sandbox. Use polars for tabular work when relevant. Always print the final answer to stdout. For multiple values, print a single JSON object.",
+                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path>. Use Polars for tabular work and use pl.scan_csv(...).collect() for CSV inputs. Always print the final answer to stdout. For multiple values, print a single JSON object.",
               minLength: 1,
             }),
+            inputFiles: Type.Optional(
+              Type.Array(
+                Type.String({
+                  description:
+                    "A company_data-relative file path discovered via search_company_knowledge, such as admin/contractors_new.csv.",
+                  minLength: 1,
+                }),
+              ),
+            ),
           }),
-          async execute(_toolCallId: string, params: { code: string }, signal?: AbortSignal) {
+          async execute(
+            _toolCallId: string,
+            params: { code: string; inputFiles?: string[] },
+            signal?: AbortSignal,
+          ) {
             const response = await fetch("/api/data-analysis/run", {
               method: "POST",
               headers: {
@@ -179,6 +238,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
               },
               body: JSON.stringify({
                 code: params.code,
+                inputFiles: params.inputFiles ?? [],
+                role,
               }),
               signal,
             });
@@ -205,7 +266,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           },
         };
 
-        const agent = new Agent({
+        agent = new Agent({
           initialState: {
             systemPrompt: getSystemPrompt(role),
             model: getModel("openai", "gpt-4o-mini"),
@@ -213,6 +274,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             messages: [],
             tools: [searchCompanyKnowledgeTool, runDataAnalysisTool],
           },
+          convertToLlm: (messages) =>
+            critjectureConvertToLlm(messages, webUi.defaultConvertToLlm),
           streamFn: (model, context, options) =>
             streamProxy(model, context, {
               ...options,
@@ -243,10 +306,40 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           return;
         }
 
+        const unsubscribe = agent.subscribe((event) => {
+          if (event.type === "agent_end") {
+            void flushPendingSelection();
+          }
+        });
+        const handleFileSelection = (event: Event) => {
+          if (!(event instanceof CustomEvent) || !agent) {
+            return;
+          }
+
+          const selection = event.detail as FileSelectionEventDetail;
+
+          agent.replaceMessages(
+            markFileSelectionSelected(agent.state.messages as AgentMessage[], selection.selectionId, selection.file),
+          );
+
+          if (agent.state.isStreaming) {
+            pendingSelectionRef.current = selection;
+            return;
+          }
+
+          void agent.prompt(buildFileSelectionPrompt(selection.file));
+        };
+
+        window.addEventListener(FILE_SELECTION_EVENT, handleFileSelection as EventListener);
         agent.setTools([searchCompanyKnowledgeTool, runDataAnalysisTool]);
         hostRef.current.replaceChildren(element);
         cleanup = () => {
-          agent.abort();
+          window.removeEventListener(
+            FILE_SELECTION_EVENT,
+            handleFileSelection as EventListener,
+          );
+          unsubscribe();
+          agent?.abort();
           element.remove();
         };
 
@@ -255,7 +348,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const message =
           caughtError instanceof Error
             ? caughtError.message
-            : "Failed to load the Step 2 chat shell.";
+            : "Failed to load the Step 4 chat shell.";
 
         if (mounted) {
           setState({ error: message, ready: false });
@@ -267,6 +360,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
     return () => {
       mounted = false;
+      pendingSelectionRef.current = null;
       cleanup?.();
     };
   }, [role]);

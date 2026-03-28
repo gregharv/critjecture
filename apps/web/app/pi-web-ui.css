@@ -21,9 +21,139 @@
     border-color 140ms ease;
 }
 
+.crit-selection {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in oklab, var(--primary) 40%, var(--border) 60%);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgb(30 41 59 / 0.92), rgb(15 23 42 / 0.96)),
+    linear-gradient(135deg, rgb(59 130 246 / 0.1), rgb(14 165 233 / 0.06));
+}
+
+.crit-selection__header {
+  display: grid;
+  gap: 6px;
+}
+
+.crit-selection__eyebrow {
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.crit-selection__title {
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.crit-selection__copy {
+  margin: 0;
+  color: var(--shell-copy);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.crit-selection__copy code,
+.crit-selection__path,
+.crit-selection__terms,
+.crit-selection__snippet,
+.crit-selection__table {
+  font-family: var(--font-mono);
+}
+
+.crit-selection__list {
+  display: grid;
+  gap: 12px;
+}
+
+.crit-selection__card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+}
+
+.crit-selection__card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.crit-selection__path {
+  color: var(--foreground);
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.crit-selection__terms {
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.crit-selection__button {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in oklab, var(--primary) 58%, var(--border) 42%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 16%, transparent 84%);
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.crit-selection__button:disabled {
+  opacity: 0.65;
+}
+
+.crit-selection__snippet {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 80%, transparent 20%);
+  color: var(--shell-copy);
+  font-size: 0.8rem;
+}
+
+.crit-selection__table-wrap {
+  overflow-x: auto;
+}
+
+.crit-selection__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.crit-selection__table th,
+.crit-selection__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 74%, transparent 26%);
+  text-align: left;
+}
+
+.crit-selection__table th {
+  color: var(--foreground);
+}
+
+.crit-selection__table td {
+  color: var(--shell-copy);
+}
+
 .crit-tool {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .crit-tool__header {
@@ -31,11 +161,13 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .crit-tool__heading {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .crit-tool__eyebrow,
@@ -88,11 +220,52 @@
 .crit-tool__section {
   display: grid;
   gap: 7px;
+  min-width: 0;
+}
+
+.crit-tool__files {
+  display: grid;
+  gap: 10px;
+}
+
+.crit-tool__file {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+}
+
+.crit-tool__file-source,
+.crit-tool__file-stage {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.crit-tool__file-source {
+  color: var(--foreground);
+}
+
+.crit-tool__file-stage {
+  color: var(--muted-foreground);
 }
 
 .crit-tool__split {
   display: grid;
   gap: 14px;
+  min-width: 0;
+}
+
+.crit-tool__split > * {
+  min-width: 0;
+}
+
+.crit-tool code-block {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .crit-tool__empty {
@@ -128,5 +301,17 @@
 @media (min-width: 860px) {
   .crit-tool__split {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .crit-tool__header,
+  .crit-selection__card-header {
+    flex-wrap: wrap;
+  }
+
+  .crit-tool__status,
+  .crit-selection__button {
+    min-width: 0;
   }
 }

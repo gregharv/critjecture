@@ -3,12 +3,16 @@ import { NextResponse } from "next/server";
 import {
   executeSandboxedCommand,
   SandboxExecutionError,
+  SandboxValidationError,
 } from "@/lib/python-sandbox";
+import { isUserRole, type UserRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
 type SandboxRequestBody = {
   code?: unknown;
+  inputFiles?: unknown;
+  role?: unknown;
 };
 
 function jsonError(
@@ -55,14 +59,35 @@ export async function POST(request: Request) {
     return jsonError("Sandbox code must be a non-empty string.", 400);
   }
 
+  if (!isUserRole(body.role)) {
+    return jsonError('Role must be either "intern" or "owner".', 400);
+  }
+
+  const inputFilesResult = parseInputFiles(body.inputFiles);
+
+  if ("error" in inputFilesResult) {
+    return jsonError(inputFilesResult.error, 400);
+  }
+
+  const role: UserRole = body.role;
+  const inputFiles = inputFilesResult.inputFiles;
+
   try {
-    const result = await executeSandboxedCommand(code);
+    const result = await executeSandboxedCommand({
+      code,
+      inputFiles,
+      role,
+    });
 
     return NextResponse.json({
       ...result,
       summary: buildSummary(result.stdout, result.stderr),
     });
   } catch (caughtError) {
+    if (caughtError instanceof SandboxValidationError) {
+      return jsonError(caughtError.message, 400);
+    }
+
     if (caughtError instanceof SandboxExecutionError) {
       const combinedOutput = [caughtError.stderr.trim(), caughtError.stdout.trim()]
         .filter(Boolean)
@@ -86,4 +111,26 @@ export async function POST(request: Request) {
 
     return jsonError(message, 500);
   }
+}
+
+function parseInputFiles(value: unknown):
+  | { inputFiles: string[] }
+  | { error: string } {
+  if (typeof value === "undefined") {
+    return { inputFiles: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { error: "inputFiles must be an array of company_data-relative paths." };
+  }
+
+  const inputFiles = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+
+  if (inputFiles.length !== value.length) {
+    return { error: "Every inputFiles entry must be a non-empty string." };
+  }
+
+  return { inputFiles };
 }

@@ -1,6 +1,6 @@
 # Critjecture
 
-Step 3 extends the `pnpm` monorepo with an RBAC-aware local search tool plus an isolated `uv` Python sandbox for deterministic data analysis.
+Step 4 extends the `pnpm` monorepo with an RBAC-aware local search tool plus an isolated `uv` Python sandbox that can discover company files, disambiguate between multiple matching ledgers, stage the chosen file, and run lazy Polars analysis safely.
 
 The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/pi-web-ui`.
 
@@ -45,6 +45,8 @@ The repo now includes:
 
 - `company_data/public/schedule.txt`
 - `company_data/admin/profit.txt`
+- `company_data/admin/contractors_new.csv`
+- `company_data/admin/contractors.csv`
 
 In the chat UI:
 
@@ -72,12 +74,71 @@ The sandbox runs with:
 - a stripped environment so app secrets are not passed into Python
 - `polars` installed for tabular analysis
 
-Suggested Step 3 smoke check:
+## Step 4 ReAct Flow
 
-- Start a fresh chat session.
-- Send any first message in `/chat`.
-- The temporary Step 3 smoke-test prompt will force a `run_data_analysis` tool call that executes `import polars as pl; print(2 + 2)`.
-- Success is the assistant returning `4`.
+Step 4 now combines three behaviors:
+
+- forgiving company search
+- ambiguous file selection
+- staged lazy-Polars analysis
+
+### Search
+
+`search_company_knowledge` now:
+
+- starts with exact phrase search
+- falls back to tokenized raw-content search and filename matching
+- groups matches by file instead of returning only flat lines
+- returns compact previews for candidate files
+- auto-selects a file only when there is a clear winner
+
+When multiple files are still plausible, the chat UI renders a picker so the user can choose the file before analysis continues.
+
+### Analysis
+
+`run_data_analysis` accepts:
+
+- `role`
+- optional `inputFiles` as `company_data`-relative paths such as `admin/contractors_new.csv`
+
+Each approved input file is staged inside a fresh sandbox workspace under:
+
+- `inputs/<same-relative-path>`
+
+For CSV analysis, the assistant is required to use:
+
+- `pl.scan_csv(...)`
+- a final `.collect()`
+
+The Step 4 guard rejects:
+
+- `pandas`
+- `pd.read_csv(...)`
+- `pl.read_csv(...)`
+
+### Demo Ledgers
+
+The current ambiguous search demo uses:
+
+- `company_data/admin/contractors_new.csv` for 2026
+- `company_data/admin/contractors.csv` for 2025
+
+### Suggested Step 4 Checks
+
+- As `Owner`, ask `What is the average payout in our 2026 contractor ledger?`
+- Confirm the UI shows `search_company_knowledge` first and `run_data_analysis` second.
+- Confirm the search auto-selects `admin/contractors_new.csv`.
+- Confirm the staged file list includes `admin/contractors_new.csv`.
+- Confirm the final answer reports an average payout of `1500`.
+- Ask `contractor payouts` and confirm the UI shows both contractor CSV files with a picker before analysis runs.
+- Click each candidate once and confirm the analysis uses only the selected file.
+- As `Intern`, ask the same question and confirm the assistant reports that the data is unavailable in the current access scope.
+
+### UI Notes
+
+- The file picker is app-owned UI rendered inside the chat history.
+- The Python sandbox card shows staged files, code, stdout, and stderr.
+- On mobile, long Python/code output should stay inside the card and scroll internally instead of overflowing the viewport.
 
 ## Environment
 

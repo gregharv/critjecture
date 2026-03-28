@@ -4,6 +4,10 @@ import { html, nothing } from "lit";
 type SandboxToolResponse = {
   exitCode: number;
   pythonExecutable: string;
+  stagedFiles: Array<{
+    sourcePath: string;
+    stagedPath: string;
+  }>;
   stderr: string;
   stdout: string;
   workspaceDir: string;
@@ -132,6 +136,26 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
             ${
               result
                 ? html`
+                    ${
+                      details?.stagedFiles?.length
+                        ? html`
+                            <section class="crit-tool__section">
+                              <div class="crit-tool__label">Staged Input Files</div>
+                              <div class="crit-tool__files">
+                                ${details.stagedFiles.map(
+                                  (file) => html`
+                                    <div class="crit-tool__file">
+                                      <div class="crit-tool__file-source">${file.sourcePath}</div>
+                                      <div class="crit-tool__file-stage">${file.stagedPath}</div>
+                                    </div>
+                                  `,
+                                )}
+                              </div>
+                            </section>
+                          `
+                        : nothing
+                    }
+
                     <div class="crit-tool__split">
                       <section class="crit-tool__section">
                         <div class="crit-tool__label">stdout</div>
@@ -190,6 +214,7 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
                 ? html`
                     <div class="crit-tool__meta">
                       <span>exit ${details.exitCode}</span>
+                      <span>${details.stagedFiles.length} staged file${details.stagedFiles.length === 1 ? "" : "s"}</span>
                       <span>${details.workspaceDir}</span>
                     </div>
                   `

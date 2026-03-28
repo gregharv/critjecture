@@ -185,3 +185,80 @@ Step 3 was implemented as a real Python analysis tool on top of the existing Ste
 - Errors from Python are returned clearly instead of being swallowed by the tool layer.
 - The tool contract now depends on stdout for useful answers, so prompt quality matters: the model must `print(...)` the final result.
 - The custom renderer improves readability, but it does not yet render charts or files. That remains Step 5 work.
+
+## Step 4: The Autonomous ReAct Loop (Memory-Safe)
+
+### What Was Implemented
+
+Step 4 was finished as an RBAC-aware search and analysis workflow that can discover company files, disambiguate between multiple matching ledgers, stage the chosen file into the Python sandbox, and run lazy Polars analysis safely.
+
+- Added shared company-data path resolution and authorization in `apps/web/lib/company-data.ts`.
+  - Resolves the repo-level `company_data` root
+  - Normalizes relative file paths
+  - Rejects absolute paths and path traversal
+  - Enforces role-based file access before analysis
+- Expanded the mock ledger data to cover ambiguous search cases:
+  - `company_data/admin/contractors_new.csv` for 2026
+  - `company_data/admin/contractors.csv` for 2025
+- Added grouped company knowledge types in `apps/web/lib/company-knowledge-types.ts`.
+- Reworked `apps/web/lib/company-knowledge.ts`.
+  - Keeps exact phrase search as the first pass
+  - Falls back to tokenized raw-content search and filename matching when the phrase search is weak or empty
+  - Groups matches by file instead of returning only flat `rg` hits
+  - Builds compact previews for candidate files
+  - Auto-selects only when there is one clear file or a unique year-based winner
+- Updated `apps/web/app/api/company-knowledge/search/route.ts`.
+  - Returns candidate files, selection state, and selected file metadata
+  - Emits summary text that tells the model when to proceed automatically and when to stop for user choice
+- Extended the sandbox wrapper in `apps/web/lib/python-sandbox.ts`.
+  - Creates a fresh per-run workspace under `/tmp/workspace/<run-id>`
+  - Stages approved company files under `inputs/<same-relative-path>`
+  - Returns staged file metadata to the UI
+  - Rejects CSV analysis code that uses `pandas`, `pd.read_csv(...)`, or eager `pl.read_csv(...)`
+  - Requires the lazy Polars pattern `pl.scan_csv(...)` plus `.collect()`
+- Updated the analysis route in `apps/web/app/api/data-analysis/run/route.ts`.
+  - Validates `role`
+  - Accepts optional `inputFiles`
+  - Returns clear 400-level errors for invalid staged inputs or invalid CSV loading patterns
+- Added the UI-only `file-selection` custom message flow in:
+  - `apps/web/lib/file-selection-messages.ts`
+  - `apps/web/components/chat-shell.tsx`
+  - `apps/web/app/pi-web-ui.css`
+- The chat shell now:
+  - Filters the UI-only selection message out of LLM context
+  - Appends a clickable picker message when search returns multiple candidate files
+  - Queues a selected file if the agent is still streaming
+  - Sends a follow-up user prompt naming the selected file once the session is ready
+  - Extends `run_data_analysis` so the current role and selected `inputFiles` are always sent to the backend
+- Updated `apps/web/lib/tool-renderers.ts`.
+  - Shows staged input files in the analysis card
+  - Keeps Python code, stdout, stderr, and execution state readable
+- Updated app-owned chat styling in `apps/web/app/pi-web-ui.css`.
+  - Added the file picker UI
+  - Fixed mobile overflow so Python sandbox/code blocks stay within the viewport and scroll internally
+- Updated operator-facing docs in `README.md`.
+  - Removes the stale Step 3 smoke-test note
+  - Documents the new contractor ledgers, forgiving search flow, picker behavior, and Step 4 verification checks
+
+### Current Step 4 Behavior
+
+- `Owner`
+  - Can search all of `company_data`
+  - Can ask for `What is the average payout in our 2026 contractor ledger?` and have the system auto-select `admin/contractors_new.csv`
+  - Can ask a broader query such as `contractor payouts` and get a picker showing both contractor CSV files before analysis runs
+  - Can pass the selected file into `run_data_analysis`, where it is staged under `inputs/<same-relative-path>`
+  - Must use lazy Polars for CSV analysis
+- `Intern`
+  - Can search only `company_data/public`
+  - Cannot see admin-only candidate files or previews
+  - Cannot stage admin-only files into the sandbox even if the model attempts to pass the path manually
+
+### Important Implementation Details
+
+- Step 4 keeps the current client-side `pi-ai` tool orchestration; it does not move the ReAct loop to the server.
+- RBAC for file analysis is enforced on the backend by validating and staging explicit `inputFiles`, not by trusting model-generated filesystem paths.
+- Search ranking stays raw-content based. No metadata manifest or CSV profiling job was added.
+- File previews are intentionally shallow: CSV header plus 3 rows, or 3 non-empty text lines.
+- The clickable picker is implemented as a custom message renderer rather than a tool-card hack so the app can inject a normal user prompt after selection.
+- The memory-safety rule is enforced both by prompt guidance and by backend validation for CSV-backed analysis calls.
+- The sandbox still uses the fixed `packages/python-sandbox/.venv/bin/python` interpreter and a stripped environment.
