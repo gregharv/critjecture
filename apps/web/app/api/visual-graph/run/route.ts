@@ -4,6 +4,7 @@ import {
   executeSandboxedCommand,
   SandboxExecutionError,
   SandboxValidationError,
+  type GeneratedSandboxAsset,
 } from "@/lib/python-sandbox";
 import {
   buildSandboxSummary,
@@ -13,6 +14,24 @@ import {
 } from "@/lib/sandbox-route";
 
 export const runtime = "nodejs";
+
+function buildVisualGraphCode(code: string) {
+  return [
+    "import matplotlib",
+    'matplotlib.use("Agg")',
+    code,
+  ].join("\n\n");
+}
+
+function expectSinglePngAsset(generatedAssets: GeneratedSandboxAsset[]) {
+  if (generatedAssets.length !== 1 || generatedAssets[0]?.mimeType !== "image/png") {
+    throw new SandboxValidationError(
+      "generate_visual_graph must save exactly one PNG file inside outputs/.",
+    );
+  }
+
+  return generatedAssets[0];
+}
 
 export async function POST(request: Request) {
   let body: SandboxRequestBody;
@@ -31,14 +50,16 @@ export async function POST(request: Request) {
 
   try {
     const result = await executeSandboxedCommand({
-      code: parsedRequest.code,
+      code: buildVisualGraphCode(parsedRequest.code),
       inputFiles: parsedRequest.inputFiles,
       role: parsedRequest.role,
     });
+    const generatedAsset = expectSinglePngAsset(result.generatedAssets);
 
     return NextResponse.json({
       ...result,
-      summary: buildSandboxSummary(result.stdout, result.stderr),
+      generatedAsset,
+      summary: `${buildSandboxSummary(result.stdout, result.stderr)}\nSaved graph asset to ${generatedAsset.relativePath}.`,
     });
   } catch (caughtError) {
     if (caughtError instanceof SandboxValidationError) {
@@ -64,7 +85,7 @@ export async function POST(request: Request) {
     const message =
       caughtError instanceof Error
         ? caughtError.message
-        : "Sandbox execution failed.";
+        : "Graph generation failed.";
 
     return jsonError(message, 500);
   }

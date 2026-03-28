@@ -262,3 +262,60 @@ Step 4 was finished as an RBAC-aware search and analysis workflow that can disco
 - The clickable picker is implemented as a custom message renderer rather than a tool-card hack so the app can inject a normal user prompt after selection.
 - The memory-safety rule is enforced both by prompt guidance and by backend validation for CSV-backed analysis calls.
 - The sandbox still uses the fixed `packages/python-sandbox/.venv/bin/python` interpreter and a stripped environment.
+
+## Step 5: Visuals & Documents (The UI Handlers)
+
+### What Was Implemented
+
+Step 5 was implemented as two new sandbox-backed file-generation tools plus a secure generated-file delivery path for the existing `/chat` UI.
+
+- Extended the sandbox package at `packages/python-sandbox`.
+  - Added `matplotlib` for PNG chart generation
+  - Added `reportlab` for PDF generation
+  - Updated the committed `uv.lock`
+- Expanded `apps/web/lib/python-sandbox.ts`.
+  - Creates `outputs/` inside every sandbox workspace
+  - Scans supported generated assets after execution
+  - Returns generated asset metadata to the UI
+  - Exposes a strict resolver for serving only `.png` and `.pdf` assets from `outputs/`
+- Added shared sandbox request parsing in `apps/web/lib/sandbox-route.ts`.
+- Added backend routes:
+  - `apps/web/app/api/visual-graph/run/route.ts`
+  - `apps/web/app/api/document/generate/route.ts`
+  - `apps/web/app/api/generated-files/[workspaceId]/[...assetPath]/route.ts`
+- Updated `apps/web/components/chat-shell.tsx`.
+  - Registers `generate_visual_graph` and `generate_document`
+  - Updates the system prompt so the model writes chart/document files into `outputs/`
+  - Tightens the chart/document guidance so charts use matplotlib plus Polars-backed staged CSV data, while PDFs use reportlab
+  - Keeps the existing search-first and picker-first behavior when company files are needed
+- Reworked `apps/web/lib/tool-renderers.ts`.
+  - Keeps the Step 4 Python sandbox card structure
+  - Adds an in-chat PNG preview card for `generate_visual_graph`
+  - Adds a PDF download action for `generate_document`
+  - Handles partial error payloads safely so failed tool calls do not crash the chat UI
+- Expanded `apps/web/app/pi-web-ui.css`.
+  - Styles the image preview card
+  - Styles the document download action
+  - Keeps the layout mobile-safe
+- Added Step 5 demo data:
+  - `company_data/admin/rent_delinquency.csv`
+- Updated `README.md` with Step 5 setup and verification notes.
+
+### Current Step 5 Behavior
+
+- `Owner`
+  - Can ask for `Create a bar chart of the top 3 contractor payouts` and receive a generated PNG preview in chat
+  - Can ask for `Generate a late rent notice PDF for Unit 4B` and receive a downloadable PDF link in chat
+  - Still uses search and staged `inputFiles` whenever company records are required
+- `Intern`
+  - Still cannot access admin-only ledgers or rent-delinquency data
+  - Sees the same access-scope refusal behavior for chart and document requests that depend on admin files
+
+### Important Implementation Details
+
+- Step 5 keeps the current client-side `pi-ai` tool orchestration. The ReAct loop is still not moved to the server.
+- Generated files are ephemeral and live only under `/tmp/workspace/<run-id>/outputs/`.
+- The generated-file route validates workspace id, rejects traversal, and only serves `.png` and `.pdf` files from the sandbox outputs directory.
+- The chart and document routes require exactly one primary output file of the expected type so the tool contract stays predictable for the UI.
+- The visual-graph route forces the non-interactive Matplotlib `Agg` backend before executing model-generated code so PNG generation works reliably in the sandbox.
+- Current graph generation reads directly from staged company data. A reasonable future improvement is to let `run_data_analysis` persist a structured output file that later graph/document tools can consume instead of recomputing from source inputs.

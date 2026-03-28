@@ -4,6 +4,7 @@ import {
   executeSandboxedCommand,
   SandboxExecutionError,
   SandboxValidationError,
+  type GeneratedSandboxAsset,
 } from "@/lib/python-sandbox";
 import {
   buildSandboxSummary,
@@ -13,6 +14,19 @@ import {
 } from "@/lib/sandbox-route";
 
 export const runtime = "nodejs";
+
+function expectSinglePdfAsset(generatedAssets: GeneratedSandboxAsset[]) {
+  if (
+    generatedAssets.length !== 1 ||
+    generatedAssets[0]?.mimeType !== "application/pdf"
+  ) {
+    throw new SandboxValidationError(
+      "generate_document must save exactly one PDF file inside outputs/.",
+    );
+  }
+
+  return generatedAssets[0];
+}
 
 export async function POST(request: Request) {
   let body: SandboxRequestBody;
@@ -35,10 +49,12 @@ export async function POST(request: Request) {
       inputFiles: parsedRequest.inputFiles,
       role: parsedRequest.role,
     });
+    const generatedAsset = expectSinglePdfAsset(result.generatedAssets);
 
     return NextResponse.json({
       ...result,
-      summary: buildSandboxSummary(result.stdout, result.stderr),
+      generatedAsset,
+      summary: `${buildSandboxSummary(result.stdout, result.stderr)}\nSaved document asset to ${generatedAsset.relativePath}.`,
     });
   } catch (caughtError) {
     if (caughtError instanceof SandboxValidationError) {
@@ -64,7 +80,7 @@ export async function POST(request: Request) {
     const message =
       caughtError instanceof Error
         ? caughtError.message
-        : "Sandbox execution failed.";
+        : "Document generation failed.";
 
     return jsonError(message, 500);
   }

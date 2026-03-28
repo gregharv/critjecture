@@ -17,6 +17,10 @@ import {
   registerCritjectureMessageRenderers,
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
+import type {
+  GeneratedAssetToolResponse,
+  SandboxToolResponse,
+} from "@/lib/sandbox-tool-types";
 import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
@@ -40,19 +44,6 @@ type SearchToolResponse = {
   summary: string;
 };
 
-type SandboxToolResponse = {
-  exitCode: number;
-  pythonExecutable: string;
-  stagedFiles: Array<{
-    sourcePath: string;
-    stagedPath: string;
-  }>;
-  stderr: string;
-  stdout: string;
-  summary: string;
-  workspaceDir: string;
-};
-
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
@@ -65,13 +56,18 @@ function getSystemPrompt(role: UserRole) {
     `Current user role: ${roleLabel}.`,
     "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
-    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
+    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
+    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. Use matplotlib only, build the dataset with Polars when CSV input files are staged, save exactly one PNG file inside outputs/chart.png, and print a short summary.",
+    "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
     "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
-    "The search tool may return an auto-selected file or require user selection. If selection is required, do not call run_data_analysis. Wait for the user to choose a file first.",
-    "When you use run_data_analysis, write complete Python 3.13 code that prints the final answer to stdout.",
+    "When you use generate_visual_graph or generate_document on company files, pass those same relative paths in inputFiles.",
+    "The search tool may return an auto-selected file or require user selection. If selection is required, do not call any Python sandbox tool yet. Wait for the user to choose a file first.",
+    "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout.",
     "Never rely on a trailing expression like `mean, median`; use print(...).",
     "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
-    "For CSV analysis, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
+    "For any staged CSV input, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
+    "matplotlib is available for PNG charts. Convert chart columns to plain Python lists before plotting.",
+    "reportlab is available for PDFs. For a simple notice, use reportlab.pdfgen.canvas.Canvas with outputs/notice.pdf.",
     "Never claim that you cannot execute Python. You can execute Python through the available tool.",
     scopeRule,
     "If the tool returns no matches, say you could not find that information in the current access scope.",
@@ -115,8 +111,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: "critjecture-step-4",
-          version: 4,
+          dbName: "critjecture-step-5",
+          version: 5,
           stores: [
             settings.getConfig(),
             providerKeys.getConfig(),
@@ -153,6 +149,75 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           pendingSelectionRef.current = null;
           await agent.prompt(buildFileSelectionPrompt(selection.file));
         };
+
+        const sandboxToolParameters = Type.Object({
+          code: Type.String({
+            description:
+              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path>. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout.",
+            minLength: 1,
+          }),
+          inputFiles: Type.Optional(
+            Type.Array(
+              Type.String({
+                description:
+                  "A company_data-relative file path discovered via search_company_knowledge, such as admin/contractors_new.csv.",
+                minLength: 1,
+              }),
+            ),
+          ),
+        });
+
+        const createSandboxTool = <TResponse extends SandboxToolResponse>(
+          options: {
+            description: string;
+            label: string;
+            name: string;
+            route: string;
+          },
+        ) => ({
+          name: options.name,
+          label: options.label,
+          description: options.description,
+          parameters: sandboxToolParameters,
+          async execute(
+            _toolCallId: string,
+            params: { code: string; inputFiles?: string[] },
+            signal?: AbortSignal,
+          ) {
+            const response = await fetch(options.route, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code: params.code,
+                inputFiles: params.inputFiles ?? [],
+                role,
+              }),
+              signal,
+            });
+
+            const data = (await response.json()) as TResponse | { error: string };
+
+            if (!response.ok) {
+              throw new Error(
+                "error" in data ? data.error : `${options.label} request failed.`,
+              );
+            }
+
+            const result = data as TResponse;
+
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: result.summary,
+                },
+              ],
+              details: result,
+            };
+          },
+        });
 
         const searchCompanyKnowledgeTool = {
           name: "search_company_knowledge",
@@ -205,66 +270,29 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           },
         };
 
-        const runDataAnalysisTool = {
+        const runDataAnalysisTool = createSandboxTool<SandboxToolResponse>({
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
             "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers.",
-          parameters: Type.Object({
-            code: Type.String({
-              description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path>. Use Polars for tabular work and use pl.scan_csv(...).collect() for CSV inputs. Always print the final answer to stdout. For multiple values, print a single JSON object.",
-              minLength: 1,
-            }),
-            inputFiles: Type.Optional(
-              Type.Array(
-                Type.String({
-                  description:
-                    "A company_data-relative file path discovered via search_company_knowledge, such as admin/contractors_new.csv.",
-                  minLength: 1,
-                }),
-              ),
-            ),
-          }),
-          async execute(
-            _toolCallId: string,
-            params: { code: string; inputFiles?: string[] },
-            signal?: AbortSignal,
-          ) {
-            const response = await fetch("/api/data-analysis/run", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                code: params.code,
-                inputFiles: params.inputFiles ?? [],
-                role,
-              }),
-              signal,
-            });
+          route: "/api/data-analysis/run",
+        });
 
-            const data = (await response.json()) as SandboxToolResponse | { error: string };
+        const generateVisualGraphTool = createSandboxTool<GeneratedAssetToolResponse>({
+          name: "generate_visual_graph",
+          label: "Generate Visual Graph",
+          description:
+            "Execute Python in the isolated sandbox to generate exactly one PNG chart inside outputs/. Use matplotlib, read staged CSV files with Polars scan_csv(...).collect(), plot plain Python lists, and print a one-line summary.",
+          route: "/api/visual-graph/run",
+        });
 
-            if (!response.ok) {
-              throw new Error(
-                "error" in data ? data.error : "Sandbox execution request failed.",
-              );
-            }
-
-            const result = data as SandboxToolResponse;
-
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: result.summary,
-                },
-              ],
-              details: result,
-            };
-          },
-        };
+        const generateDocumentTool = createSandboxTool<GeneratedAssetToolResponse>({
+          name: "generate_document",
+          label: "Generate Document",
+          description:
+            "Execute Python in the isolated sandbox to generate exactly one PDF document inside outputs/. Use reportlab and print a one-line summary after writing the file.",
+          route: "/api/document/generate",
+        });
 
         agent = new Agent({
           initialState: {
@@ -272,7 +300,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             model: getModel("openai", "gpt-4o-mini"),
             thinkingLevel: "off",
             messages: [],
-            tools: [searchCompanyKnowledgeTool, runDataAnalysisTool],
+            tools: [
+              searchCompanyKnowledgeTool,
+              runDataAnalysisTool,
+              generateVisualGraphTool,
+              generateDocumentTool,
+            ],
           },
           convertToLlm: (messages) =>
             critjectureConvertToLlm(messages, webUi.defaultConvertToLlm),
@@ -331,7 +364,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         };
 
         window.addEventListener(FILE_SELECTION_EVENT, handleFileSelection as EventListener);
-        agent.setTools([searchCompanyKnowledgeTool, runDataAnalysisTool]);
+        agent.setTools([
+          searchCompanyKnowledgeTool,
+          runDataAnalysisTool,
+          generateVisualGraphTool,
+          generateDocumentTool,
+        ]);
         hostRef.current.replaceChildren(element);
         cleanup = () => {
           window.removeEventListener(
@@ -348,7 +386,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const message =
           caughtError instanceof Error
             ? caughtError.message
-            : "Failed to load the Step 4 chat shell.";
+            : "Failed to load the Step 5 chat shell.";
 
         if (mounted) {
           setState({ error: message, ready: false });

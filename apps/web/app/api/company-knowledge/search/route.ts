@@ -51,7 +51,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
       `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
       `Role: ${roleLabel}.`,
       selectionLine,
-      "Use the selected file path in run_data_analysis inputFiles when computation is needed.",
+      "Use the selected file path in inputFiles when a Python sandbox tool is needed.",
       citations,
     ].join("\n");
   }
@@ -59,7 +59,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
   return [
     `Found ${result.candidateFiles.length} candidate files for "${query}" in ${result.scopeDescription}.`,
     `Role: ${roleLabel}.`,
-    "Selection required. Do not call run_data_analysis yet. Wait for the user to choose from the file picker.",
+    "Selection required. Do not call a Python sandbox tool yet. Wait for the user to choose from the file picker.",
     candidateLines,
   ].join("\n");
 }

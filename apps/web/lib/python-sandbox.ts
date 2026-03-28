@@ -3,7 +3,7 @@ import "server-only";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, copyFile, mkdir } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -12,16 +12,33 @@ import type { UserRole } from "@/lib/roles";
 
 const execFileAsync = promisify(execFile);
 const SANDBOX_WORKSPACE_DIR = "/tmp/workspace";
+const SANDBOX_OUTPUTS_DIR = "outputs";
 const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_MAX_BUFFER = 1024 * 1024;
+const WORKSPACE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const GENERATED_ASSET_MIME_TYPES: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+};
 
 export type StagedSandboxFile = {
   sourcePath: string;
   stagedPath: string;
 };
 
+export type GeneratedSandboxAsset = {
+  downloadUrl: string;
+  fileName: string;
+  mimeType: string;
+  relativePath: string;
+  workspaceId: string;
+};
+
 export type SandboxedCommandResult = {
   exitCode: number;
+  generatedAssets: GeneratedSandboxAsset[];
   pythonExecutable: string;
   stagedFiles: StagedSandboxFile[];
   stderr: string;
@@ -57,6 +74,116 @@ async function pathExists(targetPath: string, mode = fsConstants.R_OK) {
   } catch {
     return false;
   }
+}
+
+function getGeneratedAssetMimeType(relativePath: string) {
+  return GENERATED_ASSET_MIME_TYPES[path.extname(relativePath).toLowerCase()] ?? null;
+}
+
+function getSandboxWorkspaceId(workspaceDir: string) {
+  return path.basename(workspaceDir);
+}
+
+function buildGeneratedAssetDownloadUrl(workspaceId: string, relativePath: string) {
+  const encodedRelativePath = relativePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return `/api/generated-files/${workspaceId}/${encodedRelativePath}`;
+}
+
+function normalizeGeneratedAssetRelativePath(relativePath: string) {
+  const trimmed = relativePath.trim().replaceAll("\\", "/");
+
+  if (!trimmed) {
+    throw new Error("Generated asset path must not be empty.");
+  }
+
+  if (trimmed.startsWith("/")) {
+    throw new Error("Generated asset path must be relative to the sandbox workspace.");
+  }
+
+  const normalized = path.posix.normalize(trimmed);
+
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../")
+  ) {
+    throw new Error("Generated asset path must stay inside the sandbox workspace.");
+  }
+
+  if (
+    normalized !== SANDBOX_OUTPUTS_DIR &&
+    !normalized.startsWith(`${SANDBOX_OUTPUTS_DIR}/`)
+  ) {
+    throw new Error("Generated asset path must stay inside the sandbox outputs directory.");
+  }
+
+  return normalized;
+}
+
+function buildGeneratedAssetMetadata(workspaceDir: string, relativePath: string) {
+  const normalizedRelativePath = normalizeGeneratedAssetRelativePath(relativePath);
+  const mimeType = getGeneratedAssetMimeType(normalizedRelativePath);
+
+  if (!mimeType) {
+    throw new Error(
+      `Unsupported generated asset type: ${path.extname(normalizedRelativePath) || normalizedRelativePath}`,
+    );
+  }
+
+  const workspaceId = getSandboxWorkspaceId(workspaceDir);
+
+  return {
+    downloadUrl: buildGeneratedAssetDownloadUrl(workspaceId, normalizedRelativePath),
+    fileName: path.posix.basename(normalizedRelativePath),
+    mimeType,
+    relativePath: normalizedRelativePath,
+    workspaceId,
+  } satisfies GeneratedSandboxAsset;
+}
+
+async function collectGeneratedAssets(
+  workspaceDir: string,
+): Promise<GeneratedSandboxAsset[]> {
+  const outputsDir = path.join(workspaceDir, SANDBOX_OUTPUTS_DIR);
+
+  if (!(await pathExists(outputsDir))) {
+    return [];
+  }
+
+  const assets: GeneratedSandboxAsset[] = [];
+
+  async function walk(currentAbsoluteDir: string, currentRelativeDir: string) {
+    const entries = await readdir(currentAbsoluteDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentAbsoluteDir, entry.name);
+      const relativePath = path.posix.join(currentRelativeDir, entry.name);
+
+      if (entry.isDirectory()) {
+        await walk(absolutePath, relativePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      if (!getGeneratedAssetMimeType(relativePath)) {
+        continue;
+      }
+
+      assets.push(buildGeneratedAssetMetadata(workspaceDir, relativePath));
+    }
+  }
+
+  await walk(outputsDir, SANDBOX_OUTPUTS_DIR);
+
+  return assets.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 async function resolvePythonSandboxRoot() {
@@ -135,8 +262,51 @@ async function stageInputFiles(
   return stagedFiles;
 }
 
+export async function resolveGeneratedSandboxAsset(
+  workspaceId: string,
+  relativePath: string,
+) {
+  if (!WORKSPACE_ID_PATTERN.test(workspaceId)) {
+    throw new Error("Invalid sandbox workspace id.");
+  }
+
+  const normalizedRelativePath = normalizeGeneratedAssetRelativePath(relativePath);
+  const metadata = buildGeneratedAssetMetadata(
+    path.join(SANDBOX_WORKSPACE_DIR, workspaceId),
+    normalizedRelativePath,
+  );
+  const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, workspaceId);
+  const absolutePath = path.resolve(workspaceDir, ...normalizedRelativePath.split("/"));
+  const relativeFromWorkspace = path.relative(workspaceDir, absolutePath);
+
+  if (
+    relativeFromWorkspace === "" ||
+    relativeFromWorkspace === ".." ||
+    relativeFromWorkspace.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error("Generated asset path must stay inside the sandbox workspace.");
+  }
+
+  const assetStats = await stat(absolutePath).catch(() => null);
+
+  if (!assetStats) {
+    throw new Error(`Generated asset not found: ${normalizedRelativePath}`);
+  }
+
+  if (!assetStats.isFile()) {
+    throw new Error(`Generated asset path is not a file: ${normalizedRelativePath}`);
+  }
+
+  await access(absolutePath, fsConstants.R_OK);
+
+  return {
+    absolutePath,
+    metadata,
+  };
+}
+
 export async function executeSandboxedCommand(options: {
-  code: string,
+  code: string;
   inputFiles?: string[];
   role: UserRole;
 }): Promise<SandboxedCommandResult> {
@@ -150,6 +320,8 @@ export async function executeSandboxedCommand(options: {
 
   const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, randomUUID());
   await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(workspaceDir, SANDBOX_OUTPUTS_DIR), { recursive: true });
+  await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
 
   const stagedFiles = await stageInputFiles(options.inputFiles ?? [], options.role, workspaceDir);
   const hasCsvInputs = stagedFiles.some((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
@@ -167,6 +339,7 @@ export async function executeSandboxedCommand(options: {
       {
         cwd: workspaceDir,
         env: {
+          MPLCONFIGDIR: path.join(workspaceDir, ".matplotlib"),
           NODE_ENV: process.env.NODE_ENV ?? "production",
           PYTHONDONTWRITEBYTECODE: "1",
           PYTHONUNBUFFERED: "1",
@@ -175,9 +348,11 @@ export async function executeSandboxedCommand(options: {
         timeout: SANDBOX_TIMEOUT_MS,
       },
     );
+    const generatedAssets = await collectGeneratedAssets(workspaceDir);
 
     return {
       exitCode: 0,
+      generatedAssets,
       pythonExecutable,
       stagedFiles,
       stderr,

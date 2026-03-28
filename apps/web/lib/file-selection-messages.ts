@@ -175,7 +175,7 @@ export function markFileSelectionSelected(
 }
 
 export function buildFileSelectionPrompt(file: string) {
-  return `Use company file ${file} for the pending request. If analysis is needed, use that exact path in run_data_analysis inputFiles.`;
+  return `Use company file ${file} for the pending request. If a Python sandbox tool is needed next, pass that exact path in inputFiles.`;
 }
 
 export function critjectureConvertToLlm(

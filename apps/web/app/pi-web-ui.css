@@ -289,6 +289,79 @@
   line-height: 1.55;
 }
 
+.crit-tool__asset-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
+}
+
+.crit-tool__asset-card--image {
+  gap: 14px;
+}
+
+.crit-tool__image {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  background:
+    linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(2 6 23 / 0.98)),
+    repeating-linear-gradient(
+      45deg,
+      rgb(148 163 184 / 0.08),
+      rgb(148 163 184 / 0.08) 12px,
+      transparent 12px,
+      transparent 24px
+    );
+}
+
+.crit-tool__asset-footer,
+.crit-tool__asset-card--document {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.crit-tool__asset-copy {
+  min-width: 0;
+}
+
+.crit-tool__asset-name {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.crit-tool__asset-path {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.crit-tool__asset-link,
+.crit-tool__download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 13px;
+  border: 1px solid color-mix(in oklab, var(--primary) 58%, var(--border) 42%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 16%, transparent 84%);
+  color: var(--foreground);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .crit-tool__meta {
   display: flex;
   flex-wrap: wrap;
@@ -306,12 +379,16 @@
 
 @media (max-width: 640px) {
   .crit-tool__header,
-  .crit-selection__card-header {
+  .crit-selection__card-header,
+  .crit-tool__asset-footer,
+  .crit-tool__asset-card--document {
     flex-wrap: wrap;
   }
 
   .crit-tool__status,
-  .crit-selection__button {
+  .crit-selection__button,
+  .crit-tool__asset-link,
+  .crit-tool__download-button {
     min-width: 0;
   }
 }

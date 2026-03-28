@@ -1,6 +1,6 @@
 # Critjecture
 
-Step 4 extends the `pnpm` monorepo with an RBAC-aware local search tool plus an isolated `uv` Python sandbox that can discover company files, disambiguate between multiple matching ledgers, stage the chosen file, and run lazy Polars analysis safely.
+Step 5 extends the `pnpm` monorepo with RBAC-aware local search, an isolated `uv` Python sandbox, generated PNG/PDF outputs, and secure file serving for in-chat charts and downloadable documents.
 
 The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/pi-web-ui`.
 
@@ -47,6 +47,7 @@ The repo now includes:
 - `company_data/admin/profit.txt`
 - `company_data/admin/contractors_new.csv`
 - `company_data/admin/contractors.csv`
+- `company_data/admin/rent_delinquency.csv`
 
 In the chat UI:
 
@@ -73,6 +74,8 @@ The sandbox runs with:
 - working directory fixed to `/tmp/workspace`
 - a stripped environment so app secrets are not passed into Python
 - `polars` installed for tabular analysis
+- `matplotlib` installed for chart generation
+- `reportlab` installed for PDF generation
 
 ## Step 4 ReAct Flow
 
@@ -139,6 +142,55 @@ The current ambiguous search demo uses:
 - The file picker is app-owned UI rendered inside the chat history.
 - The Python sandbox card shows staged files, code, stdout, and stderr.
 - On mobile, long Python/code output should stay inside the card and scroll internally instead of overflowing the viewport.
+
+## Step 5 Visuals and Documents
+
+Step 5 adds two new sandbox-backed tools:
+
+- `generate_visual_graph` for PNG charts
+- `generate_document` for PDF notices
+
+Each tool:
+
+- accepts `role`
+- accepts optional `inputFiles`
+- runs in a fresh sandbox workspace under `/tmp/workspace/<run-id>`
+- must save the final artifact inside `outputs/`
+
+Generated assets are served back through:
+
+- `GET /api/generated-files/<workspace-id>/<outputs-relative-path>`
+
+The route only serves:
+
+- `.png`
+- `.pdf`
+
+from inside the sandbox `outputs/` directory.
+
+### Step 5 Demo Data
+
+The document demo uses:
+
+- `company_data/admin/rent_delinquency.csv`
+
+The chart demo continues to use:
+
+- `company_data/admin/contractors_new.csv`
+
+### Suggested Step 5 Checks
+
+- As `Owner`, ask `Create a bar chart of the top 3 contractor payouts.`
+- Confirm the UI shows `search_company_knowledge` before `generate_visual_graph` when a company file is needed.
+- Confirm the tool card renders a PNG preview and an image link after execution.
+- As `Owner`, ask `Generate a late rent notice PDF for Unit 4B.`
+- Confirm the UI shows `search_company_knowledge` before `generate_document`.
+- Confirm the tool card renders a `Download Document` action for the generated PDF.
+- As `Intern`, ask for the same chart and notice and confirm the assistant reports that the data is unavailable in the current access scope.
+
+### Future Improvement Note
+
+- A useful follow-up would be letting `run_data_analysis` persist a structured output file that `generate_visual_graph` or `generate_document` can consume directly, instead of recomputing from the original staged company data each time.
 
 ## Environment
 
