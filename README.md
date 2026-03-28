@@ -29,12 +29,21 @@ When a question depends on company data, the assistant searches the approved fil
 
 ### Roles
 
-The current MVP has two roles:
+The current MVP has two real application roles:
 
 - `Intern`: limited to `company_data/public`
 - `Owner`: can access all of `company_data`
 
-Role changes reset the active chat session so higher-privilege context is not reused accidentally.
+Role is now derived from the authenticated server session, not from a client-side toggle.
+
+### Authentication
+
+Protected routes require sign-in. Critjecture currently ships with two seeded pilot accounts configured through `apps/web/.env.local`:
+
+- one `Owner`
+- one `Intern`
+
+Sessions are cookie-based, backend routes derive permissions from the authenticated user, and generated files are only retrievable by the authenticated user who created them.
 
 ### Audit Logs
 
@@ -45,7 +54,7 @@ It shows a newest-first list of prompt cards. Expanding a card reveals a chronol
 - assistant responses
 - tool calls
 
-Each card can be filtered to show all events, only assistant responses, or only tool calls. Tool events include raw parameters, accessed files, completion summaries, and any errors.
+Each card can be filtered to show all events, only assistant responses, or only tool calls. Tool events include raw parameters, accessed files, completion summaries, and any errors. Prompt cards also show the initiating authenticated user and the chat session id that produced the interaction.
 
 ## Architecture
 
@@ -102,19 +111,28 @@ pnpm dev
 
 Open:
 
+- `http://localhost:3000/login`
 - `http://localhost:3000/chat`
-- `http://localhost:3000/admin/logs?role=owner`
+- `http://localhost:3000/admin/logs`
 
 ## Environment
 
 `apps/web/.env.local` supports:
 
 ```bash
+AUTH_SECRET=replace-with-a-long-random-string
 OPENAI_API_KEY=your-key-here
 OPENAI_MODEL=gpt-4o-mini
+CRITJECTURE_OWNER_EMAIL=owner@example.com
+CRITJECTURE_OWNER_PASSWORD=change-me-owner
+CRITJECTURE_OWNER_NAME=Owner Demo
+CRITJECTURE_INTERN_EMAIL=intern@example.com
+CRITJECTURE_INTERN_PASSWORD=change-me-intern
+CRITJECTURE_INTERN_NAME=Intern Demo
 ```
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
+If the seeded user env vars are missing, login will not succeed because no pilot accounts will be available.
 
 ## Demo Data
 
@@ -166,4 +184,4 @@ Sandbox-generated artifacts are served through:
 
 - `GET /api/generated-files/<workspace-id>/<outputs-relative-path>`
 
-Only sandbox output files with approved extensions are served back to the UI.
+Only sandbox output files with approved extensions are served back to the UI, and only to the authenticated user who created the sandbox run.

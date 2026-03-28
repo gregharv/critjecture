@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { WorkspaceShell } from "@/components/workspace-shell";
-import { useRoleQueryState } from "@/lib/role-query";
 import type {
   AuditPromptLog,
   AuditToolCallLog,
@@ -171,6 +169,7 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
   const promptAccessedFiles = getPromptAccessedFiles(prompt);
   const timelineEvents = buildAuditTimelineEvents(prompt);
   const visibleTimelineEvents = filterTimelineEvents(timelineEvents, filter);
+  const userLabel = prompt.userName || prompt.userEmail || "Unknown User";
 
   return (
     <details className="audit-card">
@@ -184,7 +183,8 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
         </div>
 
         <div className="audit-card__summary-side">
-          <div className="audit-card__session">Session {prompt.sessionId}</div>
+          <div className="audit-card__session">{userLabel}</div>
+          <div className="audit-card__session">Chat Session {prompt.chatSessionId}</div>
           <div className="audit-card__files">
             {promptAccessedFiles.length > 0 ? (
               promptAccessedFiles.map((filePath) => (
@@ -341,13 +341,12 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
 }
 
 export function AdminLogsPageClient() {
-  const { role, setRole } = useRoleQueryState("owner");
   const manualRefreshRequestedRef = useRef(false);
   const repollTimeoutRef = useRef<number | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [state, setState] = useState<AuditLogState>({
     error: null,
-    loading: role === "owner",
+    loading: true,
     prompts: [],
     refreshing: false,
   });
@@ -359,17 +358,6 @@ export function AdminLogsPageClient() {
         repollTimeoutRef.current = null;
       }
     };
-
-    if (role !== "owner") {
-      clearRepoll();
-      setState({
-        error: null,
-        loading: false,
-        prompts: [],
-        refreshing: false,
-      });
-      return;
-    }
 
     let active = true;
 
@@ -384,7 +372,7 @@ export function AdminLogsPageClient() {
       }));
 
       try {
-        const response = await fetch("/api/admin/logs?role=owner&limit=50", {
+        const response = await fetch("/api/admin/logs?limit=50", {
           cache: "no-store",
         });
         const data = (await response.json()) as ListAuditLogsResponse | { error: string };
@@ -436,61 +424,52 @@ export function AdminLogsPageClient() {
       active = false;
       clearRepoll();
     };
-  }, [role, reloadToken]);
+  }, [reloadToken]);
 
   return (
-    <WorkspaceShell activePage="logs" onRoleChange={setRole} role={role}>
-      <section className="audit-page">
-        <header className="audit-page__header">
-          <div>
-            <div className="audit-page__eyebrow">Admin</div>
-            <h1 className="audit-page__title">Audit Logs</h1>
-            <p className="audit-page__copy">
-              Review the exact prompts, tool arguments, and execution outcomes from the
-              local Critjecture session.
-            </p>
-          </div>
-          {role === "owner" ? (
-            <button
-              className="audit-refresh-button"
-              disabled={state.loading || state.refreshing}
-              onClick={() => {
-                manualRefreshRequestedRef.current = true;
-                setReloadToken((current) => current + 1);
-              }}
-              type="button"
-            >
-              {state.refreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          ) : null}
-        </header>
+    <section className="audit-page">
+      <header className="audit-page__header">
+        <div>
+          <div className="audit-page__eyebrow">Admin</div>
+          <h1 className="audit-page__title">Audit Logs</h1>
+          <p className="audit-page__copy">
+            Review the exact prompts, tool arguments, execution outcomes, and initiating
+            user for each authenticated Critjecture session.
+          </p>
+        </div>
+        <button
+          className="audit-refresh-button"
+          disabled={state.loading || state.refreshing}
+          onClick={() => {
+            manualRefreshRequestedRef.current = true;
+            setReloadToken((current) => current + 1);
+          }}
+          type="button"
+        >
+          {state.refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      </header>
 
-        {role !== "owner" ? (
-          <div className="audit-empty audit-empty--blocked">
-            <h2>Owner Access Required</h2>
-            <p>Select the Owner role to load the audit dashboard.</p>
-          </div>
-        ) : state.loading ? (
-          <div className="audit-empty">
-            <p>Loading audit logs...</p>
-          </div>
-        ) : state.error ? (
-          <div className="audit-empty audit-empty--error">
-            <h2>Audit Feed Unavailable</h2>
-            <p>{state.error}</p>
-          </div>
-        ) : state.prompts.length === 0 ? (
-          <div className="audit-empty">
-            <p>No audit entries yet. Run a chat prompt to populate the dashboard.</p>
-          </div>
-        ) : (
-          <div className="audit-list">
-            {state.prompts.map((prompt) => (
-              <AuditPromptCard key={prompt.id} prompt={prompt} />
-            ))}
-          </div>
-        )}
-      </section>
-    </WorkspaceShell>
+      {state.loading ? (
+        <div className="audit-empty">
+          <p>Loading audit logs...</p>
+        </div>
+      ) : state.error ? (
+        <div className="audit-empty audit-empty--error">
+          <h2>Audit Feed Unavailable</h2>
+          <p>{state.error}</p>
+        </div>
+      ) : state.prompts.length === 0 ? (
+        <div className="audit-empty">
+          <p>No audit entries yet. Run a chat prompt to populate the dashboard.</p>
+        </div>
+      ) : (
+        <div className="audit-list">
+          {state.prompts.map((prompt) => (
+            <AuditPromptCard key={prompt.id} prompt={prompt} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

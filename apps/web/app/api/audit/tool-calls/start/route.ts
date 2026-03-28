@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { startAuditToolCallLog } from "@/lib/audit-log";
+import { getSessionUser } from "@/lib/auth-state";
+import { auditPromptBelongsToUser, startAuditToolCallLog } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,12 @@ function jsonError(message: string, status: number) {
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: StartAuditToolCallBody;
 
   try {
@@ -38,6 +45,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const promptBelongsToUser = await auditPromptBelongsToUser(promptId, user.id);
+
+    if (!promptBelongsToUser) {
+      return jsonError("Audit prompt not found.", 404);
+    }
+
     await startAuditToolCallLog({
       parametersJson,
       promptId,

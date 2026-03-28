@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { getSessionUser } from "@/lib/auth-state";
 import { listRecentAuditPromptLogs } from "@/lib/audit-log";
-import { isUserRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
@@ -10,17 +10,18 @@ function jsonError(message: string, status: number) {
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const role = searchParams.get("role");
-  const limitParam = searchParams.get("limit");
+  const user = await getSessionUser();
 
-  if (!isUserRole(role)) {
-    return jsonError('role must be either "intern" or "owner".', 400);
+  if (!user) {
+    return jsonError("Authentication required.", 401);
   }
 
-  if (role !== "owner") {
+  if (user.role !== "owner") {
     return jsonError("Only Owner can view audit logs.", 403);
   }
+
+  const { searchParams } = new URL(request.url);
+  const limitParam = searchParams.get("limit");
 
   const limit = limitParam ? Number(limitParam) : 50;
 

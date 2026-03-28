@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { createAuditTraceEventLog } from "@/lib/audit-log";
+import { getSessionUser } from "@/lib/auth-state";
+import { auditPromptBelongsToUser, createAuditTraceEventLog } from "@/lib/audit-log";
 import {
   AUDIT_TRACE_EVENT_KINDS,
   type AuditTraceEventKind,
@@ -27,6 +28,12 @@ function isAuditTraceEventKind(value: unknown): value is AuditTraceEventKind {
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: CreateAuditTraceEventBody;
 
   try {
@@ -48,6 +55,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const promptBelongsToUser = await auditPromptBelongsToUser(promptId, user.id);
+
+    if (!promptBelongsToUser) {
+      return jsonError("Audit prompt not found.", 404);
+    }
+
     await createAuditTraceEventLog({
       content,
       kind: body.kind,

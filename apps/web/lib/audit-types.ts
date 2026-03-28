@@ -36,11 +36,14 @@ export type AuditTraceEventLog = {
 };
 
 export type AuditPromptLog = {
+  chatSessionId: string;
   createdAt: number;
   id: string;
   promptText: string;
   role: "intern" | "owner";
-  sessionId: string;
+  userEmail: string | null;
+  userId: string | null;
+  userName: string | null;
   traceEvents: AuditTraceEventLog[];
   toolCalls: AuditToolCallLog[];
 };

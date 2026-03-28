@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { getSessionUser } from "@/lib/auth-state";
 import { createAuditPromptLog } from "@/lib/audit-log";
-import { isUserRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
 type CreateAuditPromptBody = {
+  chatSessionId?: unknown;
   promptText?: unknown;
-  role?: unknown;
-  sessionId?: unknown;
 };
 
 function jsonError(message: string, status: number) {
@@ -16,6 +15,12 @@ function jsonError(message: string, status: number) {
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: CreateAuditPromptBody;
 
   try {
@@ -25,25 +30,23 @@ export async function POST(request: Request) {
   }
 
   const promptText = typeof body.promptText === "string" ? body.promptText.trim() : "";
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+  const chatSessionId =
+    typeof body.chatSessionId === "string" ? body.chatSessionId.trim() : "";
 
   if (!promptText) {
     return jsonError("promptText must be a non-empty string.", 400);
   }
 
-  if (!sessionId) {
-    return jsonError("sessionId must be a non-empty string.", 400);
-  }
-
-  if (!isUserRole(body.role)) {
-    return jsonError('Role must be either "intern" or "owner".', 400);
+  if (!chatSessionId) {
+    return jsonError("chatSessionId must be a non-empty string.", 400);
   }
 
   try {
     const result = await createAuditPromptLog({
+      chatSessionId,
       promptText,
-      role: body.role,
-      sessionId,
+      role: user.role,
+      userId: user.id,
     });
 
     return NextResponse.json(result);

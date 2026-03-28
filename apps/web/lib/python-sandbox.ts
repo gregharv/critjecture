@@ -44,6 +44,7 @@ export type SandboxedCommandResult = {
   stderr: string;
   stdout: string;
   workspaceDir: string;
+  workspaceId: string;
 };
 
 export class SandboxExecutionError extends Error {
@@ -319,6 +320,7 @@ export async function executeSandboxedCommand(options: {
   await mkdir(SANDBOX_WORKSPACE_DIR, { recursive: true });
 
   const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, randomUUID());
+  const workspaceId = getSandboxWorkspaceId(workspaceDir);
   await mkdir(workspaceDir, { recursive: true });
   await mkdir(path.join(workspaceDir, SANDBOX_OUTPUTS_DIR), { recursive: true });
   await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
@@ -358,6 +360,7 @@ export async function executeSandboxedCommand(options: {
       stderr,
       stdout,
       workspaceDir,
+      workspaceId,
     };
   } catch (caughtError) {
     if (typeof caughtError === "object" && caughtError !== null) {

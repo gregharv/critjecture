@@ -18,6 +18,7 @@ export type SandboxToolResponse = {
   stdout: string;
   summary: string;
   workspaceDir: string;
+  workspaceId: string;
 };
 
 export type GeneratedAssetToolResponse = SandboxToolResponse & {

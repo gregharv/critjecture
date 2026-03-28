@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { isUserRole, type UserRole } from "@/lib/roles";
-
 export type SandboxRequestBody = {
   code?: unknown;
   inputFiles?: unknown;
-  role?: unknown;
 };
 
 export function jsonError(
@@ -60,16 +57,12 @@ export function parseInputFiles(value: unknown):
 }
 
 export function parseSandboxRequest(body: SandboxRequestBody):
-  | { code: string; inputFiles: string[]; role: UserRole }
+  | { code: string; inputFiles: string[] }
   | { error: string } {
   const code = typeof body.code === "string" ? body.code.trim() : "";
 
   if (!code) {
     return { error: "Sandbox code must be a non-empty string." };
-  }
-
-  if (!isUserRole(body.role)) {
-    return { error: 'Role must be either "intern" or "owner".' };
   }
 
   const inputFilesResult = parseInputFiles(body.inputFiles);
@@ -81,6 +74,5 @@ export function parseSandboxRequest(body: SandboxRequestBody):
   return {
     code,
     inputFiles: inputFilesResult.inputFiles,
-    role: body.role,
   };
 }

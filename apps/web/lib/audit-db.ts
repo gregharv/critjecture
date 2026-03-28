@@ -9,9 +9,9 @@ import * as schema from "@/lib/audit-schema";
 
 const MIGRATIONS_TABLE = "__critjecture_migrations";
 
-type AuditDatabase = ReturnType<typeof drizzle<typeof schema>>;
+type AppDatabase = ReturnType<typeof drizzle<typeof schema>>;
 
-let databaseInstance: AuditDatabase | null = null;
+let databaseInstance: AppDatabase | null = null;
 let migrationPromise: Promise<void> | null = null;
 
 async function pathExists(targetPath: string) {
@@ -124,7 +124,7 @@ async function createDatabase() {
   return databaseInstance;
 }
 
-export async function getAuditDatabase() {
+export async function getAppDatabase() {
   if (databaseInstance) {
     if (migrationPromise) {
       await migrationPromise;
@@ -135,3 +135,5 @@ export async function getAuditDatabase() {
 
   return createDatabase();
 }
+
+export const getAuditDatabase = getAppDatabase;

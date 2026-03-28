@@ -2,28 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 9: Real Authentication and Server-Enforced RBAC
-
-### Goal
-
-Replace the client-side role toggle as the security boundary with real authentication and backend-enforced authorization.
-
-### What Should Be Implemented
-
-- add real login and authenticated sessions
-- define actual user identities
-- derive permissions from the authenticated user on the server
-- protect `/chat`, `/admin/logs`, and all tool routes using real auth
-- stop trusting request-supplied `role` values as the source of truth
-- keep the existing `Intern` / `Owner` concept only as a real permission model, not a UI toggle
-
-### Acceptance Criteria
-
-- unauthenticated users cannot access protected application routes
-- backend routes resolve permissions from server-side auth state
-- an `Intern` cannot escalate by modifying client requests
-- audit log access requires real owner/admin permission
-
 ## Step 10: Tenant and Data Persistence Foundations
 
 ### Goal

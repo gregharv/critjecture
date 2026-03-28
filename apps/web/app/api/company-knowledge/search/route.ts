@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 
 import { searchCompanyKnowledge } from "@/lib/company-knowledge";
 import type { CompanyKnowledgeSearchResult } from "@/lib/company-knowledge-types";
-import { getRoleLabel, isUserRole } from "@/lib/roles";
+import { getSessionUser } from "@/lib/auth-state";
+import { getRoleLabel } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
 type SearchRequestBody = {
   query?: unknown;
-  role?: unknown;
 };
 
 function jsonError(message: string, status: number) {
@@ -71,6 +71,12 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: SearchRequestBody;
 
   try {
@@ -85,17 +91,13 @@ export async function POST(request: Request) {
     return jsonError("Search query must be a non-empty string.", 400);
   }
 
-  if (!isUserRole(body.role)) {
-    return jsonError('Role must be either "intern" or "owner".', 400);
-  }
-
   try {
-    const result = await searchCompanyKnowledge(query, body.role);
-    const roleLabel = getRoleLabel(body.role);
+    const result = await searchCompanyKnowledge(query, user.role);
+    const roleLabel = getRoleLabel(user.role);
 
     return NextResponse.json({
       ...result,
-      role: body.role,
+      role: user.role,
       summary: buildSummary(query, roleLabel, result),
     });
   } catch (caughtError) {

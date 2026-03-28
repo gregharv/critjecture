@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { getSessionUser } from "@/lib/auth-state";
 import {
   executeSandboxedCommand,
   SandboxExecutionError,
   SandboxValidationError,
 } from "@/lib/python-sandbox";
+import { recordSandboxRun } from "@/lib/sandbox-runs";
 import {
   buildSandboxSummary,
   jsonError,
@@ -15,6 +17,12 @@ import {
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: SandboxRequestBody;
 
   try {
@@ -33,7 +41,13 @@ export async function POST(request: Request) {
     const result = await executeSandboxedCommand({
       code: parsedRequest.code,
       inputFiles: parsedRequest.inputFiles,
-      role: parsedRequest.role,
+      role: user.role,
+    });
+    await recordSandboxRun({
+      generatedAssets: result.generatedAssets,
+      toolName: "run_data_analysis",
+      userId: user.id,
+      workspaceId: result.workspaceId,
     });
 
     return NextResponse.json({

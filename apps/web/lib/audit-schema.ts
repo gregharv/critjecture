@@ -1,9 +1,24 @@
 import { sql } from "drizzle-orm";
 import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const users = sqliteTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(),
+    name: text("name"),
+    role: text("role", { enum: ["intern", "owner"] }).notNull(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [check("users_role_check", sql`${table.role} in ('intern', 'owner')`)],
+);
+
 export const auditPrompts = sqliteTable("audit_prompts", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
   role: text("role", { enum: ["intern", "owner"] }).notNull(),
   promptText: text("prompt_text").notNull(),
   createdAt: integer("created_at").notNull(),
@@ -50,5 +65,15 @@ export const auditTraceEvents = sqliteTable("audit_trace_events", {
   }).notNull(),
   title: text("title").notNull(),
   content: text("content").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const sandboxRuns = sqliteTable("sandbox_runs", {
+  workspaceId: text("workspace_id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  toolName: text("tool_name").notNull(),
+  generatedAssetsJson: text("generated_assets_json").notNull().default("[]"),
   createdAt: integer("created_at").notNull(),
 });

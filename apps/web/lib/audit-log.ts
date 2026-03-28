@@ -3,8 +3,8 @@ import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAuditDatabase } from "@/lib/audit-db";
-import { auditPrompts, auditToolCalls, auditTraceEvents } from "@/lib/audit-schema";
+import { getAppDatabase } from "@/lib/audit-db";
+import { auditPrompts, auditToolCalls, auditTraceEvents, users } from "@/lib/audit-schema";
 import type {
   AuditPromptLog,
   AuditToolCallStatus,
@@ -21,16 +21,18 @@ function normalizeLimit(limit: number) {
 }
 
 export async function createAuditPromptLog(input: {
+  chatSessionId: string;
   promptText: string;
   role: UserRole;
-  sessionId: string;
+  userId: string;
 }) {
-  const db = await getAuditDatabase();
+  const db = await getAppDatabase();
   const promptId = randomUUID();
 
   await db.insert(auditPrompts).values({
     id: promptId,
-    sessionId: input.sessionId,
+    sessionId: input.chatSessionId,
+    userId: input.userId,
     role: input.role,
     promptText: input.promptText,
     createdAt: Date.now(),
@@ -45,7 +47,7 @@ export async function startAuditToolCallLog(input: {
   toolCallId: string;
   toolName: string;
 }) {
-  const db = await getAuditDatabase();
+  const db = await getAppDatabase();
 
   await db.insert(auditToolCalls).values({
     id: randomUUID(),
@@ -74,7 +76,7 @@ export async function finishAuditToolCallLog(input: {
   status: AuditToolCallStatus;
   toolCallId: string;
 }) {
-  const db = await getAuditDatabase();
+  const db = await getAppDatabase();
 
   await db
     .update(auditToolCalls)
@@ -99,7 +101,7 @@ export async function createAuditTraceEventLog(input: {
   promptId: string;
   title: string;
 }) {
-  const db = await getAuditDatabase();
+  const db = await getAppDatabase();
   const content = input.content.trim();
   const title = input.title.trim();
 
@@ -117,8 +119,20 @@ export async function createAuditTraceEventLog(input: {
   });
 }
 
+export async function auditPromptBelongsToUser(promptId: string, userId: string) {
+  const db = await getAppDatabase();
+  const prompt = await db.query.auditPrompts.findFirst({
+    columns: {
+      userId: true,
+    },
+    where: eq(auditPrompts.id, promptId),
+  });
+
+  return prompt?.userId === userId;
+}
+
 export async function listRecentAuditPromptLogs(limit = 50): Promise<AuditPromptLog[]> {
-  const db = await getAuditDatabase();
+  const db = await getAppDatabase();
   const normalizedLimit = normalizeLimit(limit);
   const promptRows = await db
     .select()
@@ -141,13 +155,35 @@ export async function listRecentAuditPromptLogs(limit = 50): Promise<AuditPrompt
     .from(auditTraceEvents)
     .where(inArray(auditTraceEvents.promptId, promptIds))
     .orderBy(desc(auditTraceEvents.createdAt));
+  const userIds = [
+    ...new Set(
+      promptRows
+        .map((row) => row.userId)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
+  ];
+  const userRows =
+    userIds.length > 0
+      ? await db
+          .select({
+            email: users.email,
+            id: users.id,
+            name: users.name,
+          })
+          .from(users)
+          .where(inArray(users.id, userIds))
+      : [];
+  const usersById = new Map(userRows.map((row) => [row.id, row]));
 
   return promptRows.map((promptRow) => ({
+    chatSessionId: promptRow.sessionId,
     createdAt: promptRow.createdAt,
     id: promptRow.id,
     promptText: promptRow.promptText,
     role: promptRow.role,
-    sessionId: promptRow.sessionId,
+    userEmail: promptRow.userId ? (usersById.get(promptRow.userId)?.email ?? null) : null,
+    userId: promptRow.userId,
+    userName: promptRow.userId ? (usersById.get(promptRow.userId)?.name ?? null) : null,
     traceEvents: traceEventRows
       .filter((traceEventRow) => traceEventRow.promptId === promptRow.id)
       .map((traceEventRow) => ({

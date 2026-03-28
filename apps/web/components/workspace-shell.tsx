@@ -1,26 +1,25 @@
-"use client";
-
 import type { ReactNode } from "react";
 
 import Image from "next/image";
 import Link from "next/link";
 
-import { buildRoleHref } from "@/lib/role-query";
-import { getRoleLabel, USER_ROLES, type UserRole } from "@/lib/roles";
+import { logoutAction } from "@/app/auth-actions";
+import type { SessionUser } from "@/lib/auth-state";
+import { getRoleLabel } from "@/lib/roles";
 
 type WorkspaceShellProps = {
   activePage: "chat" | "logs";
   children: ReactNode;
-  role: UserRole;
-  onRoleChange: (role: UserRole) => void;
+  user: SessionUser;
 };
 
 export function WorkspaceShell({
   activePage,
   children,
-  role,
-  onRoleChange,
+  user,
 }: WorkspaceShellProps) {
+  const displayName = user.name || user.email;
+
   return (
     <main className="shell-page">
       <section className="shell-frame">
@@ -43,28 +42,33 @@ export function WorkspaceShell({
             <nav className="shell-nav" aria-label="Workspace navigation">
               <Link
                 className={`shell-nav__link ${activePage === "chat" ? "is-active" : ""}`}
-                href={buildRoleHref("/chat", role)}
+                href="/chat"
               >
                 Chat
               </Link>
-              <Link
-                className={`shell-nav__link ${activePage === "logs" ? "is-active" : ""}`}
-                href={buildRoleHref("/admin/logs", role)}
-              >
-                Audit Logs
-              </Link>
-            </nav>
-            <div className="role-toggle" aria-label="Role selector">
-              {USER_ROLES.map((candidate) => (
-                <button
-                  key={candidate}
-                  className={`role-button ${candidate === role ? "is-active" : ""}`}
-                  onClick={() => onRoleChange(candidate)}
-                  type="button"
+              {user.role === "owner" ? (
+                <Link
+                  className={`shell-nav__link ${activePage === "logs" ? "is-active" : ""}`}
+                  href="/admin/logs"
                 >
-                  {getRoleLabel(candidate)}
+                  Audit Logs
+                </Link>
+              ) : null}
+            </nav>
+            <div className="shell-user">
+              <div className="shell-user__identity">
+                <span className="shell-user__name">{displayName}</span>
+                <span className="shell-user__meta">
+                  {getRoleLabel(user.role)}
+                  {" · "}
+                  {user.email}
+                </span>
+              </div>
+              <form action={logoutAction}>
+                <button className="shell-signout" type="submit">
+                  Sign Out
                 </button>
-              ))}
+              </form>
             </div>
           </div>
         </header>

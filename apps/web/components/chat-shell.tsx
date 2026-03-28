@@ -386,15 +386,12 @@ function getSystemPrompt(role: UserRole) {
   ].join(" ");
 }
 
-export function ChatShell() {
-  return <ChatShellWithRole role="intern" />;
-}
-
 type ChatShellProps = {
   role: UserRole;
+  userId: string;
 };
 
-export function ChatShellWithRole({ role }: ChatShellProps) {
+export function ChatShellWithRole({ role, userId }: ChatShellProps) {
   const activePromptIdRef = useRef<string | null>(null);
   const awaitingFileSelectionRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -433,7 +430,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: "critjecture-step-6",
+          dbName: `critjecture-user-${userId}`,
           version: 6,
           stores: [
             settings.getConfig(),
@@ -629,7 +626,6 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
               body: JSON.stringify({
                 code: params.code,
                 inputFiles: params.inputFiles ?? [],
-                role,
               }),
               signal,
             });
@@ -676,7 +672,6 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
               },
               body: JSON.stringify({
                 query: params.query,
-                role,
               }),
               signal,
             });
@@ -766,9 +761,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
                   const auditResponse = await postAuditJson<CreateAuditPromptResponse>(
                     "/api/audit/prompts",
                     {
+                      chatSessionId: sessionId,
                       promptText: pendingAuditPrompt.promptText,
-                      role,
-                      sessionId,
                     },
                     options?.signal,
                   );
@@ -983,7 +977,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
       syntheticContinuationRef.current = false;
       cleanup?.();
     };
-  }, [role]);
+  }, [role, userId]);
 
   if (error) {
     return (

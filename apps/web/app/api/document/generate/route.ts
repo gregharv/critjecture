@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { getSessionUser } from "@/lib/auth-state";
 import {
   executeSandboxedCommand,
   SandboxExecutionError,
   SandboxValidationError,
   type GeneratedSandboxAsset,
 } from "@/lib/python-sandbox";
+import { recordSandboxRun } from "@/lib/sandbox-runs";
 import {
   buildSandboxSummary,
   jsonError,
@@ -29,6 +31,12 @@ function expectSinglePdfAsset(generatedAssets: GeneratedSandboxAsset[]) {
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   let body: SandboxRequestBody;
 
   try {
@@ -47,7 +55,13 @@ export async function POST(request: Request) {
     const result = await executeSandboxedCommand({
       code: parsedRequest.code,
       inputFiles: parsedRequest.inputFiles,
-      role: parsedRequest.role,
+      role: user.role,
+    });
+    await recordSandboxRun({
+      generatedAssets: result.generatedAssets,
+      toolName: "generate_document",
+      userId: user.id,
+      workspaceId: result.workspaceId,
     });
     const generatedAsset = expectSinglePdfAsset(result.generatedAssets);
 

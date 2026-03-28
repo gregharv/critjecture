@@ -480,3 +480,94 @@ Step 8 was implemented as an audit-log chronology update for the owner dashboard
 - The merged timeline currently includes only `assistant-text` trace events from the trace table. Other trace kinds remain excluded from the owner-facing chronology view.
 - Tool timeline placement is based on tool start time (`createdAt`), while tool cards still show completion status and end time when available.
 - Per-card filter state is local UI state only and resets on reload.
+
+## Step 9: Real Authentication and Server-Enforced RBAC
+
+### What Was Implemented
+
+Step 9 was implemented as a real credentials-based authentication layer with server-derived authorization, replacing the older client-side role toggle as the security boundary.
+
+- Added Auth.js-based login and session handling:
+  - `apps/web/auth.ts`
+  - `apps/web/app/api/auth/[...nextauth]/route.ts`
+  - `apps/web/app/auth-actions.ts`
+  - `apps/web/app/login/page.tsx`
+  - `apps/web/components/login-form.tsx`
+- Added authenticated user persistence on top of the existing SQLite/Drizzle setup:
+  - `apps/web/lib/users.ts`
+  - `apps/web/lib/passwords.ts`
+  - `apps/web/drizzle/0002_step9_auth_and_ownership.sql`
+  - `apps/web/lib/audit-schema.ts`
+- Added pilot user seeding from env:
+  - `CRITJECTURE_OWNER_*`
+  - `CRITJECTURE_INTERN_*`
+  - `AUTH_SECRET`
+- Added shared server auth helpers in `apps/web/lib/auth-state.ts`.
+- Reworked the top-level app routing and shell:
+  - `/` now redirects to `/login` when signed out and `/chat` when signed in
+  - `/chat` now requires an authenticated user
+  - `/admin/logs` now requires an authenticated owner
+  - `apps/web/components/workspace-shell.tsx` now shows the authenticated user identity, role, and a sign-out button instead of the old role toggle
+- Removed the old client-side role query plumbing:
+  - deleted `apps/web/lib/role-query.ts`
+  - deleted `apps/web/components/chat-page-client.tsx`
+- Updated `apps/web/components/chat-shell.tsx`.
+  - Keeps the current client-side `pi-ai` orchestration model
+  - Still receives the authenticated role for the system prompt
+  - Scopes local `pi-web-ui` IndexedDB session storage by authenticated `userId`
+  - Stops sending `role` in tool and audit requests
+  - Sends `chatSessionId` when creating prompt audit records
+- Reworked protected backend routes so they derive permissions from the authenticated session instead of trusting request input:
+  - `apps/web/app/api/stream/route.ts`
+  - `apps/web/app/api/company-knowledge/search/route.ts`
+  - `apps/web/app/api/data-analysis/run/route.ts`
+  - `apps/web/app/api/visual-graph/run/route.ts`
+  - `apps/web/app/api/document/generate/route.ts`
+  - `apps/web/app/api/admin/logs/route.ts`
+  - all audit write routes under `apps/web/app/api/audit/*`
+- Added authenticated ownership tracking for sandbox output files:
+  - `apps/web/lib/sandbox-runs.ts`
+  - `apps/web/app/api/generated-files/[workspaceId]/[...assetPath]/route.ts`
+  - sandbox runs now record the authenticated `userId`, `workspaceId`, tool name, and generated assets
+- Expanded audit data so the dashboard can show who initiated each interaction:
+  - prompt rows now store `userId`
+  - the dashboard shows user identity plus chat session id
+  - audit follow-up writes verify that the referenced prompt belongs to the authenticated user
+- Updated docs and env examples:
+  - `README.md`
+  - `apps/web/.env.local.example`
+
+### Current Step 9 Behavior
+
+- Unauthenticated visitors
+  - Are redirected to `/login` for protected app pages
+  - Receive `401` responses from protected API routes
+- `Intern`
+  - Can sign in and use `/chat`
+  - Still searches only `company_data/public`
+  - Still cannot access admin-only company files, sandbox inputs, or the owner audit dashboard
+- `Owner`
+  - Can sign in and use `/chat`
+  - Can access `/admin/logs`
+  - Sees audit entries with the initiating authenticated user and the chat session id
+- Generated assets
+  - Are still served from sandbox workspaces under `/tmp/workspace/<run-id>/outputs/`
+  - Can only be downloaded by the authenticated user who created that sandbox run
+- Local browser chat state
+  - Is now partitioned by authenticated user instead of being shared across role-toggle state
+
+### Important Implementation Details
+
+- Step 9 keeps the current client-side `pi-ai` tool orchestration model. It does not move the ReAct loop or tool execution orchestration fully to the server.
+- Auth uses Auth.js credentials sessions with signed cookies and JWT-backed session state.
+- Passwords are stored as salted `scrypt` hashes, not plaintext.
+- The current implementation is intentionally pilot-first:
+  - no signup flow
+  - no password reset flow
+  - no external identity provider
+  - no user-management UI
+  - no tenant model yet
+- User persistence currently lives in the same SQLite/Drizzle application database area already used by the audit system.
+- Backend routes no longer accept request-supplied `role` as an authorization source of truth.
+- The owner audit dashboard is now protected both at the page level and at the API level.
+- Step 10 still remains the place to formalize broader tenant, organization, and durable multi-user persistence foundations beyond this pilot auth layer.

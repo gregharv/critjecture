@@ -1,6 +1,8 @@
 import { getModel, stream } from "@mariozechner/pi-ai";
 import { NextResponse } from "next/server";
 
+import { getSessionUser } from "@/lib/auth-state";
+
 export const runtime = "nodejs";
 
 const OPENAI_MODEL_IDS = [
@@ -57,6 +59,12 @@ function isOpenAiModelId(value: string): value is OpenAiModelId {
 }
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return jsonError("Authentication required.", 401);
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {

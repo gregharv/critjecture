@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 
-export default function HomePage() {
-  redirect("/chat");
-}
+import { getSessionUser } from "@/lib/auth-state";
 
+export default async function HomePage() {
+  const user = await getSessionUser();
+
+  redirect(user ? "/chat" : "/login");
+}
