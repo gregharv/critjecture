@@ -2,6 +2,8 @@
 
 Step 5 extends the `pnpm` monorepo with RBAC-aware local search, an isolated `uv` Python sandbox, generated PNG/PDF outputs, and secure file serving for in-chat charts and downloadable documents.
 
+Step 6 adds a local SQLite audit log, client-side tool execution auditing, and an owner-gated `/admin/logs` dashboard.
+
 The `/chat` UI uses a Critjecture grey/blue wrapper theme around `@mariozechner/pi-web-ui`.
 
 ## Requirements
@@ -202,3 +204,35 @@ OPENAI_MODEL=gpt-4o-mini
 ```
 
 If `OPENAI_API_KEY` is missing, the API route returns a clear configuration error.
+
+## Step 6 Audit Logging
+
+Step 6 adds:
+
+- a local SQLite database at `apps/web/data/audit.sqlite`
+- audit write routes under `apps/web/app/api/audit`
+- an owner-only audit dashboard at `http://localhost:3000/admin/logs`
+
+The Step 6 audit flow logs:
+
+- each real user prompt
+- the active role
+- the exact tool arguments for every executed tool call
+- tool completion or error summaries
+
+Notes:
+
+- file-picker continuation prompts are treated as synthetic follow-ups and stay attached to the original human prompt
+- `/admin/logs` is gated by the current MVP role selector, not real auth
+- `better-sqlite3` is a native dependency; if install scripts are skipped, run:
+
+```bash
+pnpm approve-builds --all
+```
+
+### Suggested Step 6 Checks
+
+- As `Intern`, ask `What is our profit?` and confirm `/admin/logs?role=owner` shows the prompt plus a `search_company_knowledge` entry.
+- As `Owner`, ask `Create a bar chart of the top 3 contractor payouts.` and confirm the dashboard shows both the search and graph tool calls with raw parameters.
+- Ask `contractor payouts`, choose one of the two files, and confirm the later analysis/graph tool call stays attached to the original prompt row instead of creating a second prompt entry.
+- Open `/admin/logs?role=intern` and confirm the page shows the owner-only access state without fetching the logs.

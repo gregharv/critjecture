@@ -18,6 +18,10 @@ import {
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
 import type {
+  AuditToolCallStatus,
+  CreateAuditPromptResponse,
+} from "@/lib/audit-types";
+import type {
   GeneratedAssetToolResponse,
   SandboxToolResponse,
 } from "@/lib/sandbox-tool-types";
@@ -43,6 +47,111 @@ type SearchToolResponse = {
   scopeDescription: string;
   summary: string;
 };
+
+type PendingAuditPrompt = {
+  promptText: string;
+  synthetic: boolean;
+};
+
+function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
+  return typeof value === "object" && value !== null && "role" in value && value.role === "user";
+}
+
+function extractUserTextContent(value: unknown) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .map((entry) => {
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        "type" in entry &&
+        entry.type === "text" &&
+        "text" in entry &&
+        typeof entry.text === "string"
+      ) {
+        return entry.text;
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function extractPromptText(input: string | AgentMessage | AgentMessage[]) {
+  if (typeof input === "string") {
+    return input.trim();
+  }
+
+  const messages = Array.isArray(input) ? input : [input];
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (isUserAgentMessage(message)) {
+      return extractUserTextContent(message.content);
+    }
+  }
+
+  return "";
+}
+
+function stringifyToolArgs(args: unknown) {
+  try {
+    return JSON.stringify(args, null, 2) ?? "null";
+  } catch {
+    return String(args);
+  }
+}
+
+function getToolResultSummary(result: {
+  content?: Array<{ type: string; text?: string }>;
+  details?: unknown;
+}) {
+  const textSummary =
+    result.content
+      ?.filter((content) => content.type === "text" && typeof content.text === "string")
+      .map((content) => content.text?.trim() ?? "")
+      .filter(Boolean)
+      .join("\n")
+      .trim() ?? "";
+
+  if (textSummary) {
+    return textSummary;
+  }
+
+  if (
+    typeof result.details === "object" &&
+    result.details !== null &&
+    "summary" in result.details &&
+    typeof result.details.summary === "string"
+  ) {
+    return result.details.summary.trim();
+  }
+
+  return "";
+}
+
+function getErrorMessage(value: unknown, fallbackMessage: string) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string"
+  ) {
+    return value.error;
+  }
+
+  return fallbackMessage;
+}
 
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
@@ -83,8 +192,12 @@ type ChatShellProps = {
 };
 
 export function ChatShellWithRole({ role }: ChatShellProps) {
+  const activePromptIdRef = useRef<string | null>(null);
+  const awaitingFileSelectionRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const pendingAuditPromptRef = useRef<PendingAuditPrompt | null>(null);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
+  const syntheticContinuationRef = useRef(false);
   const [{ error, ready }, setState] = useState<ChatShellState>({
     error: null,
     ready: false,
@@ -99,6 +212,11 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
     async function bootstrap() {
       try {
+        const sessionId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `critjecture-${Date.now()}`;
+
         const [{ Agent, streamProxy }, { Type, getModel }, webUi] = await Promise.all([
           import("@mariozechner/pi-agent-core"),
           import("@mariozechner/pi-ai"),
@@ -111,8 +229,8 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: "critjecture-step-5",
-          version: 5,
+          dbName: "critjecture-step-6",
+          version: 6,
           stores: [
             settings.getConfig(),
             providerKeys.getConfig(),
@@ -140,6 +258,64 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
         registerCritjectureToolRenderers(webUi);
         registerCritjectureMessageRenderers(webUi);
 
+        const postAuditJson = async <TResponse,>(
+          url: string,
+          body: Record<string, unknown>,
+          signal?: AbortSignal,
+        ) => {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as TResponse | { error: string };
+
+          if (!response.ok) {
+            throw new Error(getErrorMessage(data, "Audit request failed."));
+          }
+
+          return data as TResponse;
+        };
+
+        const queueAuditPrompt = (
+          input: string | AgentMessage | AgentMessage[],
+          synthetic: boolean,
+        ) => {
+          const promptText = extractPromptText(input);
+
+          if (!promptText) {
+            return;
+          }
+
+          pendingAuditPromptRef.current = {
+            promptText,
+            synthetic,
+          };
+        };
+
+        const runPromptWithAudit = async (
+          originalPrompt: Agent["prompt"],
+          input: string | AgentMessage | AgentMessage[],
+          synthetic: boolean,
+          images?: unknown[],
+        ) => {
+          queueAuditPrompt(input, synthetic);
+
+          if (synthetic) {
+            syntheticContinuationRef.current = true;
+          }
+
+          if (typeof input === "string") {
+            await originalPrompt(input, images as never);
+            return;
+          }
+
+          await originalPrompt(input as never);
+        };
+
         const flushPendingSelection = async () => {
           if (!agent || !pendingSelectionRef.current || agent.state.isStreaming) {
             return;
@@ -147,7 +323,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
           const selection = pendingSelectionRef.current;
           pendingSelectionRef.current = null;
-          await agent.prompt(buildFileSelectionPrompt(selection.file));
+          awaitingFileSelectionRef.current = false;
+          await runPromptWithAudit(
+            agent.prompt.bind(agent),
+            buildFileSelectionPrompt(selection.file),
+            true,
+          );
         };
 
         const sandboxToolParameters = Type.Object({
@@ -253,6 +434,7 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             const result = data as SearchToolResponse;
 
             if (result.selectionRequired && result.candidateFiles.length > 0 && agent) {
+              awaitingFileSelectionRef.current = true;
               agent.appendMessage(
                 createFileSelectionMessage(params.query, result.candidateFiles),
               );
@@ -309,12 +491,94 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
           },
           convertToLlm: (messages) =>
             critjectureConvertToLlm(messages, webUi.defaultConvertToLlm),
-          streamFn: (model, context, options) =>
-            streamProxy(model, context, {
+          streamFn: async (model, context, options) => {
+            const pendingAuditPrompt = pendingAuditPromptRef.current;
+
+            if (pendingAuditPrompt) {
+              pendingAuditPromptRef.current = null;
+
+              if (!pendingAuditPrompt.synthetic) {
+                try {
+                  const auditResponse = await postAuditJson<CreateAuditPromptResponse>(
+                    "/api/audit/prompts",
+                    {
+                      promptText: pendingAuditPrompt.promptText,
+                      role,
+                      sessionId,
+                    },
+                    options?.signal,
+                  );
+
+                  activePromptIdRef.current = auditResponse.promptId;
+                } catch (caughtError) {
+                  console.error("Failed to audit prompt before streaming.", caughtError);
+                  activePromptIdRef.current = null;
+                }
+              }
+            }
+
+            return streamProxy(model, context, {
               ...options,
               authToken: "local-dev",
               proxyUrl: "",
-            }),
+            });
+          },
+        });
+        agent.sessionId = sessionId;
+
+        const originalPrompt = agent.prompt.bind(agent);
+        const auditedPrompt = (async (
+          input: string | AgentMessage | AgentMessage[],
+          images?: unknown[],
+        ) => {
+          await runPromptWithAudit(originalPrompt, input, false, images);
+        }) as typeof agent.prompt;
+
+        agent.prompt = auditedPrompt;
+        agent.setBeforeToolCall(async ({ args, toolCall }) => {
+          const promptId = activePromptIdRef.current;
+
+          if (!promptId) {
+            return undefined;
+          }
+
+          try {
+            await postAuditJson<{ ok: true }>("/api/audit/tool-calls/start", {
+              parametersJson: stringifyToolArgs(args),
+              promptId,
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+            });
+          } catch (caughtError) {
+            console.error("Failed to audit tool call start.", caughtError);
+          }
+
+          return undefined;
+        });
+        agent.setAfterToolCall(async ({ isError, result, toolCall }) => {
+          const promptId = activePromptIdRef.current;
+
+          if (!promptId) {
+            return undefined;
+          }
+
+          const resultSummary = getToolResultSummary(result);
+          const status: AuditToolCallStatus = isError ? "error" : "completed";
+          const errorMessage = isError ? resultSummary || "Tool execution failed." : null;
+
+          try {
+            await postAuditJson<{ ok: true }>("/api/audit/tool-calls/finish", {
+              errorMessage,
+              promptId,
+              resultSummary: resultSummary || null,
+              status,
+              toolCallId: toolCall.id,
+            });
+          } catch (caughtError) {
+            console.error("Failed to audit tool call completion.", caughtError);
+          }
+
+          return undefined;
         });
 
         const element = document.createElement("agent-interface") as HTMLElement & {
@@ -341,6 +605,15 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
         const unsubscribe = agent.subscribe((event) => {
           if (event.type === "agent_end") {
+            if (awaitingFileSelectionRef.current || pendingSelectionRef.current) {
+              return;
+            }
+
+            if (syntheticContinuationRef.current) {
+              syntheticContinuationRef.current = false;
+            }
+
+            activePromptIdRef.current = null;
             void flushPendingSelection();
           }
         });
@@ -360,7 +633,12 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
             return;
           }
 
-          void agent.prompt(buildFileSelectionPrompt(selection.file));
+          awaitingFileSelectionRef.current = false;
+          void runPromptWithAudit(
+            agent.prompt.bind(agent),
+            buildFileSelectionPrompt(selection.file),
+            true,
+          );
         };
 
         window.addEventListener(FILE_SELECTION_EVENT, handleFileSelection as EventListener);
@@ -398,7 +676,11 @@ export function ChatShellWithRole({ role }: ChatShellProps) {
 
     return () => {
       mounted = false;
+      activePromptIdRef.current = null;
+      awaitingFileSelectionRef.current = false;
+      pendingAuditPromptRef.current = null;
       pendingSelectionRef.current = null;
+      syntheticContinuationRef.current = false;
       cleanup?.();
     };
   }, [role]);

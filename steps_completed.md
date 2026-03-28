@@ -319,3 +319,53 @@ Step 5 was implemented as two new sandbox-backed file-generation tools plus a se
 - The chart and document routes require exactly one primary output file of the expected type so the tool contract stays predictable for the UI.
 - The visual-graph route forces the non-interactive Matplotlib `Agg` backend before executing model-generated code so PNG generation works reliably in the sandbox.
 - Current graph generation reads directly from staged company data. A reasonable future improvement is to let `run_data_analysis` persist a structured output file that later graph/document tools can consume instead of recomputing from source inputs.
+
+## Step 6: The Boss's Dashboard (Audit Logging)
+
+### What Was Implemented
+
+Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated admin dashboard, while preserving the existing client-side `pi-ai` tool orchestration from Steps 4 and 5.
+
+- Added a SQLite audit database in `apps/web/data/audit.sqlite`.
+- Added a Drizzle-backed audit schema and server helpers:
+  - `apps/web/lib/audit-schema.ts`
+  - `apps/web/lib/audit-db.ts`
+  - `apps/web/lib/audit-log.ts`
+  - `apps/web/drizzle/0000_step6_audit_logging.sql`
+- Added audit API routes:
+  - `apps/web/app/api/audit/prompts/route.ts`
+  - `apps/web/app/api/audit/tool-calls/start/route.ts`
+  - `apps/web/app/api/audit/tool-calls/finish/route.ts`
+  - `apps/web/app/api/admin/logs/route.ts`
+- Updated `apps/web/components/chat-shell.tsx`.
+  - Generates a stable client session id for each mounted chat session
+  - Logs each real user prompt before the first proxied OpenAI stream for that request
+  - Uses `beforeToolCall` and `afterToolCall` to persist exact tool args plus completion/error summaries
+  - Keeps ambiguous file-picker continuation prompts attached to the original human prompt instead of creating a second prompt log row
+- Added shared app chrome for `/chat` and `/admin/logs`:
+  - `apps/web/components/workspace-shell.tsx`
+  - `apps/web/components/chat-page-client.tsx`
+  - `apps/web/components/admin-logs-page-client.tsx`
+- Added the owner-gated audit dashboard route at `apps/web/app/admin/logs/page.tsx`.
+- Updated app-owned global styling and README guidance for Step 6.
+
+### Current Step 6 Behavior
+
+- `Owner`
+  - Can open `/admin/logs?role=owner`
+  - Sees a newest-first feed of prompts, roles, tool statuses, exact parameters, and summaries
+  - Gets auto-refresh polling every 5 seconds while the dashboard is open
+- `Intern`
+  - Can still use `/chat`
+  - Cannot view the audit feed on `/admin/logs`; the page shows an owner-only state and skips the fetch
+- Ambiguous file selection
+  - The original prompt is logged once
+  - The later selected-file continuation remains correlated to that same prompt row
+
+### Important Implementation Details
+
+- Step 6 does not move tool execution to the server. Prompt and tool-call auditing is initiated from the client agent lifecycle because that is where tool execution actually occurs.
+- The audit database is initialized lazily and applies committed SQL migrations on first use.
+- Tool-call rows store the validated tool arguments as JSON text so raw search queries, Python code, and `inputFiles` are fully inspectable in the dashboard.
+- The dashboard is an MVP UI gate based on the existing role selector, not a real authentication system.
+- `better-sqlite3` is a native dependency; when `pnpm` blocks native install scripts, `pnpm approve-builds --all` is required before the audit database can load at runtime.
