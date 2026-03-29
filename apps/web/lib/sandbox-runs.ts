@@ -2,8 +2,8 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/audit-db";
-import { sandboxRuns } from "@/lib/audit-schema";
+import { getAppDatabase } from "@/lib/app-db";
+import { sandboxRuns } from "@/lib/app-schema";
 import type { GeneratedSandboxAsset } from "@/lib/python-sandbox";
 
 function parseGeneratedAssetsJson(value: string) {
@@ -18,9 +18,10 @@ function parseGeneratedAssetsJson(value: string) {
 
 export async function recordSandboxRun(input: {
   generatedAssets: GeneratedSandboxAsset[];
+  organizationId: string;
+  runId: string;
   toolName: string;
   userId: string;
-  workspaceId: string;
 }) {
   const db = await getAppDatabase();
 
@@ -29,25 +30,27 @@ export async function recordSandboxRun(input: {
     .values({
       createdAt: Date.now(),
       generatedAssetsJson: JSON.stringify(input.generatedAssets),
+      organizationId: input.organizationId,
+      runId: input.runId,
       toolName: input.toolName,
       userId: input.userId,
-      workspaceId: input.workspaceId,
     })
     .onConflictDoUpdate({
-      target: sandboxRuns.workspaceId,
+      target: sandboxRuns.runId,
       set: {
         createdAt: Date.now(),
         generatedAssetsJson: JSON.stringify(input.generatedAssets),
+        organizationId: input.organizationId,
         toolName: input.toolName,
         userId: input.userId,
       },
     });
 }
 
-export async function getSandboxRunByWorkspaceId(workspaceId: string) {
+export async function getSandboxRunByRunId(runId: string) {
   const db = await getAppDatabase();
   const row = await db.query.sandboxRuns.findFirst({
-    where: eq(sandboxRuns.workspaceId, workspaceId),
+    where: eq(sandboxRuns.runId, runId),
   });
 
   if (!row) {
@@ -57,8 +60,9 @@ export async function getSandboxRunByWorkspaceId(workspaceId: string) {
   return {
     createdAt: row.createdAt,
     generatedAssets: parseGeneratedAssetsJson(row.generatedAssetsJson),
+    organizationId: row.organizationId,
+    runId: row.runId,
     toolName: row.toolName,
     userId: row.userId,
-    workspaceId: row.workspaceId,
   };
 }

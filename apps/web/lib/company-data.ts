@@ -4,33 +4,11 @@ import { constants as fsConstants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { ensureOrganizationCompanyDataRoot } from "@/lib/app-paths";
 import type { UserRole } from "@/lib/roles";
 
-async function pathExists(targetPath: string) {
-  try {
-    await access(targetPath, fsConstants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function resolveCompanyDataRoot() {
-  const candidates = [
-    path.resolve(/* turbopackIgnore: true */ process.cwd(), "company_data"),
-    path.resolve(/* turbopackIgnore: true */ process.cwd(), "../company_data"),
-    path.resolve(/* turbopackIgnore: true */ process.cwd(), "../../company_data"),
-  ];
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    "Unable to locate the company_data directory. Expected it near the repository root.",
-  );
+export async function resolveCompanyDataRoot(organizationSlug: string) {
+  return ensureOrganizationCompanyDataRoot(organizationSlug);
 }
 
 export function normalizeCompanyDataRelativePath(relativePath: string) {
@@ -72,9 +50,10 @@ function assertRoleAllowsCompanyDataPath(relativePath: string, role: UserRole) {
 
 export async function resolveAuthorizedCompanyDataFile(
   relativePath: string,
+  organizationSlug: string,
   role: UserRole,
 ) {
-  const companyDataRoot = await resolveCompanyDataRoot();
+  const companyDataRoot = await resolveCompanyDataRoot(organizationSlug);
   const normalizedRelativePath = normalizeCompanyDataRelativePath(relativePath);
 
   assertRoleAllowsCompanyDataPath(normalizedRelativePath, role);

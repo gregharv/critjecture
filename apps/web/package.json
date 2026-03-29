@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "db:migrate": "node ./scripts/run-db-migrations.mjs",
     "sync:pi-web-ui-css": "node ./scripts/sync-pi-web-ui-css.mjs"
   },
   "dependencies": {

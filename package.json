@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
-    "lint": "pnpm --filter web lint"
+    "start": "pnpm --filter web start",
+    "lint": "pnpm --filter web lint",
+    "db:migrate": "pnpm --filter web db:migrate"
   }
 }
-

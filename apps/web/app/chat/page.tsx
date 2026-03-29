@@ -9,7 +9,11 @@ export default async function ChatPage() {
 
   return (
     <WorkspaceShell activePage="chat" user={user}>
-      <ChatShellWithRole role={user.role} userId={user.id} />
+      <ChatShellWithRole
+        organizationSlug={user.organizationSlug}
+        role={user.role}
+        userId={user.id}
+      />
     </WorkspaceShell>
   );
 }

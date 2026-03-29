@@ -374,6 +374,7 @@ function pickSelectedFile(
 
 export async function searchCompanyKnowledge(
   query: string,
+  organizationSlug: string,
   role: UserRole,
   maxMatches = DEFAULT_MAX_MATCHES,
 ): Promise<CompanyKnowledgeSearchResult> {
@@ -383,7 +384,7 @@ export async function searchCompanyKnowledge(
     throw new Error("Search query must not be empty.");
   }
 
-  const companyDataRoot = await resolveCompanyDataRoot();
+  const companyDataRoot = await resolveCompanyDataRoot(organizationSlug);
   const searchedDirectory =
     role === "owner"
       ? companyDataRoot

@@ -91,12 +91,12 @@ Step 2 should build on the current implementation rather than replacing it.
 Step 2 was implemented as an RBAC-aware local knowledge search flow on top of the Step 1 streaming chat shell, with a simplified Critjecture-branded wrapper around `pi-web-ui`.
 
 - Added mock company data at the repo root:
-  - `company_data/public/schedule.txt`
-  - `company_data/admin/profit.txt`
+  - `sample_company_data/public/schedule.txt`
+  - `sample_company_data/admin/profit.txt`
 - Added shared role handling in `apps/web/lib/roles.ts`.
 - Added the backend search implementation in `apps/web/lib/company-knowledge.ts`.
   - Uses Node.js `child_process.execFile(...)` to run `rg`
-  - Resolves the repo-level `company_data` directory safely
+  - Resolves the repo-level `sample_company_data` directory safely
   - Restricts the search root by role before `rg` executes
 - Added the server API route at `apps/web/app/api/company-knowledge/search/route.ts`.
   - Validates `query` and `role`
@@ -193,13 +193,13 @@ Step 3 was implemented as a real Python analysis tool on top of the existing Ste
 Step 4 was finished as an RBAC-aware search and analysis workflow that can discover company files, disambiguate between multiple matching ledgers, stage the chosen file into the Python sandbox, and run lazy Polars analysis safely.
 
 - Added shared company-data path resolution and authorization in `apps/web/lib/company-data.ts`.
-  - Resolves the repo-level `company_data` root
+  - Resolves the repo-level `sample_company_data` root
   - Normalizes relative file paths
   - Rejects absolute paths and path traversal
   - Enforces role-based file access before analysis
 - Expanded the mock ledger data to cover ambiguous search cases:
-  - `company_data/admin/contractors_new.csv` for 2026
-  - `company_data/admin/contractors.csv` for 2025
+  - `sample_company_data/admin/contractors_new.csv` for 2026
+  - `sample_company_data/admin/contractors.csv` for 2025
 - Added grouped company knowledge types in `apps/web/lib/company-knowledge-types.ts`.
 - Reworked `apps/web/lib/company-knowledge.ts`.
   - Keeps exact phrase search as the first pass
@@ -282,7 +282,7 @@ Step 5 was implemented as two new sandbox-backed file-generation tools plus a se
 - Added backend routes:
   - `apps/web/app/api/visual-graph/run/route.ts`
   - `apps/web/app/api/document/generate/route.ts`
-  - `apps/web/app/api/generated-files/[workspaceId]/[...assetPath]/route.ts`
+  - `apps/web/app/api/generated-files/[runId]/[...assetPath]/route.ts`
 - Updated `apps/web/components/chat-shell.tsx`.
   - Registers `generate_visual_graph` and `generate_document`
   - Updates the system prompt so the model writes chart/document files into `outputs/`
@@ -298,7 +298,7 @@ Step 5 was implemented as two new sandbox-backed file-generation tools plus a se
   - Styles the document download action
   - Keeps the layout mobile-safe
 - Added Step 5 demo data:
-  - `company_data/admin/rent_delinquency.csv`
+  - `sample_company_data/admin/rent_delinquency.csv`
 - Updated `README.md` with Step 5 setup and verification notes.
 
 ### Current Step 5 Behavior
@@ -326,25 +326,25 @@ Step 5 was implemented as two new sandbox-backed file-generation tools plus a se
 
 Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated admin dashboard, while preserving the existing client-side `pi-ai` tool orchestration from Steps 4 and 5.
 
-- Added a SQLite audit database in `apps/web/data/audit.sqlite`.
+- Added a SQLite audit database. That original Step 6 path was later replaced by the shared app database path under `DATABASE_URL` or `storage/critjecture.sqlite`.
 - Added a Drizzle-backed audit schema and server helpers:
-  - `apps/web/lib/audit-schema.ts`
-  - `apps/web/lib/audit-db.ts`
+  - `apps/web/lib/app-schema.ts` (current)
+  - `apps/web/lib/app-db.ts` (current)
   - `apps/web/lib/audit-log.ts`
   - `apps/web/drizzle/0000_step6_audit_logging.sql`
   - `apps/web/drizzle/0001_step6_trace_events.sql`
 - Added audit API routes:
-  - `apps/web/app/api/audit/prompts/route.ts`
+  - `apps/web/app/api/audit/chat-turns/route.ts`
   - `apps/web/app/api/audit/tool-calls/start/route.ts`
   - `apps/web/app/api/audit/tool-calls/finish/route.ts`
-  - `apps/web/app/api/audit/trace-events/route.ts`
+  - `apps/web/app/api/audit/assistant-messages/route.ts`
   - `apps/web/app/api/admin/logs/route.ts`
 - Updated `apps/web/components/chat-shell.tsx`.
   - Generates a stable client session id for each mounted chat session
   - Logs each real user prompt before the first proxied OpenAI stream for that request
   - Uses `beforeToolCall` and `afterToolCall` to persist exact tool args, accessed data files, and completion/error summaries
   - Captures assistant response text as a lightweight trace for each audited interaction
-  - Keeps ambiguous file-picker continuation prompts attached to the original human prompt instead of creating a second prompt log row
+  - Keeps ambiguous file-picker continuation prompts attached to the original human chat turn instead of creating a second chat-turn row
 - Added shared app chrome for `/chat` and `/admin/logs`:
   - `apps/web/components/workspace-shell.tsx`
   - `apps/web/components/chat-page-client.tsx`
@@ -365,23 +365,23 @@ Step 6 was implemented as a local SQLite-backed audit system plus an owner-gated
 
 - `Owner`
   - Can open `/admin/logs?role=owner`
-  - Sees a newest-first feed of collapsible prompt cards
+  - Sees a newest-first feed of collapsible chat turn cards
   - Can scan collapsed headers for role, timestamp, question, and accessed data files
-  - Can expand a card to inspect the assistant response trace plus exact tool-call parameters and summaries
+  - Can expand a card to inspect the assistant response timeline plus exact tool-call parameters and summaries
   - Only gets background refreshes while recent interactions still look active or incomplete
 - `Intern`
   - Can still use `/chat`
   - Cannot view the audit feed on `/admin/logs`; the page shows an owner-only state and skips the fetch
 - Ambiguous file selection
-  - The original prompt is logged once
-  - The later selected-file continuation remains correlated to that same prompt row
+  - The original user question is logged once
+  - The later selected-file continuation remains correlated to that same chat turn row
 
 ### Important Implementation Details
 
-- Step 6 does not move tool execution to the server. Prompt and tool-call auditing is initiated from the client agent lifecycle because that is where tool execution actually occurs.
+- Step 6 does not move tool execution to the server. Chat-turn and tool-call auditing is initiated from the client agent lifecycle because that is where tool execution actually occurs.
 - The audit database is initialized lazily and applies committed SQL migrations on first use.
 - Tool-call rows store the validated tool arguments as JSON text and track accessed company-data files so the dashboard can surface file access directly in the collapsed header and per-tool detail view.
-- The trace section now intentionally records only assistant response text. Tool-call and tool-result detail stays in the tool section so the audit view does not duplicate the same execution information twice.
+- The assistant-messages section now intentionally records only assistant response text. Tool-call and tool-result detail stays in the tool section so the audit view does not duplicate the same execution information twice.
 - The dashboard is an MVP UI gate based on the existing role selector, not a real authentication system.
 - `better-sqlite3` is a native dependency; when `pnpm` blocks native install scripts, `pnpm approve-builds --all` is required before the audit database can load at runtime.
 
@@ -413,9 +413,9 @@ Step 7 was implemented as a planner-backed multi-file selection flow, plus a fol
   - Consolidates them into one planner-level picker instead of emitting one picker per search
   - Blocks sandbox tools while planner selection is pending
   - Sends one synthetic continuation prompt containing the full confirmed file set so later tools can pass those exact paths in `inputFiles`
-- Fixed audit prompt correlation in `apps/web/components/chat-shell.tsx`.
-  - Synthetic picker-confirmation continuations now stay attached to the original human prompt
-  - This prevents the audit dashboard from showing a second prompt card for the same interaction
+- Fixed audit chat-turn correlation in `apps/web/components/chat-shell.tsx`.
+  - Synthetic picker-confirmation continuations now stay attached to the original human question
+  - This prevents the audit dashboard from showing a second chat turn card for the same interaction
 - Tightened app-owned chat styling in `apps/web/app/pi-web-ui.css`.
   - Markdown tables in assistant responses now scroll horizontally inside the chat message
   - Long summary text, staged file paths, and tool metadata now wrap instead of overflowing the message column
@@ -441,16 +441,16 @@ Step 7 was implemented as a planner-backed multi-file selection flow, plus a fol
 - The multi-file picker remains a UI-only custom message that is filtered out of LLM context. Only the synthetic post-confirmation prompt is sent back into the model conversation.
 - The planner state is session-local and is cleared once the pending selection is resolved.
 - Sandbox tools now reject execution while planner selection is pending, which prevents the model from racing ahead with incomplete file context.
-- The audit fix works by routing synthetic continuation prompts through the underlying prompt path rather than the audited wrapper, so the continuation reuses the original prompt log row.
+- The audit fix works by routing synthetic continuation prompts through the underlying prompt path rather than the audited wrapper, so the continuation reuses the original chat turn row.
 
 ## Step 8: Audit Timeline Ordering & Filtering
 
 ### What Was Implemented
 
-Step 8 was implemented as an audit-log chronology update for the owner dashboard, replacing the older split assistant/tool detail view with a single merged event timeline per prompt card.
+Step 8 was implemented as an audit-log chronology update for the owner dashboard, replacing the older split assistant/tool detail view with a single merged event timeline per chat turn card.
 
 - Updated `apps/web/components/admin-logs-page-client.tsx`.
-  - Normalizes each prompt into one combined timeline of assistant response events and tool-call events
+  - Normalizes each chat turn into one combined timeline of assistant response events and tool-call events
   - Sorts those merged events by `createdAt` ascending so the expanded audit card reflects the real execution order
   - Adds a per-card filter with `All`, `Assistant`, and `Tools`
   - Keeps tool detail rendering intact for parameters, accessed files, result summaries, and errors
@@ -461,8 +461,8 @@ Step 8 was implemented as an audit-log chronology update for the owner dashboard
 ### Current Step 8 Behavior
 
 - `Owner`
-  - Still sees the same newest-first collapsed prompt feed on `/admin/logs`
-  - Can expand a prompt card and review one chronological timeline instead of separate assistant and tool sections
+  - Still sees the same newest-first collapsed chat turn feed on `/admin/logs`
+  - Can expand a chat turn card and review one chronological timeline instead of separate assistant and tool sections
   - Sees `All` by default, with the option to filter to only assistant responses or only tool calls for that card
 - Example session
   - Session `04c2400a-44df-400d-8f06-a5ac3fe7d6c9` now displays in the actual recorded order:
@@ -476,9 +476,9 @@ Step 8 was implemented as an audit-log chronology update for the owner dashboard
 
 ### Important Implementation Details
 
-- Step 8 uses the existing audit data model. No schema or API changes were needed because assistant trace events and tool-call rows already stored timestamps.
-- The merged timeline currently includes only `assistant-text` trace events from the trace table. Other trace kinds remain excluded from the owner-facing chronology view.
-- Tool timeline placement is based on tool start time (`createdAt`), while tool cards still show completion status and end time when available.
+- Step 8 originally used the existing audit data model. Those concepts now live in `chat_turns`, `assistant_messages`, and `tool_calls`, each of which still stores the timestamps needed for chronology.
+- The merged timeline currently includes only assistant-message rows plus tool-call rows.
+- Tool timeline placement is based on tool start time (`startedAt`), while tool cards still show completion status and end time when available.
 - Per-card filter state is local UI state only and resets on reload.
 
 ## Step 9: Real Authentication and Server-Enforced RBAC
@@ -497,7 +497,7 @@ Step 9 was implemented as a real credentials-based authentication layer with ser
   - `apps/web/lib/users.ts`
   - `apps/web/lib/passwords.ts`
   - `apps/web/drizzle/0002_step9_auth_and_ownership.sql`
-  - `apps/web/lib/audit-schema.ts`
+  - `apps/web/lib/app-schema.ts`
 - Added pilot user seeding from env:
   - `CRITJECTURE_OWNER_*`
   - `CRITJECTURE_INTERN_*`
@@ -516,7 +516,7 @@ Step 9 was implemented as a real credentials-based authentication layer with ser
   - Still receives the authenticated role for the system prompt
   - Scopes local `pi-web-ui` IndexedDB session storage by authenticated `userId`
   - Stops sending `role` in tool and audit requests
-  - Sends `chatSessionId` when creating prompt audit records
+  - Sends `chatSessionId` when creating chat-turn audit records
 - Reworked protected backend routes so they derive permissions from the authenticated session instead of trusting request input:
   - `apps/web/app/api/stream/route.ts`
   - `apps/web/app/api/company-knowledge/search/route.ts`
@@ -527,12 +527,12 @@ Step 9 was implemented as a real credentials-based authentication layer with ser
   - all audit write routes under `apps/web/app/api/audit/*`
 - Added authenticated ownership tracking for sandbox output files:
   - `apps/web/lib/sandbox-runs.ts`
-  - `apps/web/app/api/generated-files/[workspaceId]/[...assetPath]/route.ts`
-  - sandbox runs now record the authenticated `userId`, `workspaceId`, tool name, and generated assets
+  - `apps/web/app/api/generated-files/[runId]/[...assetPath]/route.ts`
+  - sandbox runs now record the authenticated `userId`, `runId`, tool name, and generated assets
 - Expanded audit data so the dashboard can show who initiated each interaction:
-  - prompt rows now store `userId`
+  - chat turn rows now store `userId`
   - the dashboard shows user identity plus chat session id
-  - audit follow-up writes verify that the referenced prompt belongs to the authenticated user
+  - audit follow-up writes verify that the referenced chat turn belongs to the authenticated user
 - Updated docs and env examples:
   - `README.md`
   - `apps/web/.env.local.example`
@@ -571,3 +571,81 @@ Step 9 was implemented as a real credentials-based authentication layer with ser
 - Backend routes no longer accept request-supplied `role` as an authorization source of truth.
 - The owner audit dashboard is now protected both at the page level and at the API level.
 - Step 10 still remains the place to formalize broader tenant, organization, and durable multi-user persistence foundations beyond this pilot auth layer.
+
+## Step 10: Tenant and Data Persistence Foundations
+
+### What Was Implemented
+
+Step 10 was implemented as a SQLite-first tenant and storage foundation that supports local development, customer-managed hardware, and Railway deployments with attached persistent storage.
+
+- Added a generic application persistence layer:
+  - `apps/web/lib/app-db.ts`
+  - `apps/web/lib/app-schema.ts`
+  - `apps/web/scripts/run-db-migrations.mjs`
+- Added configurable storage and path resolution:
+  - `apps/web/lib/app-paths.ts`
+  - new env support for `DATABASE_URL` and `CRITJECTURE_STORAGE_ROOT`
+- Added tenant data model foundations:
+  - `organizations`
+  - `organization_memberships`
+  - `organization_id` scoping on `chat_turns`
+  - `organization_id` scoping on `sandbox_runs`
+  - migration `apps/web/drizzle/0003_step10_tenants_and_storage.sql`
+- Added default organization seeding and legacy backfill:
+  - `apps/web/lib/organizations.ts`
+  - `apps/web/lib/users.ts`
+  - existing Step 9 users are backfilled into the default organization through memberships
+  - legacy chat turns and sandbox runs are backfilled to that organization
+- Reworked runtime company-data storage:
+  - live company data now resolves from `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/company_data`
+  - repo-root `sample_company_data/` is now bundled sample data used to seed first-run organization storage
+- Reworked authenticated session shape:
+  - session state now includes `organizationId`, `organizationName`, and `organizationSlug`
+  - effective role is now derived from organization membership
+- Scoped existing protected behavior to the authenticated organization:
+  - company-data search
+  - sandbox file staging
+  - chat-turn creation and audit log listing
+  - sandbox run ownership
+  - generated-file retrieval
+- Added deployment and recovery documentation:
+  - `README.md`
+  - `deployment.md`
+  - `production_readiness.md`
+  - `apps/web/.env.local.example`
+- Added explicit migration and start scripts:
+  - root `pnpm db:migrate`
+  - root `pnpm start`
+  - web `pnpm db:migrate`
+
+### Current Step 10 Behavior
+
+- Local development
+  - Defaults to `./storage/critjecture.sqlite`
+  - Defaults to `./storage` as the persistent storage root
+  - Copies bundled sample company data into the default organization storage on first boot
+- Customer-managed hardware / on-prem
+  - Can point both the SQLite database and the storage root at persistent local paths
+  - Uses the same app and migration flow as local development
+- Railway with attached storage
+  - Can point both `DATABASE_URL` and `CRITJECTURE_STORAGE_ROOT` at the mounted volume path
+  - Uses the same SQLite-first runtime model as local and hardware installs
+- Authenticated users
+  - Now operate inside a specific organization context stored in the session
+  - Still see `Owner` / `Intern` behavior, but that role now comes from organization membership
+- Owners
+  - See audit logs only for their current organization
+- Generated assets
+  - Still live in `/tmp/workspace/<run-id>/outputs/`
+  - Are only retrievable by the authenticated user who created them within the same organization
+
+### Important Implementation Details
+
+- Step 10 keeps SQLite as the primary supported deployment path. Postgres remains a future scale-up option rather than a current requirement.
+- The current implementation supports one active organization per user session. Multi-organization switching UI was not added in this step.
+- The app still seeds a single default organization from env:
+  - `CRITJECTURE_ORGANIZATION_NAME`
+  - `CRITJECTURE_ORGANIZATION_SLUG`
+- Runtime company data is no longer sourced directly from the repo root during normal operation.
+- Database migrations remain forward-only SQL files and can be run explicitly with `pnpm db:migrate`.
+- Sandbox workspaces remain ephemeral and are still out of durable backup scope.

@@ -3,7 +3,7 @@ export type SandboxGeneratedAsset = {
   fileName: string;
   mimeType: string;
   relativePath: string;
-  workspaceId: string;
+  runId: string;
 };
 
 export type SandboxToolResponse = {
@@ -18,7 +18,7 @@ export type SandboxToolResponse = {
   stdout: string;
   summary: string;
   workspaceDir: string;
-  workspaceId: string;
+  runId: string;
 };
 
 export type GeneratedAssetToolResponse = SandboxToolResponse & {

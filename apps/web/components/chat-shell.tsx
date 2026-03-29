@@ -19,8 +19,8 @@ import {
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
 import type {
-  AuditToolCallStatus,
-  CreateAuditPromptResponse,
+  CreateChatTurnResponse,
+  ToolCallStatus,
 } from "@/lib/audit-types";
 import type {
   GeneratedAssetToolResponse,
@@ -50,8 +50,8 @@ type SearchToolResponse = {
   summary: string;
 };
 
-type PendingAuditPrompt = {
-  promptText: string;
+type PendingChatTurn = {
+  userPromptText: string;
   synthetic: boolean;
 };
 
@@ -268,29 +268,27 @@ function getContentString(entry: unknown, key: string) {
   return "";
 }
 
-function extractAssistantTraceEntries(message: AgentMessage) {
+function extractAssistantMessages(message: AgentMessage) {
   if (!isAssistantAgentMessage(message) || !Array.isArray(message.content)) {
     return [];
   }
 
   return message.content.flatMap<{
-    content: string;
-    kind: "assistant-text";
-    title: string;
+    messageText: string;
+    messageTitle: string;
   }>((entry) => {
     if (typeof entry !== "object" || entry === null || !("type" in entry)) {
       return [];
     }
 
     if (entry.type === "text") {
-      const content = getContentString(entry, "text");
+      const messageText = getContentString(entry, "text");
 
-      return content
+      return messageText
         ? [
             {
-              content,
-              kind: "assistant-text" as const,
-              title: "Assistant Response",
+              messageText,
+              messageTitle: "Assistant Response",
             },
           ]
         : [];
@@ -360,8 +358,8 @@ function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
     role === "owner"
-      ? "You may search all files inside company_data when needed."
-      : "You may search only public files inside company_data/public. Never imply access to admin-only data.";
+      ? "You may search all files inside the current organization's company_data when needed."
+      : "You may search only public files inside the current organization's company_data/public. Never imply access to admin-only data.";
 
   return [
     "You are a concise, reliable assistant for a property management workflow prototype.",
@@ -387,15 +385,16 @@ function getSystemPrompt(role: UserRole) {
 }
 
 type ChatShellProps = {
+  organizationSlug: string;
   role: UserRole;
   userId: string;
 };
 
-export function ChatShellWithRole({ role, userId }: ChatShellProps) {
-  const activePromptIdRef = useRef<string | null>(null);
+export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellProps) {
+  const activeTurnIdRef = useRef<string | null>(null);
   const awaitingFileSelectionRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const pendingAuditPromptRef = useRef<PendingAuditPrompt | null>(null);
+  const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const syntheticContinuationRef = useRef(false);
@@ -430,7 +429,7 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
         const customProviders = new webUi.CustomProvidersStore();
 
         const backend = new webUi.IndexedDBStorageBackend({
-          dbName: `critjecture-user-${userId}`,
+          dbName: `critjecture-user-${userId}-${organizationSlug}`,
           version: 6,
           stores: [
             settings.getConfig(),
@@ -481,22 +480,22 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           return data as TResponse;
         };
 
-        const queueAuditPrompt = (
+        const queueChatTurn = (
           input: string | AgentMessage | AgentMessage[],
           synthetic: boolean,
         ) => {
-          const promptText = extractPromptText(input);
+          const userPromptText = extractPromptText(input);
 
           if (!synthetic) {
             plannerSearchesRef.current = [];
           }
 
-          if (!promptText) {
+          if (!userPromptText) {
             return;
           }
 
-          pendingAuditPromptRef.current = {
-            promptText,
+          pendingChatTurnRef.current = {
+            userPromptText,
             synthetic,
           };
         };
@@ -507,7 +506,7 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           synthetic: boolean,
           images?: unknown[],
         ) => {
-          queueAuditPrompt(input, synthetic);
+          queueChatTurn(input, synthetic);
 
           if (synthetic) {
             syntheticContinuationRef.current = true;
@@ -581,14 +580,14 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path>. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout.",
+              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
             Type.Array(
               Type.String({
                 description:
-                  "A company_data-relative file path discovered via search_company_knowledge, such as admin/contractors_new.csv.",
+                  "A company_data-relative file path for the current organization discovered via search_company_knowledge, such as admin/contractors_new.csv.",
                 minLength: 1,
               }),
             ),
@@ -608,7 +607,7 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           description: options.description,
           parameters: sandboxToolParameters,
           async execute(
-            _toolCallId: string,
+            _runtimeToolCallId: string,
             params: { code: string; inputFiles?: string[] },
             signal?: AbortSignal,
           ) {
@@ -656,7 +655,7 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           name: "search_company_knowledge",
           label: "Search Company Knowledge",
           description:
-            "Search company_data using short keywords, filenames, or years. The tool may auto-select files or trigger a planner-level multi-select picker when multiple files are relevant.",
+            "Search the current organization's company_data using short keywords, filenames, or years. The tool may auto-select files or trigger a planner-level multi-select picker when multiple files are relevant.",
           parameters: Type.Object({
             query: Type.String({
               description:
@@ -664,7 +663,11 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
               minLength: 1,
             }),
           }),
-          async execute(_toolCallId: string, params: { query: string }, signal?: AbortSignal) {
+          async execute(
+            _runtimeToolCallId: string,
+            params: { query: string },
+            signal?: AbortSignal,
+          ) {
             const response = await fetch("/api/company-knowledge/search", {
               method: "POST",
               headers: {
@@ -751,26 +754,26 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           convertToLlm: (messages) =>
             critjectureConvertToLlm(messages, webUi.defaultConvertToLlm),
           streamFn: async (model, context, options) => {
-            const pendingAuditPrompt = pendingAuditPromptRef.current;
+            const pendingChatTurn = pendingChatTurnRef.current;
 
-            if (pendingAuditPrompt) {
-              pendingAuditPromptRef.current = null;
+            if (pendingChatTurn) {
+              pendingChatTurnRef.current = null;
 
-              if (!pendingAuditPrompt.synthetic) {
+              if (!pendingChatTurn.synthetic) {
                 try {
-                  const auditResponse = await postAuditJson<CreateAuditPromptResponse>(
-                    "/api/audit/prompts",
+                  const auditResponse = await postAuditJson<CreateChatTurnResponse>(
+                    "/api/audit/chat-turns",
                     {
                       chatSessionId: sessionId,
-                      promptText: pendingAuditPrompt.promptText,
+                      userPromptText: pendingChatTurn.userPromptText,
                     },
                     options?.signal,
                   );
 
-                  activePromptIdRef.current = auditResponse.promptId;
+                  activeTurnIdRef.current = auditResponse.turnId;
                 } catch (caughtError) {
-                  console.error("Failed to audit prompt before streaming.", caughtError);
-                  activePromptIdRef.current = null;
+                  console.error("Failed to create chat turn before streaming.", caughtError);
+                  activeTurnIdRef.current = null;
                 }
               }
             }
@@ -794,18 +797,18 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
 
         agent.prompt = auditedPrompt;
         agent.setBeforeToolCall(async ({ args, toolCall }) => {
-          const promptId = activePromptIdRef.current;
+          const turnId = activeTurnIdRef.current;
 
-          if (!promptId) {
+          if (!turnId) {
             return undefined;
           }
 
           try {
             await postAuditJson<{ ok: true }>("/api/audit/tool-calls/start", {
-              parametersJson: stringifyToolArgs(args),
-              promptId,
-              toolCallId: toolCall.id,
+              runtimeToolCallId: toolCall.id,
               toolName: toolCall.name,
+              toolParametersJson: stringifyToolArgs(args),
+              turnId,
             });
           } catch (caughtError) {
             console.error("Failed to audit tool call start.", caughtError);
@@ -814,25 +817,25 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
           return undefined;
         });
         agent.setAfterToolCall(async ({ args, isError, result, toolCall }) => {
-          const promptId = activePromptIdRef.current;
+          const turnId = activeTurnIdRef.current;
 
-          if (!promptId) {
+          if (!turnId) {
             return undefined;
           }
 
           const resultSummary = getToolResultSummary(result);
           const accessedFiles = extractAccessedFiles(args, result);
-          const status: AuditToolCallStatus = isError ? "error" : "completed";
+          const status: ToolCallStatus = isError ? "error" : "completed";
           const errorMessage = isError ? resultSummary || "Tool execution failed." : null;
 
           try {
             await postAuditJson<{ ok: true }>("/api/audit/tool-calls/finish", {
               accessedFiles,
               errorMessage,
-              promptId,
               resultSummary: resultSummary || null,
+              runtimeToolCallId: toolCall.id,
               status,
-              toolCallId: toolCall.id,
+              turnId,
             });
           } catch (caughtError) {
             console.error("Failed to audit tool call completion.", caughtError);
@@ -864,20 +867,19 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
         }
 
         const unsubscribe = agent.subscribe((event) => {
-          if (event.type === "message_end" && activePromptIdRef.current) {
-            const promptId = activePromptIdRef.current;
-            const traceEntries = extractAssistantTraceEntries(event.message);
+          if (event.type === "message_end" && activeTurnIdRef.current) {
+            const turnId = activeTurnIdRef.current;
+            const assistantMessages = extractAssistantMessages(event.message);
 
-            if (traceEntries.length > 0) {
+            if (assistantMessages.length > 0) {
               void Promise.all(
-                traceEntries.map((traceEntry) =>
-                  postAuditJson<{ ok: true }>("/api/audit/trace-events", {
-                    content: traceEntry.content,
-                    kind: traceEntry.kind,
-                    promptId,
-                    title: traceEntry.title,
+                assistantMessages.map((assistantMessage) =>
+                  postAuditJson<{ ok: true }>("/api/audit/assistant-messages", {
+                    messageText: assistantMessage.messageText,
+                    messageTitle: assistantMessage.messageTitle,
+                    turnId,
                   }).catch((caughtError) => {
-                    console.error("Failed to audit assistant trace event.", caughtError);
+                    console.error("Failed to audit assistant message.", caughtError);
                   }),
                 ),
               );
@@ -902,7 +904,7 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
               syntheticContinuationRef.current = false;
             }
 
-            activePromptIdRef.current = null;
+            activeTurnIdRef.current = null;
             plannerSearchesRef.current = [];
           }
         });
@@ -969,15 +971,15 @@ export function ChatShellWithRole({ role, userId }: ChatShellProps) {
 
     return () => {
       mounted = false;
-      activePromptIdRef.current = null;
+      activeTurnIdRef.current = null;
       awaitingFileSelectionRef.current = false;
-      pendingAuditPromptRef.current = null;
+      pendingChatTurnRef.current = null;
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
       syntheticContinuationRef.current = false;
       cleanup?.();
     };
-  }, [role, userId]);
+  }, [organizationSlug, role, userId]);
 
   if (error) {
     return (

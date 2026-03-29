@@ -10,3 +10,4 @@ coverage
 apps/web/data/*.sqlite
 apps/web/data/*.sqlite-shm
 apps/web/data/*.sqlite-wal
+storage

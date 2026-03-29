@@ -3,17 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 
 import type {
-  AuditPromptLog,
-  AuditToolCallLog,
-  AuditTraceEventLog,
-  ListAuditLogsResponse,
+  ChatTurnLog,
+  ListChatTurnLogsResponse,
+  ToolCallLog,
 } from "@/lib/audit-types";
 import { getRoleLabel } from "@/lib/roles";
 
 type AuditLogState = {
   error: string | null;
   loading: boolean;
-  prompts: AuditPromptLog[];
+  turns: ChatTurnLog[];
   refreshing: boolean;
 };
 
@@ -31,7 +30,7 @@ type AuditTimelineEvent =
       createdAt: number;
       eventType: "tool";
       id: string;
-      toolCall: AuditToolCallLog;
+      toolCall: ToolCallLog;
     };
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -47,13 +46,13 @@ function formatTimestamp(timestamp: number | null) {
   return DATE_TIME_FORMATTER.format(timestamp);
 }
 
-function parseInputFilesFromParameters(toolCall: AuditToolCallLog) {
+function parseInputFilesFromToolParameters(toolCall: ToolCallLog) {
   if (toolCall.accessedFiles.length > 0) {
     return toolCall.accessedFiles;
   }
 
   try {
-    const parsed = JSON.parse(toolCall.parametersJson) as { inputFiles?: unknown };
+    const parsed = JSON.parse(toolCall.toolParametersJson) as { inputFiles?: unknown };
 
     if (!Array.isArray(parsed.inputFiles)) {
       return [];
@@ -67,54 +66,49 @@ function parseInputFilesFromParameters(toolCall: AuditToolCallLog) {
   }
 }
 
-function getPromptAccessedFiles(prompt: AuditPromptLog) {
-  return [...new Set(prompt.toolCalls.flatMap((toolCall) => parseInputFilesFromParameters(toolCall)))];
+function getTurnAccessedFiles(turn: ChatTurnLog) {
+  return [...new Set(turn.toolCalls.flatMap((toolCall) => parseInputFilesFromToolParameters(toolCall)))];
 }
 
-function hasAssistantResponse(prompt: AuditPromptLog) {
-  return prompt.traceEvents.some((traceEvent) => traceEvent.kind === "assistant-text");
+function hasAssistantMessage(turn: ChatTurnLog) {
+  return turn.assistantMessages.length > 0;
 }
 
-function promptIsActiveOrIncomplete(prompt: AuditPromptLog, now: number) {
+function turnIsActiveOrIncomplete(turn: ChatTurnLog, now: number) {
   if (
-    prompt.toolCalls.some(
+    turn.toolCalls.some(
       (toolCall) => toolCall.status === "started" || toolCall.completedAt === null,
     )
   ) {
     return true;
   }
 
-  const hasAnyTrace = prompt.traceEvents.length > 0;
+  const hasAnyAssistantMessages = turn.assistantMessages.length > 0;
 
-  if (!hasAssistantResponse(prompt) && (!hasAnyTrace || prompt.toolCalls.length === 0)) {
-    return now - prompt.createdAt < 2 * 60 * 1000;
+  if (!hasAssistantMessage(turn) && (!hasAnyAssistantMessages || turn.toolCalls.length === 0)) {
+    return now - turn.createdAt < 2 * 60 * 1000;
   }
 
   return false;
 }
 
-function shouldRepoll(prompts: AuditPromptLog[]) {
+function shouldRepoll(turns: ChatTurnLog[]) {
   const now = Date.now();
 
-  return prompts.some((prompt) => promptIsActiveOrIncomplete(prompt, now));
+  return turns.some((turn) => turnIsActiveOrIncomplete(turn, now));
 }
 
-function buildAuditTimelineEvents(prompt: AuditPromptLog): AuditTimelineEvent[] {
-  const assistantEvents = prompt.traceEvents
-    .filter(
-      (traceEvent): traceEvent is AuditTraceEventLog =>
-        traceEvent.kind === "assistant-text",
-    )
-    .map<AuditTimelineEvent>((traceEvent) => ({
-      content: traceEvent.content,
-      createdAt: traceEvent.createdAt,
-      eventType: "assistant",
-      id: traceEvent.id,
-      title: traceEvent.title || "Assistant Response",
-    }));
+function buildAuditTimelineEvents(turn: ChatTurnLog): AuditTimelineEvent[] {
+  const assistantEvents = turn.assistantMessages.map<AuditTimelineEvent>((assistantMessage) => ({
+    content: assistantMessage.messageText,
+    createdAt: assistantMessage.createdAt,
+    eventType: "assistant",
+    id: assistantMessage.id,
+    title: assistantMessage.messageTitle || "Assistant Response",
+  }));
 
-  const toolEvents = prompt.toolCalls.map<AuditTimelineEvent>((toolCall) => ({
-    createdAt: toolCall.createdAt,
+  const toolEvents = turn.toolCalls.map<AuditTimelineEvent>((toolCall) => ({
+    createdAt: toolCall.startedAt,
     eventType: "tool",
     id: toolCall.id,
     toolCall,
@@ -158,36 +152,36 @@ function getTimelineEmptyMessage(filter: AuditTimelineFilter) {
   }
 
   if (filter === "tools") {
-    return "No tool calls were executed for this prompt.";
+    return "No tool calls were executed for this chat turn.";
   }
 
   return "No timeline events were captured for this interaction.";
 }
 
-function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
+function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
   const [filter, setFilter] = useState<AuditTimelineFilter>("all");
-  const promptAccessedFiles = getPromptAccessedFiles(prompt);
-  const timelineEvents = buildAuditTimelineEvents(prompt);
+  const turnAccessedFiles = getTurnAccessedFiles(turn);
+  const timelineEvents = buildAuditTimelineEvents(turn);
   const visibleTimelineEvents = filterTimelineEvents(timelineEvents, filter);
-  const userLabel = prompt.userName || prompt.userEmail || "Unknown User";
+  const userLabel = turn.userName || turn.userEmail || "Unknown User";
 
   return (
     <details className="audit-card">
       <summary className="audit-card__summary">
         <div className="audit-card__summary-main">
           <div className="audit-card__meta">
-            <span className="audit-badge">{getRoleLabel(prompt.role)}</span>
-            <span>{formatTimestamp(prompt.createdAt)}</span>
+            <span className="audit-badge">{getRoleLabel(turn.userRole)}</span>
+            <span>{formatTimestamp(turn.createdAt)}</span>
           </div>
-          <h2 className="audit-card__title">{prompt.promptText}</h2>
+          <h2 className="audit-card__title">{turn.userPromptText}</h2>
         </div>
 
         <div className="audit-card__summary-side">
           <div className="audit-card__session">{userLabel}</div>
-          <div className="audit-card__session">Chat Session {prompt.chatSessionId}</div>
+          <div className="audit-card__session">Chat Session {turn.chatSessionId}</div>
           <div className="audit-card__files">
-            {promptAccessedFiles.length > 0 ? (
-              promptAccessedFiles.map((filePath) => (
+            {turnAccessedFiles.length > 0 ? (
+              turnAccessedFiles.map((filePath) => (
                 <span className="audit-file-badge" key={filePath}>
                   {filePath}
                 </span>
@@ -286,7 +280,7 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
                           >
                             {event.toolCall.status}
                           </span>
-                          <span>{formatTimestamp(event.toolCall.createdAt)}</span>
+                          <span>{formatTimestamp(event.toolCall.startedAt)}</span>
                           <span>{formatTimestamp(event.toolCall.completedAt)}</span>
                         </div>
                       </div>
@@ -295,8 +289,8 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
                     <div className="audit-tool__section">
                       <div className="audit-tool__label">Data Files Accessed</div>
                       <div className="audit-card__files">
-                        {parseInputFilesFromParameters(event.toolCall).length > 0 ? (
-                          parseInputFilesFromParameters(event.toolCall).map((filePath) => (
+                        {parseInputFilesFromToolParameters(event.toolCall).length > 0 ? (
+                          parseInputFilesFromToolParameters(event.toolCall).map((filePath) => (
                             <span className="audit-file-badge" key={filePath}>
                               {filePath}
                             </span>
@@ -311,7 +305,7 @@ function AuditPromptCard({ prompt }: { prompt: AuditPromptLog }) {
 
                     <div className="audit-tool__section">
                       <div className="audit-tool__label">Parameters</div>
-                      <pre className="audit-tool__code">{event.toolCall.parametersJson}</pre>
+                      <pre className="audit-tool__code">{event.toolCall.toolParametersJson}</pre>
                     </div>
 
                     {event.toolCall.resultSummary ? (
@@ -347,7 +341,7 @@ export function AdminLogsPageClient() {
   const [state, setState] = useState<AuditLogState>({
     error: null,
     loading: true,
-    prompts: [],
+    turns: [],
     refreshing: false,
   });
 
@@ -367,15 +361,15 @@ export function AdminLogsPageClient() {
       setState((current) => ({
         ...current,
         error: null,
-        loading: reason === "initial" && current.prompts.length === 0,
-        refreshing: reason !== "initial" && current.prompts.length > 0,
+        loading: reason === "initial" && current.turns.length === 0,
+        refreshing: reason !== "initial" && current.turns.length > 0,
       }));
 
       try {
         const response = await fetch("/api/admin/logs?limit=50", {
           cache: "no-store",
         });
-        const data = (await response.json()) as ListAuditLogsResponse | { error: string };
+        const data = (await response.json()) as ListChatTurnLogsResponse | { error: string };
 
         if (!response.ok) {
           throw new Error("error" in data ? data.error : "Failed to load audit logs.");
@@ -385,13 +379,13 @@ export function AdminLogsPageClient() {
           return;
         }
 
-        const result = data as ListAuditLogsResponse;
-        const needsRepoll = shouldRepoll(result.prompts);
+        const result = data as ListChatTurnLogsResponse;
+        const needsRepoll = shouldRepoll(result.turns);
 
         setState({
           error: null,
           loading: false,
-          prompts: result.prompts,
+          turns: result.turns,
           refreshing: false,
         });
 
@@ -433,7 +427,7 @@ export function AdminLogsPageClient() {
           <div className="audit-page__eyebrow">Admin</div>
           <h1 className="audit-page__title">Audit Logs</h1>
           <p className="audit-page__copy">
-            Review the exact prompts, tool arguments, execution outcomes, and initiating
+            Review the exact chat turns, tool arguments, execution outcomes, and initiating
             user for each authenticated Critjecture session.
           </p>
         </div>
@@ -459,14 +453,14 @@ export function AdminLogsPageClient() {
           <h2>Audit Feed Unavailable</h2>
           <p>{state.error}</p>
         </div>
-      ) : state.prompts.length === 0 ? (
+      ) : state.turns.length === 0 ? (
         <div className="audit-empty">
-          <p>No audit entries yet. Run a chat prompt to populate the dashboard.</p>
+          <p>No audit entries yet. Run a chat turn to populate the dashboard.</p>
         </div>
       ) : (
         <div className="audit-list">
-          {state.prompts.map((prompt) => (
-            <AuditPromptCard key={prompt.id} prompt={prompt} />
+          {state.turns.map((turn) => (
+            <ChatTurnCard key={turn.id} turn={turn} />
           ))}
         </div>
       )}

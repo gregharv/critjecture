@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { listRecentAuditPromptLogs } from "@/lib/audit-log";
+import { listRecentChatTurnLogs } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
@@ -26,9 +26,9 @@ export async function GET(request: Request) {
   const limit = limitParam ? Number(limitParam) : 50;
 
   try {
-    const prompts = await listRecentAuditPromptLogs(limit);
+    const turns = await listRecentChatTurnLogs(user.organizationId, limit);
 
-    return NextResponse.json({ prompts });
+    return NextResponse.json({ turns });
   } catch (caughtError) {
     const message =
       caughtError instanceof Error ? caughtError.message : "Failed to load audit logs.";

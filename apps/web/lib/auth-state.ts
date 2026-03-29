@@ -10,13 +10,23 @@ export type SessionUser = {
   email: string;
   id: string;
   name: string | null;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
   role: UserRole;
 };
 
 function getSafeSessionUser(session: Session | null): SessionUser | null {
   const user = session?.user;
 
-  if (!user || typeof user.id !== "string" || typeof user.email !== "string") {
+  if (
+    !user ||
+    typeof user.id !== "string" ||
+    typeof user.email !== "string" ||
+    typeof user.organizationId !== "string" ||
+    typeof user.organizationName !== "string" ||
+    typeof user.organizationSlug !== "string"
+  ) {
     return null;
   }
 
@@ -28,6 +38,9 @@ function getSafeSessionUser(session: Session | null): SessionUser | null {
     email: user.email,
     id: user.id,
     name: typeof user.name === "string" ? user.name : null,
+    organizationId: user.organizationId,
+    organizationName: user.organizationName,
+    organizationSlug: user.organizationSlug,
     role: user.role,
   };
 }

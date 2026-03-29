@@ -11,14 +11,14 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS users_email_idx
   ON users(email);
 
-ALTER TABLE audit_prompts
+ALTER TABLE chat_turns
   ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 
-CREATE INDEX IF NOT EXISTS audit_prompts_user_id_created_at_idx
-  ON audit_prompts(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS chat_turns_user_id_created_at_idx
+  ON chat_turns(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS sandbox_runs (
-  workspace_id TEXT PRIMARY KEY,
+  run_id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   tool_name TEXT NOT NULL,
   generated_assets_json TEXT NOT NULL DEFAULT '[]',

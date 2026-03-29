@@ -7,7 +7,10 @@ This document captures the main capabilities still missing before Critjecture sh
 Critjecture already has a strong MVP foundation:
 
 - a Next.js chat app
-- role-aware local company-data search
+- real authentication and server-enforced RBAC
+- organizations plus organization memberships
+- SQLite-backed durable app state with repeatable migrations
+- role-aware organization-scoped company-data search
 - sandboxed Python analysis with staged inputs
 - generated PNG and PDF outputs
 - an owner-facing audit dashboard
@@ -18,43 +21,7 @@ That is enough to demonstrate the workflow and validate the product shape. It is
 
 These are the biggest gaps that should be addressed before treating the product as production-ready for real customers.
 
-### 1. Real Authentication and Server-Enforced Authorization
-
-This is the largest current gap.
-
-Today, the product uses a client-side role toggle in the UI, and backend routes accept `role` from the request body or query string. That means the current `Intern` / `Owner` distinction is not a real security boundary.
-
-What is missing:
-
-- real login and session management
-- a server-side user identity model
-- backend-derived roles and permissions
-- route protection based on authenticated user state
-- audit access tied to actual owner/admin permissions
-
-Why it matters:
-
-- a production system cannot trust a browser-supplied role for data access
-- the audit dashboard cannot be treated as secure while access is controlled by UI state
-- company-data search, sandbox staging, and generated file access all need to derive permissions from real auth
-
-### 2. Tenant and User Model
-
-The app currently behaves like a single local workspace rather than a multi-user, customer-facing product.
-
-What is missing:
-
-- users
-- organizations or tenants
-- membership and role assignment
-- a mapping between users, tenants, company-data roots, audit records, and conversations
-
-Why it matters:
-
-- even a small rollout needs to know who belongs to which customer account
-- production data boundaries should not be inferred from one shared app instance
-
-### 3. Stronger Sandbox Isolation
+### 1. Stronger Sandbox Isolation
 
 The Python sandbox is careful, but it is still a local `child_process` model. It stages approved files and strips environment variables, which is good, but that is still not the same as a hardened production isolation boundary.
 
@@ -70,24 +37,23 @@ Why it matters:
 - model-generated code is inherently high risk
 - a production rollout needs stronger guarantees than a local subprocess sandbox
 
-### 4. Production Persistence, Backups, and Recovery
+### 2. Production Backup Discipline and Recovery Drills
 
-The repo uses local SQLite for audit storage and browser-local session storage for chat UX. That is fine for local development and may be acceptable for some on-prem pilots, but it is not enough for general production operations.
+The repo now has a real SQLite-backed persistence model with tenant scoping and documented storage layout. That is enough for the primary supported deployment path, but production operations still need stronger verification around recovery.
 
 What is missing:
 
-- a durable production database strategy
-- backup and restore procedures
-- migration discipline for production upgrades
+- regular backup verification
+- restore drills for both the SQLite database file and tenant storage root
 - retention policies for audits, conversations, uploads, and generated outputs
 - disaster recovery expectations
 
 Why it matters:
 
-- production systems need recoverable state
-- local-node storage is fragile in cloud environments
+- production systems need proven recoverable state
+- a documented backup policy is not the same as a tested restore path
 
-### 5. Rate Limiting, Abuse Controls, and Cost Controls
+### 3. Rate Limiting, Abuse Controls, and Cost Controls
 
 The app does not currently appear to have rate limiting or usage governance around chat and tool execution.
 
@@ -102,7 +68,7 @@ Why it matters:
 
 - without limits, a production rollout is exposed to both cost spikes and abuse
 
-### 6. Observability and Incident Debugging
+### 4. Observability and Incident Debugging
 
 The audit log is useful for product behavior, but it is not a replacement for production observability.
 
@@ -118,7 +84,7 @@ Why it matters:
 - production failures need fast diagnosis
 - customer support becomes difficult without system-level visibility
 
-### 7. Automated Test Coverage and Release Confidence
+### 5. Automated Test Coverage and Release Confidence
 
 There does not appear to be a real automated test suite in the repo today.
 
@@ -213,11 +179,11 @@ The severity of some gaps depends on how Critjecture is deployed.
 
 For a controlled on-prem deployment or a tightly managed single-customer pilot:
 
-- SQLite may be acceptable sooner
+- the current SQLite-first deployment model may already be appropriate
 - simpler operational tooling may be acceptable sooner
 - limited-user rollout may reduce the need for some tenant-management features at first
 
-Even in that model, real authentication and server-enforced authorization should still move ahead of a serious rollout.
+Even in that model, stronger sandbox isolation, backup verification, and release confidence still need real attention before a serious rollout.
 
 ### Multi-Tenant Cloud SaaS
 
@@ -225,12 +191,11 @@ For a real multi-tenant cloud deployment, the standard is much higher.
 
 Before that kind of launch, Critjecture should have:
 
-- real auth and server-derived permissions
-- a real tenant model
 - stronger execution isolation
-- durable production persistence and backups
+- durable backup verification and recovery drills
 - observability and cost controls
 - automated regression coverage
+- likely a higher-concurrency database path once usage grows past the SQLite-first operational envelope
 
 Those are not optional polish items in a multi-tenant SaaS setting. They are launch requirements.
 
@@ -238,16 +203,13 @@ Those are not optional polish items in a multi-tenant SaaS setting. They are lau
 
 ### Before First External Pilot
 
-- real authentication
-- server-enforced RBAC
-- user and tenant foundations
 - stronger sandbox controls
 - basic production observability
 - minimum regression test coverage for critical routes
 
 ### Before Multi-Tenant Production
 
-- production persistence and backup strategy
+- production backup verification and restore drills
 - rate limiting and cost controls
 - stronger operational dashboards and incident handling
 - admin controls and tenant management

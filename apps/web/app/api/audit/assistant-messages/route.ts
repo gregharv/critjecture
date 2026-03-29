@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { chatTurnBelongsToUser, startToolCallLog } from "@/lib/audit-log";
+import { chatTurnBelongsToUser, createAssistantMessageLog } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
-type StartAuditToolCallBody = {
-  runtimeToolCallId?: unknown;
-  toolParametersJson?: unknown;
-  toolName?: unknown;
+type CreateAssistantMessageBody = {
+  messageText?: unknown;
+  messageTitle?: unknown;
   turnId?: unknown;
 };
 
@@ -23,24 +22,23 @@ export async function POST(request: Request) {
     return jsonError("Authentication required.", 401);
   }
 
-  let body: StartAuditToolCallBody;
+  let body: CreateAssistantMessageBody;
 
   try {
-    body = (await request.json()) as StartAuditToolCallBody;
+    body = (await request.json()) as CreateAssistantMessageBody;
   } catch {
     return jsonError("Request body must be valid JSON.", 400);
   }
 
-  const toolParametersJson =
-    typeof body.toolParametersJson === "string" ? body.toolParametersJson.trim() : "";
   const turnId = typeof body.turnId === "string" ? body.turnId.trim() : "";
-  const runtimeToolCallId =
-    typeof body.runtimeToolCallId === "string" ? body.runtimeToolCallId.trim() : "";
-  const toolName = typeof body.toolName === "string" ? body.toolName.trim() : "";
+  const messageTitle =
+    typeof body.messageTitle === "string" ? body.messageTitle.trim() : "";
+  const messageText =
+    typeof body.messageText === "string" ? body.messageText.trim() : "";
 
-  if (!turnId || !runtimeToolCallId || !toolName || !toolParametersJson) {
+  if (!turnId || !messageTitle || !messageText) {
     return jsonError(
-      "turnId, runtimeToolCallId, toolName, and toolParametersJson must all be non-empty strings.",
+      "turnId, messageTitle, and messageText must all be non-empty strings.",
       400,
     );
   }
@@ -56,10 +54,9 @@ export async function POST(request: Request) {
       return jsonError("Chat turn not found.", 404);
     }
 
-    await startToolCallLog({
-      runtimeToolCallId,
-      toolName,
-      toolParametersJson,
+    await createAssistantMessageLog({
+      messageText,
+      messageTitle,
       turnId,
     });
 
@@ -68,7 +65,7 @@ export async function POST(request: Request) {
     const message =
       caughtError instanceof Error
         ? caughtError.message
-        : "Failed to create tool call log.";
+        : "Failed to create assistant message log.";
 
     return jsonError(message, 500);
   }

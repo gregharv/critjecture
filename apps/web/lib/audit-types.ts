@@ -1,57 +1,46 @@
-export const AUDIT_TOOL_CALL_STATUSES = ["started", "completed", "error"] as const;
+export const TOOL_CALL_STATUSES = ["started", "completed", "error"] as const;
 
-export type AuditToolCallStatus = (typeof AUDIT_TOOL_CALL_STATUSES)[number];
+export type ToolCallStatus = (typeof TOOL_CALL_STATUSES)[number];
 
-export type AuditToolCallLog = {
+export type ToolCallLog = {
   accessedFiles: string[];
   completedAt: number | null;
-  createdAt: number;
+  startedAt: number;
   errorMessage: string | null;
   id: string;
-  parametersJson: string;
-  promptId: string;
+  toolParametersJson: string;
+  turnId: string;
   resultSummary: string | null;
-  status: AuditToolCallStatus;
-  toolCallId: string;
+  status: ToolCallStatus;
+  runtimeToolCallId: string;
   toolName: string;
 };
 
-export const AUDIT_TRACE_EVENT_KINDS = [
-  "assistant-text",
-  "assistant-thinking",
-  "assistant-tool-plan",
-  "tool-call",
-  "tool-result",
-] as const;
-
-export type AuditTraceEventKind = (typeof AUDIT_TRACE_EVENT_KINDS)[number];
-
-export type AuditTraceEventLog = {
-  content: string;
+export type AssistantMessageLog = {
   createdAt: number;
   id: string;
-  kind: AuditTraceEventKind;
-  promptId: string;
-  title: string;
+  messageText: string;
+  messageTitle: string;
+  turnId: string;
 };
 
-export type AuditPromptLog = {
+export type ChatTurnLog = {
+  assistantMessages: AssistantMessageLog[];
   chatSessionId: string;
   createdAt: number;
   id: string;
-  promptText: string;
-  role: "intern" | "owner";
+  toolCalls: ToolCallLog[];
+  userPromptText: string;
   userEmail: string | null;
   userId: string | null;
   userName: string | null;
-  traceEvents: AuditTraceEventLog[];
-  toolCalls: AuditToolCallLog[];
+  userRole: "intern" | "owner";
 };
 
-export type CreateAuditPromptResponse = {
-  promptId: string;
+export type CreateChatTurnResponse = {
+  turnId: string;
 };
 
-export type ListAuditLogsResponse = {
-  prompts: AuditPromptLog[];
+export type ListChatTurnLogsResponse = {
+  turns: ChatTurnLog[];
 };

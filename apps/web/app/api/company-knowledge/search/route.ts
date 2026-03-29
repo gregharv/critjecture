@@ -92,7 +92,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await searchCompanyKnowledge(query, user.role);
+    const result = await searchCompanyKnowledge(query, user.organizationSlug, user.role);
     const roleLabel = getRoleLabel(user.role);
 
     return NextResponse.json({

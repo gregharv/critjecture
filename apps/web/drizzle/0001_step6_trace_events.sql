@@ -1,23 +1,14 @@
-ALTER TABLE audit_tool_calls
+ALTER TABLE tool_calls
   ADD COLUMN accessed_files_json TEXT NOT NULL DEFAULT '[]';
 
-CREATE TABLE IF NOT EXISTS audit_trace_events (
+CREATE TABLE IF NOT EXISTS assistant_messages (
   id TEXT PRIMARY KEY NOT NULL,
-  prompt_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (
-    kind IN (
-      'assistant-text',
-      'assistant-thinking',
-      'assistant-tool-plan',
-      'tool-call',
-      'tool-result'
-    )
-  ),
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  message_title TEXT NOT NULL,
+  message_text TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  FOREIGN KEY (prompt_id) REFERENCES audit_prompts(id) ON DELETE CASCADE
+  FOREIGN KEY (turn_id) REFERENCES chat_turns(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS audit_trace_events_prompt_id_created_at_idx
-  ON audit_trace_events(prompt_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS assistant_messages_turn_id_created_at_idx
+  ON assistant_messages(turn_id, created_at DESC);

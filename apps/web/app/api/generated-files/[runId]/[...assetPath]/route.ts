@@ -4,14 +4,14 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import { resolveGeneratedSandboxAsset } from "@/lib/python-sandbox";
-import { getSandboxRunByWorkspaceId } from "@/lib/sandbox-runs";
+import { getSandboxRunByRunId } from "@/lib/sandbox-runs";
 
 export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
     assetPath?: string[];
-    workspaceId?: string;
+    runId?: string;
   }>;
 };
 
@@ -26,17 +26,21 @@ export async function GET(_request: Request, context: RouteContext) {
     return jsonError("Authentication required.", 401);
   }
 
-  const { assetPath = [], workspaceId = "" } = await context.params;
+  const { assetPath = [], runId = "" } = await context.params;
   const relativePath = assetPath.join("/");
 
-  if (!workspaceId || !relativePath) {
+  if (!runId || !relativePath) {
     return jsonError("Generated file path is incomplete.", 400);
   }
 
   try {
-    const sandboxRun = await getSandboxRunByWorkspaceId(workspaceId);
+    const sandboxRun = await getSandboxRunByRunId(runId);
 
-    if (!sandboxRun || sandboxRun.userId !== user.id) {
+    if (
+      !sandboxRun ||
+      sandboxRun.userId !== user.id ||
+      sandboxRun.organizationId !== user.organizationId
+    ) {
       return jsonError("Generated asset not found.", 404);
     }
 
@@ -52,7 +56,7 @@ export async function GET(_request: Request, context: RouteContext) {
       return jsonError("Generated asset not found.", 404);
     }
 
-    const asset = await resolveGeneratedSandboxAsset(workspaceId, relativePath);
+    const asset = await resolveGeneratedSandboxAsset(runId, relativePath);
     const content = await readFile(asset.absolutePath);
     const headers = new Headers({
       "Cache-Control": "no-store",

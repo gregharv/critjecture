@@ -15,7 +15,7 @@ const SANDBOX_WORKSPACE_DIR = "/tmp/workspace";
 const SANDBOX_OUTPUTS_DIR = "outputs";
 const SANDBOX_TIMEOUT_MS = 10_000;
 const SANDBOX_MAX_BUFFER = 1024 * 1024;
-const WORKSPACE_ID_PATTERN =
+const RUN_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const GENERATED_ASSET_MIME_TYPES: Record<string, string> = {
@@ -33,18 +33,18 @@ export type GeneratedSandboxAsset = {
   fileName: string;
   mimeType: string;
   relativePath: string;
-  workspaceId: string;
+  runId: string;
 };
 
 export type SandboxedCommandResult = {
   exitCode: number;
   generatedAssets: GeneratedSandboxAsset[];
   pythonExecutable: string;
+  runId: string;
   stagedFiles: StagedSandboxFile[];
   stderr: string;
   stdout: string;
   workspaceDir: string;
-  workspaceId: string;
 };
 
 export class SandboxExecutionError extends Error {
@@ -81,17 +81,17 @@ function getGeneratedAssetMimeType(relativePath: string) {
   return GENERATED_ASSET_MIME_TYPES[path.extname(relativePath).toLowerCase()] ?? null;
 }
 
-function getSandboxWorkspaceId(workspaceDir: string) {
+function getSandboxRunId(workspaceDir: string) {
   return path.basename(workspaceDir);
 }
 
-function buildGeneratedAssetDownloadUrl(workspaceId: string, relativePath: string) {
+function buildGeneratedAssetDownloadUrl(runId: string, relativePath: string) {
   const encodedRelativePath = relativePath
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
 
-  return `/api/generated-files/${workspaceId}/${encodedRelativePath}`;
+  return `/api/generated-files/${runId}/${encodedRelativePath}`;
 }
 
 function normalizeGeneratedAssetRelativePath(relativePath: string) {
@@ -136,14 +136,14 @@ function buildGeneratedAssetMetadata(workspaceDir: string, relativePath: string)
     );
   }
 
-  const workspaceId = getSandboxWorkspaceId(workspaceDir);
+  const runId = getSandboxRunId(workspaceDir);
 
   return {
-    downloadUrl: buildGeneratedAssetDownloadUrl(workspaceId, normalizedRelativePath),
+    downloadUrl: buildGeneratedAssetDownloadUrl(runId, normalizedRelativePath),
     fileName: path.posix.basename(normalizedRelativePath),
     mimeType,
     relativePath: normalizedRelativePath,
-    workspaceId,
+    runId,
   } satisfies GeneratedSandboxAsset;
 }
 
@@ -240,6 +240,7 @@ function validateCsvAnalysisCode(code: string) {
 
 async function stageInputFiles(
   inputFiles: string[],
+  organizationSlug: string,
   role: UserRole,
   workspaceDir: string,
 ): Promise<StagedSandboxFile[]> {
@@ -247,7 +248,11 @@ async function stageInputFiles(
   const stagedFiles: StagedSandboxFile[] = [];
 
   for (const requestedPath of uniquePaths) {
-    const resolvedFile = await resolveAuthorizedCompanyDataFile(requestedPath, role);
+    const resolvedFile = await resolveAuthorizedCompanyDataFile(
+      requestedPath,
+      organizationSlug,
+      role,
+    );
     const stagedPath = path.posix.join("inputs", resolvedFile.relativePath);
     const stagedAbsolutePath = path.join(workspaceDir, ...stagedPath.split("/"));
 
@@ -264,19 +269,19 @@ async function stageInputFiles(
 }
 
 export async function resolveGeneratedSandboxAsset(
-  workspaceId: string,
+  runId: string,
   relativePath: string,
 ) {
-  if (!WORKSPACE_ID_PATTERN.test(workspaceId)) {
-    throw new Error("Invalid sandbox workspace id.");
+  if (!RUN_ID_PATTERN.test(runId)) {
+    throw new Error("Invalid sandbox run id.");
   }
 
   const normalizedRelativePath = normalizeGeneratedAssetRelativePath(relativePath);
   const metadata = buildGeneratedAssetMetadata(
-    path.join(SANDBOX_WORKSPACE_DIR, workspaceId),
+    path.join(SANDBOX_WORKSPACE_DIR, runId),
     normalizedRelativePath,
   );
-  const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, workspaceId);
+  const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, runId);
   const absolutePath = path.resolve(workspaceDir, ...normalizedRelativePath.split("/"));
   const relativeFromWorkspace = path.relative(workspaceDir, absolutePath);
 
@@ -309,6 +314,7 @@ export async function resolveGeneratedSandboxAsset(
 export async function executeSandboxedCommand(options: {
   code: string;
   inputFiles?: string[];
+  organizationSlug: string;
   role: UserRole;
 }): Promise<SandboxedCommandResult> {
   const normalizedCode = options.code.trim();
@@ -320,12 +326,17 @@ export async function executeSandboxedCommand(options: {
   await mkdir(SANDBOX_WORKSPACE_DIR, { recursive: true });
 
   const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, randomUUID());
-  const workspaceId = getSandboxWorkspaceId(workspaceDir);
+  const runId = getSandboxRunId(workspaceDir);
   await mkdir(workspaceDir, { recursive: true });
   await mkdir(path.join(workspaceDir, SANDBOX_OUTPUTS_DIR), { recursive: true });
   await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
 
-  const stagedFiles = await stageInputFiles(options.inputFiles ?? [], options.role, workspaceDir);
+  const stagedFiles = await stageInputFiles(
+    options.inputFiles ?? [],
+    options.organizationSlug,
+    options.role,
+    workspaceDir,
+  );
   const hasCsvInputs = stagedFiles.some((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
 
   if (hasCsvInputs) {
@@ -356,11 +367,11 @@ export async function executeSandboxedCommand(options: {
       exitCode: 0,
       generatedAssets,
       pythonExecutable,
+      runId,
       stagedFiles,
       stderr,
       stdout,
       workspaceDir,
-      workspaceId,
     };
   } catch (caughtError) {
     if (typeof caughtError === "object" && caughtError !== null) {

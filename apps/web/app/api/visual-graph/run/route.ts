@@ -60,13 +60,15 @@ export async function POST(request: Request) {
     const result = await executeSandboxedCommand({
       code: buildVisualGraphCode(parsedRequest.code),
       inputFiles: parsedRequest.inputFiles,
+      organizationSlug: user.organizationSlug,
       role: user.role,
     });
     await recordSandboxRun({
       generatedAssets: result.generatedAssets,
+      organizationId: user.organizationId,
+      runId: result.runId,
       toolName: "generate_visual_graph",
       userId: user.id,
-      workspaceId: result.workspaceId,
     });
     const generatedAsset = expectSinglePngAsset(result.generatedAssets);
 

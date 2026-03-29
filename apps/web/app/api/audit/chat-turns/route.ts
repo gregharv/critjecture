@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { createAuditPromptLog } from "@/lib/audit-log";
+import { createChatTurnLog } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
-type CreateAuditPromptBody = {
+type CreateChatTurnBody = {
   chatSessionId?: unknown;
-  promptText?: unknown;
+  userPromptText?: unknown;
 };
 
 function jsonError(message: string, status: number) {
@@ -21,20 +21,21 @@ export async function POST(request: Request) {
     return jsonError("Authentication required.", 401);
   }
 
-  let body: CreateAuditPromptBody;
+  let body: CreateChatTurnBody;
 
   try {
-    body = (await request.json()) as CreateAuditPromptBody;
+    body = (await request.json()) as CreateChatTurnBody;
   } catch {
     return jsonError("Request body must be valid JSON.", 400);
   }
 
-  const promptText = typeof body.promptText === "string" ? body.promptText.trim() : "";
+  const userPromptText =
+    typeof body.userPromptText === "string" ? body.userPromptText.trim() : "";
   const chatSessionId =
     typeof body.chatSessionId === "string" ? body.chatSessionId.trim() : "";
 
-  if (!promptText) {
-    return jsonError("promptText must be a non-empty string.", 400);
+  if (!userPromptText) {
+    return jsonError("userPromptText must be a non-empty string.", 400);
   }
 
   if (!chatSessionId) {
@@ -42,17 +43,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await createAuditPromptLog({
+    const result = await createChatTurnLog({
       chatSessionId,
-      promptText,
-      role: user.role,
+      organizationId: user.organizationId,
+      userPromptText,
+      userRole: user.role,
       userId: user.id,
     });
 
     return NextResponse.json(result);
   } catch (caughtError) {
     const message =
-      caughtError instanceof Error ? caughtError.message : "Failed to create audit prompt log.";
+      caughtError instanceof Error ? caughtError.message : "Failed to create chat turn log.";
 
     return jsonError(message, 500);
   }

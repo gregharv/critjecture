@@ -2,27 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 10: Tenant and Data Persistence Foundations
-
-### Goal
-
-Add durable application state for users, organizations, and core records so the product is not tied to local-only or browser-only assumptions.
-
-### What Should Be Implemented
-
-- add a production-ready persistence layer for users and organizations
-- define tenant ownership of company data, conversations, audits, and uploaded files
-- establish production migration practices
-- define backup and restore expectations
-- preserve the option for simpler single-customer on-prem deployment where appropriate
-
-### Acceptance Criteria
-
-- users and organizations are stored durably
-- data records are scoped to the correct tenant
-- database migrations are repeatable
-- backup and restore expectations are documented and testable
-
 ## Step 11: Server-Backed Chat History
 
 ### Goal

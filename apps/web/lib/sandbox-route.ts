@@ -42,7 +42,9 @@ export function parseInputFiles(value: unknown):
   }
 
   if (!Array.isArray(value)) {
-    return { error: "inputFiles must be an array of company_data-relative paths." };
+    return {
+      error: "inputFiles must be an array of company_data-relative paths for the current organization.",
+    };
   }
 
   const inputFiles = value

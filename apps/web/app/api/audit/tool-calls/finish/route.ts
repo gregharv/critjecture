@@ -1,31 +1,28 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { auditPromptBelongsToUser, finishAuditToolCallLog } from "@/lib/audit-log";
-import {
-  AUDIT_TOOL_CALL_STATUSES,
-  type AuditToolCallStatus,
-} from "@/lib/audit-types";
+import { chatTurnBelongsToUser, finishToolCallLog } from "@/lib/audit-log";
+import { TOOL_CALL_STATUSES, type ToolCallStatus } from "@/lib/audit-types";
 
 export const runtime = "nodejs";
 
 type FinishAuditToolCallBody = {
   accessedFiles?: unknown;
   errorMessage?: unknown;
-  promptId?: unknown;
   resultSummary?: unknown;
+  runtimeToolCallId?: unknown;
   status?: unknown;
-  toolCallId?: unknown;
+  turnId?: unknown;
 };
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-function isAuditToolCallStatus(value: unknown): value is AuditToolCallStatus {
+function isToolCallStatus(value: unknown): value is ToolCallStatus {
   return (
     typeof value === "string" &&
-    AUDIT_TOOL_CALL_STATUSES.includes(value as AuditToolCallStatus)
+    TOOL_CALL_STATUSES.includes(value as ToolCallStatus)
   );
 }
 
@@ -44,8 +41,9 @@ export async function POST(request: Request) {
     return jsonError("Request body must be valid JSON.", 400);
   }
 
-  const promptId = typeof body.promptId === "string" ? body.promptId.trim() : "";
-  const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId.trim() : "";
+  const turnId = typeof body.turnId === "string" ? body.turnId.trim() : "";
+  const runtimeToolCallId =
+    typeof body.runtimeToolCallId === "string" ? body.runtimeToolCallId.trim() : "";
   const resultSummary =
     typeof body.resultSummary === "string" ? body.resultSummary.trim() : null;
   const errorMessage =
@@ -56,28 +54,32 @@ export async function POST(request: Request) {
         .filter(Boolean)
     : [];
 
-  if (!promptId || !toolCallId) {
-    return jsonError("promptId and toolCallId must both be non-empty strings.", 400);
+  if (!turnId || !runtimeToolCallId) {
+    return jsonError("turnId and runtimeToolCallId must both be non-empty strings.", 400);
   }
 
-  if (!isAuditToolCallStatus(body.status) || body.status === "started") {
+  if (!isToolCallStatus(body.status) || body.status === "started") {
     return jsonError('status must be either "completed" or "error".', 400);
   }
 
   try {
-    const promptBelongsToUser = await auditPromptBelongsToUser(promptId, user.id);
+    const turnBelongsToUser = await chatTurnBelongsToUser(
+      turnId,
+      user.id,
+      user.organizationId,
+    );
 
-    if (!promptBelongsToUser) {
-      return jsonError("Audit prompt not found.", 404);
+    if (!turnBelongsToUser) {
+      return jsonError("Chat turn not found.", 404);
     }
 
-    await finishAuditToolCallLog({
+    await finishToolCallLog({
       accessedFiles,
       errorMessage,
-      promptId,
       resultSummary,
       status: body.status,
-      toolCallId,
+      runtimeToolCallId,
+      turnId,
     });
 
     return NextResponse.json({ ok: true });
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
     const message =
       caughtError instanceof Error
         ? caughtError.message
-        : "Failed to finish audit tool call log.";
+        : "Failed to finish tool call log.";
 
     return jsonError(message, 500);
   }

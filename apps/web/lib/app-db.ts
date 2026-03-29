@@ -2,10 +2,11 @@ import "server-only";
 
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { access, mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import * as schema from "@/lib/audit-schema";
+import { resolveDatabaseFilePath, resolveWebRoot } from "@/lib/app-paths";
+import * as schema from "@/lib/app-schema";
 
 const MIGRATIONS_TABLE = "__critjecture_migrations";
 
@@ -14,55 +15,8 @@ type AppDatabase = ReturnType<typeof drizzle<typeof schema>>;
 let databaseInstance: AppDatabase | null = null;
 let migrationPromise: Promise<void> | null = null;
 
-async function pathExists(targetPath: string) {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolveWebRoot() {
-  const candidates = [
-    path.resolve(process.cwd(), "apps/web"),
-    path.resolve(process.cwd()),
-    path.resolve(process.cwd(), ".."),
-  ];
-
-  for (const candidate of candidates) {
-    if (await pathExists(path.join(candidate, "package.json"))) {
-      const packageJsonPath = path.join(candidate, "package.json");
-      const packageJson = await readFile(packageJsonPath, "utf8").catch(() => "");
-
-      if (packageJson.includes('"name": "web"')) {
-        return candidate;
-      }
-    }
-  }
-
-  throw new Error("Unable to locate apps/web for audit database setup.");
-}
-
-async function resolveAuditPaths() {
-  const webRoot = await resolveWebRoot();
-
-  return {
-    dbFilePath: path.join(webRoot, "data", "audit.sqlite"),
-    migrationsDir: path.join(webRoot, "drizzle"),
-  };
-}
-
-async function ensureDatabaseDirectory(dbFilePath: string) {
-  await mkdir(path.dirname(dbFilePath), { recursive: true });
-}
-
 async function getMigrationFileNames(migrationsDir: string) {
-  if (!(await pathExists(migrationsDir))) {
-    return [];
-  }
-
-  const entries = await readdir(migrationsDir, { withFileTypes: true });
+  const entries = await readdir(migrationsDir, { withFileTypes: true }).catch(() => []);
 
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
@@ -70,8 +24,17 @@ async function getMigrationFileNames(migrationsDir: string) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+async function resolveMigrationPaths() {
+  const webRoot = await resolveWebRoot();
+
+  return {
+    dbFilePath: await resolveDatabaseFilePath(),
+    migrationsDir: path.join(webRoot, "drizzle"),
+  };
+}
+
 async function runMigrations(sqlite: Database.Database) {
-  const { migrationsDir } = await resolveAuditPaths();
+  const { migrationsDir } = await resolveMigrationPaths();
   const migrationFiles = await getMigrationFileNames(migrationsDir);
 
   sqlite.exec(`
@@ -95,9 +58,7 @@ async function runMigrations(sqlite: Database.Database) {
     const applyMigration = sqlite.transaction(() => {
       sqlite.exec(migrationSql);
       sqlite
-        .prepare(
-          `INSERT INTO ${MIGRATIONS_TABLE} (id, applied_at) VALUES (?, ?)`,
-        )
+        .prepare(`INSERT INTO ${MIGRATIONS_TABLE} (id, applied_at) VALUES (?, ?)`)
         .run(migrationFile, Date.now());
     });
 
@@ -106,8 +67,8 @@ async function runMigrations(sqlite: Database.Database) {
 }
 
 async function createDatabase() {
-  const { dbFilePath } = await resolveAuditPaths();
-  await ensureDatabaseDirectory(dbFilePath);
+  const { dbFilePath } = await resolveMigrationPaths();
+  await mkdir(path.dirname(dbFilePath), { recursive: true });
 
   const sqlite = new Database(dbFilePath);
   sqlite.pragma("journal_mode = WAL");
@@ -124,7 +85,7 @@ async function createDatabase() {
   return databaseInstance;
 }
 
-export async function getAppDatabase() {
+export async function ensureDatabaseReady() {
   if (databaseInstance) {
     if (migrationPromise) {
       await migrationPromise;
@@ -136,4 +97,4 @@ export async function getAppDatabase() {
   return createDatabase();
 }
 
-export const getAuditDatabase = getAppDatabase;
+export const getAppDatabase = ensureDatabaseReady;

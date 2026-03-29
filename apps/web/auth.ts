@@ -44,6 +44,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           email: user.email,
           id: user.id,
           name: user.name,
+          organizationId: user.organizationId,
+          organizationName: user.organizationName,
+          organizationSlug: user.organizationSlug,
           role: user.role,
         };
       },
@@ -58,6 +61,18 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       if (user) {
         token.email = user.email;
         token.name = user.name;
+        token.organizationId =
+          "organizationId" in user && typeof user.organizationId === "string"
+            ? user.organizationId
+            : undefined;
+        token.organizationName =
+          "organizationName" in user && typeof user.organizationName === "string"
+            ? user.organizationName
+            : undefined;
+        token.organizationSlug =
+          "organizationSlug" in user && typeof user.organizationSlug === "string"
+            ? user.organizationSlug
+            : undefined;
         token.sub = user.id;
 
         if ("role" in user && isUserRole(user.role)) {
@@ -73,6 +88,12 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           typeof token.email === "string" ? token.email : session.user.email ?? "";
         session.user.id = typeof token.sub === "string" ? token.sub : "";
         session.user.name = typeof token.name === "string" ? token.name : null;
+        session.user.organizationId =
+          typeof token.organizationId === "string" ? token.organizationId : "";
+        session.user.organizationName =
+          typeof token.organizationName === "string" ? token.organizationName : "";
+        session.user.organizationSlug =
+          typeof token.organizationSlug === "string" ? token.organizationSlug : "";
         session.user.role = isUserRole(token.role) ? token.role : "intern";
       }
 

@@ -3,8 +3,13 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/audit-db";
-import { users } from "@/lib/audit-schema";
+import { getAppDatabase } from "@/lib/app-db";
+import { users } from "@/lib/app-schema";
+import {
+  backfillLegacyOrganizationScope,
+  ensureDefaultOrganization,
+  getPrimaryMembershipForUser,
+} from "@/lib/organizations";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { type UserRole } from "@/lib/roles";
 
@@ -16,6 +21,16 @@ export type AppUser = {
   role: UserRole;
 };
 
+export type AuthenticatedAppUser = {
+  email: string;
+  id: string;
+  name: string | null;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  role: UserRole;
+};
+
 type SeedUserInput = {
   email: string;
   name: string | null;
@@ -23,7 +38,7 @@ type SeedUserInput = {
   role: UserRole;
 };
 
-let seedUsersPromise: Promise<void> | null = null;
+let seedStatePromise: Promise<void> | null = null;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -84,24 +99,30 @@ async function upsertSeedUser(input: SeedUserInput) {
     .where(eq(users.id, existingUser.id));
 }
 
-export async function ensureSeedUsers() {
-  if (!seedUsersPromise) {
-    seedUsersPromise = (async () => {
-      const seedUsers = [
-        getSeedUserInput("CRITJECTURE_OWNER", "owner"),
-        getSeedUserInput("CRITJECTURE_INTERN", "intern"),
-      ].filter((value): value is SeedUserInput => value !== null);
+async function ensureSeedUsers() {
+  const seedUsers = [
+    getSeedUserInput("CRITJECTURE_OWNER", "owner"),
+    getSeedUserInput("CRITJECTURE_INTERN", "intern"),
+  ].filter((value): value is SeedUserInput => value !== null);
 
-      for (const seedUser of seedUsers) {
-        await upsertSeedUser(seedUser);
-      }
+  for (const seedUser of seedUsers) {
+    await upsertSeedUser(seedUser);
+  }
+}
+
+export async function ensureSeedState() {
+  if (!seedStatePromise) {
+    seedStatePromise = (async () => {
+      await ensureSeedUsers();
+      const defaultOrganization = await ensureDefaultOrganization();
+      await backfillLegacyOrganizationScope(defaultOrganization.id);
     })().catch((error) => {
-      seedUsersPromise = null;
+      seedStatePromise = null;
       throw error;
     });
   }
 
-  await seedUsersPromise;
+  await seedStatePromise;
 }
 
 function mapUserRecord(record: typeof users.$inferSelect): AppUser {
@@ -115,7 +136,7 @@ function mapUserRecord(record: typeof users.$inferSelect): AppUser {
 }
 
 export async function getUserByEmail(email: string) {
-  await ensureSeedUsers();
+  await ensureSeedState();
 
   const db = await getAppDatabase();
   const user = await db.query.users.findFirst({
@@ -126,7 +147,7 @@ export async function getUserByEmail(email: string) {
 }
 
 export async function getUserById(id: string) {
-  await ensureSeedUsers();
+  await ensureSeedState();
 
   const db = await getAppDatabase();
   const user = await db.query.users.findFirst({
@@ -134,6 +155,24 @@ export async function getUserById(id: string) {
   });
 
   return user ? mapUserRecord(user) : null;
+}
+
+async function getAuthenticatedUserForRecord(user: AppUser): Promise<AuthenticatedAppUser | null> {
+  const membership = await getPrimaryMembershipForUser(user.id);
+
+  if (!membership) {
+    return null;
+  }
+
+  return {
+    email: user.email,
+    id: user.id,
+    name: user.name,
+    organizationId: membership.organizationId,
+    organizationName: membership.organizationName,
+    organizationSlug: membership.organizationSlug,
+    role: membership.role,
+  };
 }
 
 export async function authenticateUser(email: string, password: string) {
@@ -149,5 +188,5 @@ export async function authenticateUser(email: string, password: string) {
     return null;
   }
 
-  return user;
+  return getAuthenticatedUserForRecord(user);
 }

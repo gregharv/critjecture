@@ -59,6 +59,8 @@ export function WorkspaceShell({
               <div className="shell-user__identity">
                 <span className="shell-user__name">{displayName}</span>
                 <span className="shell-user__meta">
+                  {user.organizationName}
+                  {" · "}
                   {getRoleLabel(user.role)}
                   {" · "}
                   {user.email}
