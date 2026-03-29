@@ -36,6 +36,7 @@ pnpm dev
 
 - Mount or provision a persistent directory for `CRITJECTURE_STORAGE_ROOT`.
 - Point `DATABASE_URL` at a SQLite file inside that persistent directory.
+- Install `bubblewrap` and ensure `prlimit` is available on the Linux host.
 - Run `pnpm db:migrate` before starting the service for upgrades.
 - Back up both the SQLite database file and the storage root content.
 
@@ -46,6 +47,7 @@ SQLite on Railway is supported when a persistent volume is attached.
 - Mount a Railway volume to a stable path such as `/data`.
 - Set `CRITJECTURE_STORAGE_ROOT=/data/critjecture`.
 - Set `DATABASE_URL=/data/critjecture/critjecture.sqlite`.
+- Ensure the runtime image includes `bubblewrap` and `prlimit`.
 - Run `pnpm db:migrate` before the service starts on first deploys and upgrades.
 
 Railway volumes support backups and restores for their stored content, including SQLite files. See Railway's official volume backup docs before relying on this operationally.
@@ -60,7 +62,9 @@ Back up:
 Do not treat as durable:
 
 - `/tmp/workspace/*` sandbox workspaces
-- generated sandbox outputs that were not copied into persistent storage
+- expired generated sandbox outputs after their TTL has elapsed
+
+Short-lived generated sandbox outputs are now copied into tenant storage under `generated_assets/` and are intended to remain available only for the configured TTL window.
 
 ## Restore Expectations
 

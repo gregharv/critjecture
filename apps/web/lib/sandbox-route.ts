@@ -3,12 +3,20 @@ import { NextResponse } from "next/server";
 export type SandboxRequestBody = {
   code?: unknown;
   inputFiles?: unknown;
+  runtimeToolCallId?: unknown;
+  turnId?: unknown;
 };
 
 export function jsonError(
   message: string,
   status: number,
-  details?: { exitCode: number; stderr: string; stdout: string },
+  details?: {
+    exitCode?: number;
+    sandboxRunId?: string;
+    status?: string;
+    stderr?: string;
+    stdout?: string;
+  },
 ) {
   return NextResponse.json(
     {
@@ -32,6 +40,20 @@ export function buildSandboxSummary(stdout: string, stderr: string) {
   }
 
   return "Sandbox execution completed successfully, but stdout was empty. Update the Python code to print the final answer explicitly.";
+}
+
+export function buildGeneratedAssetSummary(
+  stdout: string,
+  assetKind: "chart" | "document",
+  relativePath: string,
+) {
+  const trimmedStdout = stdout.trim();
+
+  if (trimmedStdout) {
+    return `Sandbox execution completed successfully.\n${trimmedStdout}\nSaved ${assetKind} asset to ${relativePath}.`;
+  }
+
+  return `Sandbox execution completed successfully.\nSaved ${assetKind} asset to ${relativePath}.`;
 }
 
 export function parseInputFiles(value: unknown):
@@ -59,7 +81,7 @@ export function parseInputFiles(value: unknown):
 }
 
 export function parseSandboxRequest(body: SandboxRequestBody):
-  | { code: string; inputFiles: string[] }
+  | { code: string; inputFiles: string[]; runtimeToolCallId: string | null; turnId: string | null }
   | { error: string } {
   const code = typeof body.code === "string" ? body.code.trim() : "";
 
@@ -76,5 +98,10 @@ export function parseSandboxRequest(body: SandboxRequestBody):
   return {
     code,
     inputFiles: inputFilesResult.inputFiles,
+    runtimeToolCallId:
+      typeof body.runtimeToolCallId === "string" && body.runtimeToolCallId.trim()
+        ? body.runtimeToolCallId.trim()
+        : null,
+    turnId: typeof body.turnId === "string" && body.turnId.trim() ? body.turnId.trim() : null,
   };
 }

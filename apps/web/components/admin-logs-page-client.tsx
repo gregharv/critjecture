@@ -54,6 +54,10 @@ function formatTimestamp(timestamp: number | null) {
   return DATE_TIME_FORMATTER.format(timestamp);
 }
 
+function formatMiB(bytes: number) {
+  return `${Math.round(bytes / (1024 * 1024))} MiB`;
+}
+
 function getAssistantMessageLabel(
   turn: ChatTurnLog,
   messageId: string,
@@ -271,6 +275,37 @@ function ToolTimelineEvent({ toolCall }: { toolCall: ToolCallLog }) {
           )}
         </div>
       </div>
+
+      {toolCall.sandboxRun ? (
+        <div className="audit-tool__section">
+          <div className="audit-tool__label">Sandbox Run</div>
+          <pre className="audit-tool__code">{JSON.stringify({
+            runId: toolCall.sandboxRun.runId,
+            runner: toolCall.sandboxRun.runner,
+            status: toolCall.sandboxRun.status,
+            failureReason: toolCall.sandboxRun.failureReason,
+            cleanupStatus: toolCall.sandboxRun.cleanupStatus,
+            cleanupCompletedAt: toolCall.sandboxRun.cleanupCompletedAt
+              ? formatTimestamp(toolCall.sandboxRun.cleanupCompletedAt)
+              : null,
+            limits: {
+              timeoutMs: toolCall.sandboxRun.timeoutMs,
+              cpuLimitSeconds: toolCall.sandboxRun.cpuLimitSeconds,
+              memoryLimit: formatMiB(toolCall.sandboxRun.memoryLimitBytes),
+              maxProcesses: toolCall.sandboxRun.maxProcesses,
+              stdoutMaxBytes: toolCall.sandboxRun.stdoutMaxBytes,
+              artifactMaxBytes: toolCall.sandboxRun.artifactMaxBytes,
+              artifactTtlMs: toolCall.sandboxRun.artifactTtlMs,
+            },
+            generatedAssets: toolCall.sandboxRun.generatedAssets.map((asset) => ({
+              relativePath: asset.relativePath,
+              mimeType: asset.mimeType,
+              byteSize: asset.byteSize,
+              expiresAt: formatTimestamp(asset.expiresAt),
+            })),
+          }, null, 2)}</pre>
+        </div>
+      ) : null}
 
       {parameterDisplay.code ? (
         <div className="audit-tool__section">

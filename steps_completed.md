@@ -912,4 +912,126 @@ Step 13 was implemented as a tenant-scoped knowledge library with authenticated 
 - Uploaded PDFs use the existing `documents` and `document_chunks` tables as the searchable indexed path.
 - PDF ingestion currently depends on the local `pdftotext` binary and does not perform OCR.
 - The new knowledge library is the primary admin-visible upload surface for this step; uploads were not added to the audit timeline.
-- The remaining roadmap in `steps.md` now starts at Step 14.
+- The remaining roadmap in `steps.md` now starts at Step 16.
+
+## Step 14: Sandbox Hardening and Execution Controls
+
+### What Was Implemented
+
+Step 14 was implemented as a Linux namespace sandbox hardening pass with stricter execution controls, persisted short-lived generated assets, stronger cleanup guarantees, and tighter audit correlation.
+
+- Added shared sandbox policy defaults in:
+  - `apps/web/lib/sandbox-policy.ts`
+  - centralizes:
+    - timeout
+    - CPU limit
+    - memory limit
+    - process limit
+    - stdout/stderr capture limit
+    - artifact size limit
+    - artifact TTL
+    - per-user and global concurrency caps
+- Expanded the shared app schema and migration set:
+  - `apps/web/drizzle/0003_step14_sandbox_hardening.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds:
+    - richer `sandbox_runs` lifecycle fields
+    - `tool_calls.sandbox_run_id`
+    - normalized `sandbox_generated_assets`
+- Reworked sandbox execution in:
+  - `apps/web/lib/python-sandbox.ts`
+  - now:
+    - admits runs through a tracked `sandbox_runs` lifecycle
+    - rejects excess concurrency with recorded sandbox rows
+    - executes Python through Linux `bubblewrap`
+    - applies `prlimit` CPU, memory, process, file-size, and timeout controls
+    - keeps sandbox network access disabled
+    - validates generated file signatures and exact output locations
+    - deletes `/tmp/workspace/<run-id>` in `finally`
+- Replaced ephemeral generated-file serving with persisted short-lived artifacts:
+  - `apps/web/lib/sandbox-runs.ts`
+  - `apps/web/app/api/generated-files/[runId]/[...assetPath]/route.ts`
+  - `apps/web/lib/app-paths.ts`
+  - accepted PNG/PDF outputs are copied into tenant storage under `generated_assets/<run-id>/...`
+  - generated files are served from persisted storage and expire after the configured TTL
+- Tightened tool and audit correlation:
+  - sandbox tool routes now return `sandboxRunId`, runner, and enforced limits
+  - audit tool completion accepts and stores `sandboxRunId`
+  - owner audit logs now show sandbox lifecycle metadata and generated-asset expiry details
+- Updated operator and decision docs:
+  - `README.md`
+  - `deployment.md`
+  - `sandbox.md`
+  - `steps.md`
+
+### Current Step 14 Behavior
+
+- Sandbox execution
+  - runs through `bubblewrap` on Linux
+  - uses no normal network access
+  - enforces CPU, memory, process, stdout/stderr, and output-size limits
+  - rejects new work when the per-user or global concurrency cap is already reached
+- Cleanup and lifecycle
+  - every admitted run receives a durable `sandbox_runs` row
+  - stale `running` rows are reconciled as abandoned
+  - temporary sandbox workspaces are removed after completion or failure
+- Generated files
+  - `run_data_analysis` may not persist generated files
+  - `generate_visual_graph` must write exactly `outputs/chart.png`
+  - `generate_document` must write exactly `outputs/notice.pdf`
+  - accepted files are copied into tenant storage and expire after the configured TTL
+- Auditability
+  - audit tool calls now carry `sandboxRunId`
+  - owner audit logs can inspect runner, limits, cleanup state, failure reason, and generated asset expiry
+
+### Important Implementation Details
+
+- Step 14 intentionally chose Linux `bubblewrap` hardening instead of keeping the old plain child-process path.
+- The app still uses synchronous HTTP tool calls; Step 14 does not add a background queue or external sandbox worker.
+- Generated-file access no longer depends on `/tmp/workspace/<run-id>` still existing.
+- `sandbox.md` is the long-lived decision record for sandbox defaults and future tuning.
+- The remaining roadmap in `steps.md` now starts at Step 16.
+
+## Step 15: Product Boundaries, Chart-Flow Limits, and Current-State Summary
+
+### What Was Implemented
+
+Step 15 was implemented as a documentation pass to make the current product boundaries explicit and to record what the MVP is designed for, what it is not designed for yet, and how the recent chart-flow changes behave.
+
+- Updated `overview.md` to reflect the actual current architecture rather than the earlier blueprint language.
+- Added a clear product-positioning summary covering:
+  - what Critjecture is for right now
+  - what it is not for yet
+  - current chart and sandbox scaling limitations
+  - near-term ideas for scaling the chart flow safely
+- Documented the current chart workflow after the recent fix:
+  - search for the right file
+  - run data analysis first
+  - emit compact JSON chart data
+  - store a temporary `analysisResultId`
+  - render the chart from that structured result
+- Recorded the practical limitation that the current chart flow is suitable for summarized chart payloads, not huge raw plotted datasets.
+- Updated roadmap numbering in `steps.md` so future steps remain sequential after adding this summary step.
+
+### Current Step 15 Behavior
+
+- The repo now has an explicit written statement of current product intent instead of leaving that intent implicit in the code or prior chat history.
+- Engineers can see that the current MVP is optimized for:
+  - narrow property-management workflows
+  - small-to-medium summarized analyses
+  - auditable, RBAC-scoped tool calls
+- Engineers can also see that the current MVP is not yet meant for:
+  - massive plotted point sets
+  - durable multi-instance intermediate analysis storage
+  - warehouse-style or async large-scale data processing
+
+### Important Implementation Details
+
+- This step is documentation-only.
+- The new summary reflects the implementation state reached through Steps 1-14, including:
+  - authentication
+  - tenant-scoped knowledge ingestion
+  - server-backed chat history
+  - sandbox hardening
+  - analysis-first chart generation
+- The remaining roadmap in `steps.md` now starts at Step 16.

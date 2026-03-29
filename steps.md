@@ -2,27 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 14: Sandbox Hardening and Execution Controls
-
-### Goal
-
-Strengthen the execution model for model-generated code so it is appropriate for real customer environments.
-
-### What Should Be Implemented
-
-- move toward a stronger isolation boundary than the current local subprocess model
-- enforce CPU, memory, runtime, and concurrency limits
-- guarantee workspace cleanup and artifact lifecycle handling
-- tighten execution auditing around sandbox runs
-- formalize allowed output types and safer generated-file handling
-
-### Acceptance Criteria
-
-- sandbox jobs have enforced resource limits
-- failed or abandoned jobs do not leave unsafe residual state
-- execution isolation is materially stronger than the current local child-process model
-
-## Step 15: Observability, Rate Limits, and Cost Controls
+## Step 16: Observability, Rate Limits, and Cost Controls
 
 ### Goal
 
@@ -43,7 +23,7 @@ Add the operational controls needed to run the product safely and supportably.
 - abusive or runaway usage is limited automatically
 - usage and cost data can be reviewed per user or tenant
 
-## Step 16: Bulk Knowledge Imports and Async Ingestion
+## Step 17: Bulk Knowledge Imports and Async Ingestion
 
 ### Goal
 
@@ -66,7 +46,7 @@ Support real customer knowledge onboarding by importing large file sets safely w
 - partial failures do not invalidate the whole import job
 - newly imported files only appear in search and tool workflows after successful ingestion
 
-## Step 17: Test Coverage and Release Readiness
+## Step 18: Test Coverage and Release Readiness
 
 ### Goal
 
@@ -87,7 +67,7 @@ Create enough automated verification to ship changes with confidence.
 - major regressions are catchable before release
 - a repeatable release confidence process exists
 
-## Step 18: Admin Operations and Compliance Controls
+## Step 19: Admin Operations and Compliance Controls
 
 ### Goal
 

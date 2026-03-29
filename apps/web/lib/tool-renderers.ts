@@ -116,8 +116,16 @@ function getToolExitCode(details: SandboxToolDetails | undefined) {
   return typeof details?.exitCode === "number" ? details.exitCode : undefined;
 }
 
-function getToolWorkspaceDir(details: SandboxToolDetails | undefined) {
-  return typeof details?.workspaceDir === "string" ? details.workspaceDir : "";
+function getToolSandboxRunId(details: SandboxToolDetails | undefined) {
+  return typeof details?.sandboxRunId === "string" ? details.sandboxRunId : "";
+}
+
+function getToolRunner(details: SandboxToolDetails | undefined) {
+  return typeof details?.runner === "string" ? details.runner : "";
+}
+
+function getToolLimits(details: SandboxToolDetails | undefined) {
+  return details?.limits;
 }
 
 function getGeneratedAsset(details: SandboxToolDetails | undefined) {
@@ -190,7 +198,9 @@ function renderSandboxToolCard(
   const state = getToolState(result, isStreaming);
   const summary = getToolSummary(result);
   const generatedAsset = getGeneratedAsset(details);
-  const workspaceDir = getToolWorkspaceDir(details);
+  const sandboxRunId = getToolSandboxRunId(details);
+  const runner = getToolRunner(details);
+  const limits = getToolLimits(details);
 
   return {
     content: html`
@@ -302,7 +312,7 @@ function renderSandboxToolCard(
         }
 
         ${
-          typeof exitCode === "number" || stagedFiles.length || workspaceDir
+          typeof exitCode === "number" || stagedFiles.length || sandboxRunId || runner || limits
             ? html`
                 <div class="crit-tool__meta">
                   ${typeof exitCode === "number"
@@ -311,7 +321,12 @@ function renderSandboxToolCard(
                   ${stagedFiles.length || details
                     ? html`<span>${stagedFiles.length} staged file${stagedFiles.length === 1 ? "" : "s"}</span>`
                     : nothing}
-                  ${workspaceDir ? html`<span>${workspaceDir}</span>` : nothing}
+                  ${runner ? html`<span>${runner}</span>` : nothing}
+                  ${sandboxRunId ? html`<span>run ${sandboxRunId}</span>` : nothing}
+                  ${limits
+                    ? html`<span>${Math.round(limits.memoryLimitBytes / (1024 * 1024))} MiB</span>`
+                    : nothing}
+                  ${limits ? html`<span>${Math.round(limits.timeoutMs / 1000)}s timeout</span>` : nothing}
                 </div>
               `
             : nothing

@@ -15,6 +15,24 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
+function describeCsvPreview(result: CompanyKnowledgeSearchResult, files: string[]) {
+  const schemaLines = result.candidateFiles
+    .map((candidate) => {
+      if (!files.includes(candidate.file) || candidate.preview.kind !== "csv") {
+        return null;
+      }
+
+      return `${candidate.file}: ${candidate.preview.columns.join(", ")}`;
+    })
+    .filter(Boolean);
+
+  if (schemaLines.length === 0) {
+    return null;
+  }
+
+  return `CSV columns: ${schemaLines.join(" | ")}.`;
+}
+
 function buildSummary(query: string, roleLabel: string, result: CompanyKnowledgeSearchResult) {
   if (result.candidateFiles.length === 0) {
     return `No matches found for "${query}" in ${result.scopeDescription}.`;
@@ -51,9 +69,12 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
       `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
       `Role: ${roleLabel}.`,
       selectionLine,
+      describeCsvPreview(result, result.selectedFiles),
       "Use the selected file path in inputFiles when a Python sandbox tool is needed.",
       citations,
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   const recommendedLine =
@@ -66,8 +87,11 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     `Role: ${roleLabel}.`,
     "Selection pending. A multi-select file picker will appear after the assistant finishes gathering candidates. Do not call a Python sandbox tool yet.",
     recommendedLine,
+    describeCsvPreview(result, result.recommendedFiles),
     candidateLines,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export async function POST(request: Request) {

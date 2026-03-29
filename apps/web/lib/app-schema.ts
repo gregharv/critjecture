@@ -138,6 +138,7 @@ export const toolCalls = sqliteTable(
     toolName: text("tool_name").notNull(),
     toolParametersJson: text("tool_parameters_json").notNull(),
     accessedFilesJson: text("accessed_files_json").notNull().default("[]"),
+    sandboxRunId: text("sandbox_run_id"),
     status: text("status", { enum: ["started", "completed", "error"] }).notNull(),
     resultSummary: text("result_summary"),
     errorMessage: text("error_message"),
@@ -150,6 +151,7 @@ export const toolCalls = sqliteTable(
       sql`${table.status} in ('started', 'completed', 'error')`,
     ),
     index("tool_calls_turn_id_started_at_idx").on(table.turnId, table.startedAt),
+    index("tool_calls_sandbox_run_id_idx").on(table.sandboxRunId),
   ],
 );
 
@@ -188,19 +190,77 @@ export const sandboxRuns = sqliteTable(
     organizationId: text("organization_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
+    turnId: text("turn_id").references(() => chatTurns.id, { onDelete: "set null" }),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    runtimeToolCallId: text("runtime_tool_call_id"),
     toolName: text("tool_name").notNull(),
+    runner: text("runner").notNull().default("bubblewrap"),
+    status: text("status", {
+      enum: ["running", "completed", "failed", "timed_out", "rejected", "abandoned"],
+    })
+      .notNull()
+      .default("running"),
+    failureReason: text("failure_reason"),
+    exitCode: integer("exit_code"),
+    timeoutMs: integer("timeout_ms").notNull().default(0),
+    cpuLimitSeconds: integer("cpu_limit_seconds").notNull().default(0),
+    memoryLimitBytes: integer("memory_limit_bytes").notNull().default(0),
+    maxProcesses: integer("max_processes").notNull().default(0),
+    stdoutMaxBytes: integer("stdout_max_bytes").notNull().default(0),
+    artifactMaxBytes: integer("artifact_max_bytes").notNull().default(0),
+    artifactTtlMs: integer("artifact_ttl_ms").notNull().default(0),
+    cleanupStatus: text("cleanup_status", {
+      enum: ["pending", "completed", "failed", "skipped"],
+    })
+      .notNull()
+      .default("pending"),
+    cleanupCompletedAt: integer("cleanup_completed_at"),
+    cleanupError: text("cleanup_error"),
     generatedAssetsJson: text("generated_assets_json").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at").notNull().default(0),
+    completedAt: integer("completed_at"),
   },
   (table) => [
+    check(
+      "sandbox_runs_status_check",
+      sql`${table.status} in ('running', 'completed', 'failed', 'timed_out', 'rejected', 'abandoned')`,
+    ),
+    check(
+      "sandbox_runs_cleanup_status_check",
+      sql`${table.cleanupStatus} in ('pending', 'completed', 'failed', 'skipped')`,
+    ),
     index("sandbox_runs_user_id_created_at_idx").on(table.userId, table.createdAt),
     index("sandbox_runs_organization_id_created_at_idx").on(
       table.organizationId,
       table.createdAt,
     ),
+    index("sandbox_runs_status_started_at_idx").on(table.status, table.startedAt),
+    index("sandbox_runs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
+  ],
+);
+
+export const sandboxGeneratedAssets = sqliteTable(
+  "sandbox_generated_assets",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => sandboxRuns.runId, { onDelete: "cascade" }),
+    relativePath: text("relative_path").notNull(),
+    storagePath: text("storage_path").notNull(),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("sandbox_generated_assets_run_path_idx").on(table.runId, table.relativePath),
+    index("sandbox_generated_assets_run_id_idx").on(table.runId),
+    index("sandbox_generated_assets_expires_at_idx").on(table.expiresAt),
   ],
 );
 

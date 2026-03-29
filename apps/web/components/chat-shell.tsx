@@ -31,10 +31,16 @@ import type {
   ToolCallStatus,
 } from "@/lib/audit-types";
 import type {
+  DataAnalysisToolResponse,
   GeneratedAssetToolResponse,
   SandboxToolResponse,
 } from "@/lib/sandbox-tool-types";
 import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
+import {
+  DEFAULT_CHAT_MODEL_ID,
+  DEFAULT_CHAT_THINKING_LEVEL,
+  getSessionModelId,
+} from "@/lib/chat-models";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type ChatShellState = {
@@ -76,8 +82,6 @@ type ConversationBootstrapState = {
   id: string;
   initialSessionData: SessionData | null;
 };
-
-const AUDIT_MODEL_NAME = "gpt-4o-mini";
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
@@ -187,8 +191,26 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
   return fallbackMessage;
 }
 
+function extractSandboxRunId(value: unknown) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "sandboxRunId" in value &&
+    typeof value.sandboxRunId === "string" &&
+    value.sandboxRunId.trim()
+  ) {
+    return value.sandboxRunId.trim();
+  }
+
+  return null;
+}
+
 function getUniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function getActiveModelId(model: unknown) {
+  return getSessionModelId(model) ?? DEFAULT_CHAT_MODEL_ID;
 }
 
 function createPlannerSelectionMessage(searches: PendingPlannerSearch[]) {
@@ -368,6 +390,22 @@ function extractAccessedFiles(
   return [...files];
 }
 
+function createToolRouteError(
+  value: unknown,
+  fallbackMessage: string,
+): Error & { sandboxRunId?: string } {
+  const error = new Error(getErrorMessage(value, fallbackMessage)) as Error & {
+    sandboxRunId?: string;
+  };
+  const sandboxRunId = extractSandboxRunId(value);
+
+  if (sandboxRunId) {
+    error.sandboxRunId = sandboxRunId;
+  }
+
+  return error;
+}
+
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
@@ -381,14 +419,16 @@ function getSystemPrompt(role: UserRole) {
     "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
-    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. Use matplotlib only, build the dataset with Polars when CSV input files are staged, save exactly one PNG file inside outputs/chart.png, and print a short summary.",
+    "For any chart that depends on company CSV files, use run_data_analysis first to confirm the exact CSV headers and print one JSON object shaped like {\"chart\":{\"type\":\"bar\",\"x\":[...],\"y\":[...],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}}.",
+    "Use the generate_visual_graph tool after that analysis step by passing the returned analysisResultId. Do not rescan CSV files inside generate_visual_graph when analysisResultId is available.",
+    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. Use matplotlib only, save exactly one PNG file inside outputs/chart.png, and print a short summary.",
     "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
     "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
-    "When you use generate_visual_graph or generate_document on company files, pass those same relative paths in inputFiles.",
+    "When you use generate_document on company files, pass those same relative paths in inputFiles.",
     "The search tool may return auto-selected files or trigger a planner-level multi-select picker after the assistant finishes gathering candidates. If selection is pending, do not call any Python sandbox tool yet. Wait for the user to confirm the picker first.",
     "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout.",
     "Never rely on a trailing expression like `mean, median`; use print(...).",
-    "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
+    "If you need to return multiple analytical values or prepare chart data, print a single JSON object so the UI can render it clearly.",
     "For any staged CSV input, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
     "Polars cheat sheet: use DataFrame.group_by(...), not groupby(...). Use df.sort('column', descending=True), not reverse=True or 'desc'. Use exact CSV headers in pl.col(...), for example ledger_year instead of inventing year. Convert plot columns with series.to_list() before passing them to matplotlib.",
     "matplotlib is available for PNG charts. Convert chart columns to plain Python lists before plotting.",
@@ -960,7 +1000,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout.",
+              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If you are preparing a chart, print a single JSON object with chart-ready arrays under a chart key.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
@@ -974,21 +1014,62 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           ),
         });
 
-        const createSandboxTool = <TResponse extends SandboxToolResponse>(
+        const generateVisualGraphParameters = Type.Object({
+          analysisResultId: Type.Optional(
+            Type.String({
+              description:
+                "The analysisResultId returned by run_data_analysis for chart-ready data. Use this for any chart based on company CSV files instead of rescanning the CSV.",
+              minLength: 1,
+            }),
+          ),
+          chartType: Type.Optional(
+            Type.Union([
+              Type.Literal("bar"),
+              Type.Literal("line"),
+              Type.Literal("scatter"),
+            ]),
+          ),
+          code: Type.Optional(
+            Type.String({
+              description:
+                "Optional fallback Python plotting code for manual or synthetic charts only. Do not rescan company CSV files here when analysisResultId is available.",
+              minLength: 1,
+            }),
+          ),
+          inputFiles: Type.Optional(
+            Type.Array(
+              Type.String({
+                description:
+                  "Only use inputFiles here for manual fallback charts. CSV-backed charts should use analysisResultId instead.",
+                minLength: 1,
+              }),
+            ),
+          ),
+          title: Type.Optional(Type.String({ minLength: 1 })),
+          xLabel: Type.Optional(Type.String({ minLength: 1 })),
+          yLabel: Type.Optional(Type.String({ minLength: 1 })),
+        });
+
+        const createSandboxTool = <
+          TParams extends Record<string, unknown>,
+          TResponse extends SandboxToolResponse,
+        >(
           options: {
+            buildRequestBody: (runtimeToolCallId: string, params: TParams) => Record<string, unknown>;
             description: string;
             label: string;
             name: string;
+            parameters: unknown;
             route: string;
           },
         ) => ({
           name: options.name,
           label: options.label,
           description: options.description,
-          parameters: sandboxToolParameters,
+          parameters: options.parameters,
           async execute(
-            _runtimeToolCallId: string,
-            params: { code: string; inputFiles?: string[] },
+            runtimeToolCallId: string,
+            params: TParams,
             signal?: AbortSignal,
           ) {
             if (awaitingFileSelectionRef.current || hasPendingPlannerSelection()) {
@@ -1003,8 +1084,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                code: params.code,
-                inputFiles: params.inputFiles ?? [],
+                ...options.buildRequestBody(runtimeToolCallId, params),
+                turnId: activeTurnIdRef.current,
               }),
               signal,
             });
@@ -1012,9 +1093,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             const data = (await response.json()) as TResponse | { error: string };
 
             if (!response.ok) {
-              throw new Error(
-                "error" in data ? data.error : `${options.label} request failed.`,
-              );
+              throw createToolRouteError(data, `${options.label} request failed.`);
             }
 
             const result = data as TResponse;
@@ -1094,27 +1173,67 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           },
         };
 
-        const runDataAnalysisTool = createSandboxTool<SandboxToolResponse>({
+        const runDataAnalysisTool = createSandboxTool<
+          { code: string; inputFiles?: string[] },
+          DataAnalysisToolResponse
+        >({
+          buildRequestBody: (runtimeToolCallId, params) => ({
+            code: params.code,
+            inputFiles: params.inputFiles ?? [],
+            runtimeToolCallId,
+          }),
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers.",
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. For any CSV-backed chart, run this first and print one JSON object with chart-ready arrays under chart.",
+          parameters: sandboxToolParameters,
           route: "/api/data-analysis/run",
         });
 
-        const generateVisualGraphTool = createSandboxTool<GeneratedAssetToolResponse>({
+        const generateVisualGraphTool = createSandboxTool<
+          {
+            analysisResultId?: string;
+            chartType?: "bar" | "line" | "scatter";
+            code?: string;
+            inputFiles?: string[];
+            title?: string;
+            xLabel?: string;
+            yLabel?: string;
+          },
+          GeneratedAssetToolResponse
+        >({
+          buildRequestBody: (runtimeToolCallId, params) => ({
+            analysisResultId: params.analysisResultId,
+            chartType: params.chartType,
+            code: params.code,
+            inputFiles: params.inputFiles ?? [],
+            runtimeToolCallId,
+            title: params.title,
+            xLabel: params.xLabel,
+            yLabel: params.yLabel,
+          }),
           name: "generate_visual_graph",
           label: "Generate Visual Graph",
           description:
-            "Execute Python in the isolated sandbox to generate exactly one PNG chart inside outputs/. Use matplotlib, read staged CSV files with Polars scan_csv(...).collect(), plot plain Python lists, and print a one-line summary.",
+            "Generate exactly one PNG chart inside outputs/. For company CSV charts, pass analysisResultId from run_data_analysis so the server renders the chart from chart-ready data without rescanning CSV files. Use code only for manual or synthetic charts.",
+          parameters: generateVisualGraphParameters,
           route: "/api/visual-graph/run",
         });
 
-        const generateDocumentTool = createSandboxTool<GeneratedAssetToolResponse>({
+        const generateDocumentTool = createSandboxTool<
+          { code: string; inputFiles?: string[] },
+          GeneratedAssetToolResponse
+        >({
+          buildRequestBody: (runtimeToolCallId, params) => ({
+            code: params.code,
+            inputFiles: params.inputFiles ?? [],
+            runtimeToolCallId,
+          }),
           name: "generate_document",
           label: "Generate Document",
           description:
             "Execute Python in the isolated sandbox to generate exactly one PDF document inside outputs/. Use reportlab and print a one-line summary after writing the file.",
+          parameters: sandboxToolParameters,
           route: "/api/document/generate",
         });
 
@@ -1123,9 +1242,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             systemPrompt: getSystemPrompt(role),
             model:
               initialConversation.initialSessionData?.model ??
-              getModel("openai", "gpt-4o-mini"),
+              getModel("openai", DEFAULT_CHAT_MODEL_ID),
             thinkingLevel:
-              initialConversation.initialSessionData?.thinkingLevel ?? "off",
+              initialConversation.initialSessionData?.thinkingLevel ??
+              DEFAULT_CHAT_THINKING_LEVEL,
             messages: initialConversation.initialSessionData?.messages ?? [],
             tools: [
               searchCompanyKnowledgeTool,
@@ -1213,6 +1333,9 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
           const resultSummary = getToolResultSummary(result);
           const accessedFiles = extractAccessedFiles(args, result);
+          const sandboxRunId = isError
+            ? extractSandboxRunId(result)
+            : extractSandboxRunId(result.details);
           const status: ToolCallStatus = isError ? "error" : "completed";
           const errorMessage = isError ? resultSummary || "Tool execution failed." : null;
 
@@ -1221,6 +1344,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               accessedFiles,
               errorMessage,
               resultSummary: resultSummary || null,
+              sandboxRunId,
               runtimeToolCallId: toolCall.id,
               status,
               turnId,
@@ -1280,7 +1404,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                     messageIndex,
                     messageText: assistantMessage.messageText,
                     messageType,
-                    modelName: AUDIT_MODEL_NAME,
+                    modelName: getActiveModelId(agent?.state.model),
                     turnId,
                   }).catch((caughtError) => {
                     console.error("Failed to audit assistant message.", caughtError);

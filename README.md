@@ -102,10 +102,12 @@ The Python execution environment is isolated under `packages/python-sandbox`.
 Key properties:
 
 - interpreter is fixed to the project sandbox `.venv`
-- execution runs in a fresh workspace under `/tmp/workspace/<run-id>`
+- execution runs through a Linux `bubblewrap` sandbox with no normal network access
+- execution uses a fresh workspace under `/tmp/workspace/<run-id>` with immediate cleanup after finalization
 - inherited environment variables are stripped before Python runs
 - approved company files are staged into `inputs/`
 - generated artifacts must be written to `outputs/`
+- accepted PNG/PDF outputs are copied into tenant storage with a short TTL before being served back to the UI
 
 Installed Python tooling includes:
 
@@ -129,6 +131,7 @@ storage/                  Default local runtime storage root (gitignored)
 - Node.js 20.9 or newer
 - `pnpm` 10.x
 - `uv` 0.11 or newer
+- Linux host with `bubblewrap` and `prlimit`
 - `pdftotext` available on the host for uploaded PDF ingestion
 - `OPENAI_API_KEY` for live chat
 
@@ -242,6 +245,8 @@ pnpm approve-builds --all
 
 Sandbox-generated artifacts are served through:
 
-- `GET /api/generated-files/<workspace-id>/<outputs-relative-path>`
+- `GET /api/generated-files/<run-id>/<outputs-relative-path>`
 
-Only sandbox output files with approved extensions are served back to the UI, and only to the authenticated user who created the sandbox run inside the same organization.
+Only approved sandbox output files are served back to the UI, only to the authenticated user who created the sandbox run inside the same organization, and only until the artifact TTL expires.
+
+Read [sandbox.md](/home/hard2vary/projects/critjecture/sandbox.md) for the current sandbox defaults, rationale, and tuning boundaries.

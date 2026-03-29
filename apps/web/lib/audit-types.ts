@@ -9,6 +9,36 @@ export type TurnStatus = (typeof TURN_STATUSES)[number];
 export type ToolCallStatus = (typeof TOOL_CALL_STATUSES)[number];
 export type AssistantMessageType = (typeof ASSISTANT_MESSAGE_TYPES)[number];
 
+export type SandboxGeneratedAssetLog = {
+  byteSize: number;
+  expiresAt: number;
+  fileName: string;
+  mimeType: string;
+  relativePath: string;
+};
+
+export type SandboxRunLog = {
+  artifactMaxBytes: number;
+  artifactTtlMs: number;
+  cleanupCompletedAt: number | null;
+  cleanupError: string | null;
+  cleanupStatus: "pending" | "completed" | "failed" | "skipped";
+  completedAt: number | null;
+  cpuLimitSeconds: number;
+  exitCode: number | null;
+  failureReason: string | null;
+  generatedAssets: SandboxGeneratedAssetLog[];
+  maxProcesses: number;
+  memoryLimitBytes: number;
+  runId: string;
+  runner: string;
+  startedAt: number;
+  status: "running" | "completed" | "failed" | "timed_out" | "rejected" | "abandoned";
+  stdoutMaxBytes: number;
+  timeoutMs: number;
+  toolName: string;
+ };
+
 export type ToolCallLog = {
   accessedFiles: string[];
   completedAt: number | null;
@@ -18,6 +48,8 @@ export type ToolCallLog = {
   toolParametersJson: string;
   turnId: string;
   resultSummary: string | null;
+  sandboxRun: SandboxRunLog | null;
+  sandboxRunId: string | null;
   status: ToolCallStatus;
   runtimeToolCallId: string;
   toolName: string;

@@ -9,6 +9,8 @@ import {
   chatTurns,
   responseCitations,
   retrievalRuns,
+  sandboxGeneratedAssets,
+  sandboxRuns,
   toolCalls,
   users,
 } from "@/lib/app-schema";
@@ -100,6 +102,7 @@ function normalizeAccessedFiles(accessedFiles: string[] | undefined) {
 export async function finishToolCallLog(input: {
   accessedFiles?: string[];
   errorMessage?: string | null;
+  sandboxRunId?: string | null;
   turnId: string;
   resultSummary?: string | null;
   status: ToolCallStatus;
@@ -114,6 +117,7 @@ export async function finishToolCallLog(input: {
       completedAt: Date.now(),
       errorMessage: input.errorMessage ?? null,
       resultSummary: input.resultSummary ?? null,
+      sandboxRunId: input.sandboxRunId ?? null,
       status: input.status,
     })
     .where(
@@ -227,6 +231,69 @@ export async function listRecentChatTurnLogs(
           .where(inArray(users.id, userIds))
       : [];
   const usersById = new Map(userRows.map((row) => [row.id, row]));
+  const sandboxRunIds = [
+    ...new Set(
+      toolCallRows
+        .map((row) => row.sandboxRunId)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
+  ];
+  const sandboxRunRows =
+    sandboxRunIds.length > 0
+      ? await db
+          .select()
+          .from(sandboxRuns)
+          .where(inArray(sandboxRuns.runId, sandboxRunIds))
+      : [];
+  const sandboxAssetRows =
+    sandboxRunIds.length > 0
+      ? await db
+          .select()
+          .from(sandboxGeneratedAssets)
+          .where(inArray(sandboxGeneratedAssets.runId, sandboxRunIds))
+      : [];
+  const sandboxAssetsByRunId = new Map<string, typeof sandboxAssetRows>();
+
+  for (const sandboxAssetRow of sandboxAssetRows) {
+    const current = sandboxAssetsByRunId.get(sandboxAssetRow.runId) ?? [];
+    current.push(sandboxAssetRow);
+    sandboxAssetsByRunId.set(sandboxAssetRow.runId, current);
+  }
+
+  const sandboxRunsById = new Map(
+    sandboxRunRows.map((row) => [
+      row.runId,
+      {
+        artifactMaxBytes: row.artifactMaxBytes,
+        artifactTtlMs: row.artifactTtlMs,
+        cleanupCompletedAt: row.cleanupCompletedAt,
+        cleanupError: row.cleanupError,
+        cleanupStatus: row.cleanupStatus,
+        completedAt: row.completedAt,
+        cpuLimitSeconds: row.cpuLimitSeconds,
+        exitCode: row.exitCode,
+        failureReason: row.failureReason,
+        generatedAssets: (sandboxAssetsByRunId.get(row.runId) ?? [])
+          .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+          .map((assetRow) => ({
+            byteSize: assetRow.byteSize,
+            expiresAt: assetRow.expiresAt,
+            fileName: assetRow.fileName,
+            mimeType: assetRow.mimeType,
+            relativePath: assetRow.relativePath,
+          })),
+        maxProcesses: row.maxProcesses,
+        memoryLimitBytes: row.memoryLimitBytes,
+        runId: row.runId,
+        runner: row.runner,
+        startedAt: row.startedAt,
+        status: row.status,
+        stdoutMaxBytes: row.stdoutMaxBytes,
+        timeoutMs: row.timeoutMs,
+        toolName: row.toolName,
+      },
+    ]),
+  );
 
   return turnRows.map((turnRow) => ({
     assistantMessages: assistantMessageRows
@@ -281,6 +348,10 @@ export async function listRecentChatTurnLogs(
         errorMessage: toolCallRow.errorMessage,
         id: toolCallRow.id,
         resultSummary: toolCallRow.resultSummary,
+        sandboxRun: toolCallRow.sandboxRunId
+          ? (sandboxRunsById.get(toolCallRow.sandboxRunId) ?? null)
+          : null,
+        sandboxRunId: toolCallRow.sandboxRunId,
         runtimeToolCallId: toolCallRow.runtimeToolCallId,
         startedAt: toolCallRow.startedAt,
         status: toolCallRow.status,

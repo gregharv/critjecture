@@ -10,6 +10,7 @@ type FinishAuditToolCallBody = {
   accessedFiles?: unknown;
   errorMessage?: unknown;
   resultSummary?: unknown;
+  sandboxRunId?: unknown;
   runtimeToolCallId?: unknown;
   status?: unknown;
   turnId?: unknown;
@@ -48,6 +49,10 @@ export async function POST(request: Request) {
     typeof body.resultSummary === "string" ? body.resultSummary.trim() : null;
   const errorMessage =
     typeof body.errorMessage === "string" ? body.errorMessage.trim() : null;
+  const sandboxRunId =
+    typeof body.sandboxRunId === "string" && body.sandboxRunId.trim()
+      ? body.sandboxRunId.trim()
+      : null;
   const accessedFiles = Array.isArray(body.accessedFiles)
     ? body.accessedFiles
         .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
@@ -77,6 +82,7 @@ export async function POST(request: Request) {
       accessedFiles,
       errorMessage,
       resultSummary,
+      sandboxRunId,
       status: body.status,
       runtimeToolCallId,
       turnId,

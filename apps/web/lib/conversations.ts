@@ -5,6 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { AgentMessage, SessionData, SessionMetadata } from "@mariozechner/pi-web-ui";
 
 import { getAppDatabase } from "@/lib/app-db";
+import { DEFAULT_CHAT_THINKING_LEVEL } from "@/lib/chat-models";
 import { conversations } from "@/lib/app-schema";
 import type {
   ConversationMetadata,
@@ -336,16 +337,23 @@ export async function listUserConversations(input: {
 
   return rows
     .filter((row) => canAccessConversation(input.userRole, row.userRole))
-    .map<ConversationMetadata>((row) => ({
-      id: row.id,
-      title: row.title,
-      createdAt: new Date(row.createdAt).toISOString(),
-      lastModified: new Date(row.updatedAt).toISOString(),
-      messageCount: row.messageCount,
-      usage: parseUsageJson(row.usageJson),
-      thinkingLevel: "off",
-      preview: row.previewText,
-    }));
+    .map<ConversationMetadata>((row) => {
+      const sessionData = parseSessionDataJson(row.sessionDataJson);
+      const normalizedSessionData = sessionData
+        ? normalizeConversationSessionData(sessionData, row.id)
+        : null;
+
+      return {
+        id: row.id,
+        title: row.title,
+        createdAt: new Date(row.createdAt).toISOString(),
+        lastModified: new Date(row.updatedAt).toISOString(),
+        messageCount: row.messageCount,
+        usage: parseUsageJson(row.usageJson),
+        thinkingLevel: normalizedSessionData?.thinkingLevel ?? DEFAULT_CHAT_THINKING_LEVEL,
+        preview: row.previewText,
+      };
+    });
 }
 
 export async function getUserConversation(input: {
@@ -373,8 +381,10 @@ export async function getUserConversation(input: {
     return null;
   }
 
+  const normalizedSessionData = normalizeConversationSessionData(sessionData, row.id);
+
   return {
-    ...sessionData,
+    ...normalizedSessionData,
     id: row.id,
     title: row.title,
     createdAt: new Date(row.createdAt).toISOString(),

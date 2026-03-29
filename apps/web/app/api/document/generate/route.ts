@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import {
+  SandboxAdmissionError,
   executeSandboxedCommand,
   SandboxExecutionError,
   SandboxValidationError,
   type GeneratedSandboxAsset,
 } from "@/lib/python-sandbox";
-import { recordSandboxRun } from "@/lib/sandbox-runs";
 import {
-  buildSandboxSummary,
+  buildGeneratedAssetSummary,
   jsonError,
   parseSandboxRequest,
   type SandboxRequestBody,
@@ -55,14 +55,12 @@ export async function POST(request: Request) {
     const result = await executeSandboxedCommand({
       code: parsedRequest.code,
       inputFiles: parsedRequest.inputFiles,
+      organizationId: user.organizationId,
       organizationSlug: user.organizationSlug,
       role: user.role,
-    });
-    await recordSandboxRun({
-      generatedAssets: result.generatedAssets,
-      organizationId: user.organizationId,
-      runId: result.runId,
+      runtimeToolCallId: parsedRequest.runtimeToolCallId ?? undefined,
       toolName: "generate_document",
+      turnId: parsedRequest.turnId ?? undefined,
       userId: user.id,
     });
     const generatedAsset = expectSinglePdfAsset(result.generatedAssets);
@@ -70,11 +68,25 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ...result,
       generatedAsset,
-      summary: `${buildSandboxSummary(result.stdout, result.stderr)}\nSaved document asset to ${generatedAsset.relativePath}.`,
+      summary: buildGeneratedAssetSummary(
+        result.stdout,
+        "document",
+        generatedAsset.relativePath,
+      ),
     });
   } catch (caughtError) {
+    if (caughtError instanceof SandboxAdmissionError) {
+      return jsonError(caughtError.message, 429, {
+        sandboxRunId: caughtError.sandboxRunId,
+        status: "rejected",
+      });
+    }
+
     if (caughtError instanceof SandboxValidationError) {
-      return jsonError(caughtError.message, 400);
+      return jsonError(caughtError.message, 400, {
+        sandboxRunId: caughtError.sandboxRunId ?? undefined,
+        status: "failed",
+      });
     }
 
     if (caughtError instanceof SandboxExecutionError) {
@@ -87,6 +99,8 @@ export async function POST(request: Request) {
         500,
         {
           exitCode: caughtError.exitCode,
+          sandboxRunId: caughtError.sandboxRunId,
+          status: caughtError.status,
           stderr: caughtError.stderr,
           stdout: caughtError.stdout,
         },

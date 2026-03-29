@@ -167,3 +167,12 @@ export async function ensureOrganizationCompanyDataRoot(organizationSlug: string
 
   return companyDataRoot;
 }
+
+export async function ensureOrganizationGeneratedAssetsRoot(organizationSlug: string) {
+  const organizationRoot = await resolveOrganizationStorageRoot(organizationSlug);
+  const generatedAssetsRoot = path.join(organizationRoot, "generated_assets");
+
+  await mkdir(generatedAssetsRoot, { recursive: true });
+
+  return generatedAssetsRoot;
+}

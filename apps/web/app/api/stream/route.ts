@@ -2,17 +2,13 @@ import { getModel, stream } from "@mariozechner/pi-ai";
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
+import {
+  DEFAULT_CHAT_MODEL_ID,
+  OPENAI_MODEL_IDS,
+  type OpenAiModelId,
+} from "@/lib/chat-models";
 
 export const runtime = "nodejs";
-
-const OPENAI_MODEL_IDS = [
-  "gpt-4o-mini",
-  "gpt-4o",
-  "gpt-4.1-mini",
-  "gpt-4.1",
-] as const;
-
-type OpenAiModelId = (typeof OPENAI_MODEL_IDS)[number];
 
 type ProxyRequestBody = {
   context?: {
@@ -87,7 +83,7 @@ export async function POST(request: Request) {
   }
 
   const context = body.context;
-  const requestedModelId = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const requestedModelId = process.env.OPENAI_MODEL ?? DEFAULT_CHAT_MODEL_ID;
 
   if (!isOpenAiModelId(requestedModelId)) {
     return jsonError(
