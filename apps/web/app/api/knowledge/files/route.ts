@@ -7,6 +7,14 @@ import {
   parseKnowledgeStatusFilter,
   uploadKnowledgeFile,
 } from "@/lib/knowledge-files";
+import {
+  beginObservedRequest,
+  buildObservedErrorResponse,
+  buildRateLimitedResponse,
+  enforceRateLimitPolicy,
+  finalizeObservedRequest,
+  runOperationsMaintenance,
+} from "@/lib/operations";
 
 export const runtime = "nodejs";
 
@@ -50,9 +58,38 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const observed = beginObservedRequest({
+    method: "POST",
+    routeGroup: "knowledge_upload",
+    routeKey: "knowledge.files.upload",
+    user,
+  });
+  await runOperationsMaintenance();
 
   if (!user) {
-    return jsonError("Authentication required.", 401);
+    return finalizeObservedRequest(observed, {
+      errorCode: "auth_required",
+      outcome: "error",
+      response: buildObservedErrorResponse("Authentication required.", 401),
+    });
+  }
+
+  const rateLimitDecision = await enforceRateLimitPolicy({
+    routeGroup: "knowledge_upload",
+    user,
+  });
+
+  if (rateLimitDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: rateLimitDecision.errorCode,
+      metadata: {
+        limit: rateLimitDecision.limit,
+        scope: rateLimitDecision.scope,
+        windowMs: rateLimitDecision.windowMs,
+      },
+      outcome: "rate_limited",
+      response: buildRateLimitedResponse(rateLimitDecision),
+    });
   }
 
   let formData: FormData;
@@ -60,18 +97,30 @@ export async function POST(request: Request) {
   try {
     formData = await request.formData();
   } catch {
-    return jsonError("Request body must be multipart form data.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_form_data",
+      outcome: "error",
+      response: buildObservedErrorResponse("Request body must be multipart form data.", 400),
+    });
   }
 
   const file = formData.get("file");
   const scope = formData.get("scope");
 
   if (!(file instanceof File)) {
-    return jsonError("file must be provided as a multipart upload.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "missing_file",
+      outcome: "error",
+      response: buildObservedErrorResponse("file must be provided as a multipart upload.", 400),
+    });
   }
 
   if (typeof scope !== "string" && user.role === "owner") {
-    return jsonError("scope must be provided for owner uploads.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "missing_scope",
+      outcome: "error",
+      response: buildObservedErrorResponse("scope must be provided for owner uploads.", 400),
+    });
   }
 
   try {
@@ -81,11 +130,36 @@ export async function POST(request: Request) {
       user,
     });
 
-    return NextResponse.json({ file: uploadedFile });
+    const response = NextResponse.json({ file: uploadedFile });
+    return finalizeObservedRequest(observed, {
+      metadata: {
+        accessScope: uploadedFile.accessScope,
+        displayName: uploadedFile.displayName,
+        ingestionStatus: uploadedFile.ingestionStatus,
+      },
+      outcome: "ok",
+      response,
+      usageEvents: [
+        {
+          eventType: "knowledge_upload",
+          metadata: {
+            accessScope: uploadedFile.accessScope,
+            ingestionStatus: uploadedFile.ingestionStatus,
+          },
+          quantity: 1,
+          status: uploadedFile.ingestionStatus,
+          subjectName: uploadedFile.displayName,
+        },
+      ],
+    });
   } catch (caughtError) {
     const message =
       caughtError instanceof Error ? caughtError.message : "Knowledge upload failed.";
 
-    return jsonError(message, 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "knowledge_upload_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(message, 400),
+    });
   }
 }

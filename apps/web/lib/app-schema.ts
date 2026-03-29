@@ -439,3 +439,122 @@ export const responseCitations = sqliteTable(
     index("response_citations_candidate_id_idx").on(table.retrievalCandidateId),
   ],
 );
+
+export const requestLogs = sqliteTable(
+  "request_logs",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id").notNull().unique(),
+    routeKey: text("route_key").notNull(),
+    routeGroup: text("route_group").notNull(),
+    method: text("method").notNull(),
+    organizationId: text("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    statusCode: integer("status_code").notNull(),
+    outcome: text("outcome").notNull(),
+    errorCode: text("error_code"),
+    modelName: text("model_name"),
+    toolName: text("tool_name"),
+    sandboxRunId: text("sandbox_run_id"),
+    totalTokens: integer("total_tokens"),
+    totalCostUsd: real("total_cost_usd"),
+    durationMs: integer("duration_ms").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at").notNull(),
+  },
+  (table) => [
+    index("request_logs_route_group_started_at_idx").on(table.routeGroup, table.startedAt),
+    index("request_logs_organization_id_started_at_idx").on(table.organizationId, table.startedAt),
+    index("request_logs_user_id_started_at_idx").on(table.userId, table.startedAt),
+    index("request_logs_status_code_started_at_idx").on(table.statusCode, table.startedAt),
+  ],
+);
+
+export const usageEvents = sqliteTable(
+  "usage_events",
+  {
+    id: text("id").primaryKey(),
+    requestLogId: text("request_log_id").references(() => requestLogs.id, {
+      onDelete: "set null",
+    }),
+    routeKey: text("route_key").notNull(),
+    routeGroup: text("route_group").notNull(),
+    eventType: text("event_type").notNull(),
+    organizationId: text("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    subjectName: text("subject_name"),
+    status: text("status").notNull(),
+    quantity: integer("quantity").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    costUsd: real("cost_usd").notNull().default(0),
+    durationMs: integer("duration_ms"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("usage_events_route_group_created_at_idx").on(table.routeGroup, table.createdAt),
+    index("usage_events_organization_id_created_at_idx").on(table.organizationId, table.createdAt),
+    index("usage_events_user_id_created_at_idx").on(table.userId, table.createdAt),
+    index("usage_events_event_type_created_at_idx").on(table.eventType, table.createdAt),
+  ],
+);
+
+export const rateLimitBuckets = sqliteTable(
+  "rate_limit_buckets",
+  {
+    id: text("id").primaryKey(),
+    routeGroup: text("route_group").notNull(),
+    scopeType: text("scope_type").notNull(),
+    scopeId: text("scope_id").notNull(),
+    bucketStartAt: integer("bucket_start_at").notNull(),
+    bucketWidthSeconds: integer("bucket_width_seconds").notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rate_limit_buckets_scope_bucket_idx").on(
+      table.routeGroup,
+      table.scopeType,
+      table.scopeId,
+      table.bucketStartAt,
+      table.bucketWidthSeconds,
+    ),
+    index("rate_limit_buckets_updated_at_idx").on(table.updatedAt),
+  ],
+);
+
+export const operationalAlerts = sqliteTable(
+  "operational_alerts",
+  {
+    id: text("id").primaryKey(),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    alertType: text("alert_type").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull(),
+    organizationId: text("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    occurrenceCount: integer("occurrence_count").notNull().default(1),
+    firstSeenAt: integer("first_seen_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+  },
+  (table) => [
+    index("operational_alerts_status_last_seen_at_idx").on(table.status, table.lastSeenAt),
+    index("operational_alerts_organization_id_last_seen_at_idx").on(
+      table.organizationId,
+      table.lastSeenAt,
+    ),
+  ],
+);

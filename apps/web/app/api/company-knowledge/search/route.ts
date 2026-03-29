@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 import { searchCompanyKnowledge } from "@/lib/company-knowledge";
 import type { CompanyKnowledgeSearchResult } from "@/lib/company-knowledge-types";
 import { getSessionUser } from "@/lib/auth-state";
+import {
+  beginObservedRequest,
+  buildObservedErrorResponse,
+  buildRateLimitedResponse,
+  enforceRateLimitPolicy,
+  finalizeObservedRequest,
+  runOperationsMaintenance,
+} from "@/lib/operations";
 import { getRoleLabel } from "@/lib/roles";
 
 export const runtime = "nodejs";
@@ -10,10 +18,6 @@ export const runtime = "nodejs";
 type SearchRequestBody = {
   query?: unknown;
 };
-
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ error: message }, { status });
-}
 
 function describeCsvPreview(result: CompanyKnowledgeSearchResult, files: string[]) {
   const schemaLines = result.candidateFiles
@@ -96,9 +100,38 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const observed = beginObservedRequest({
+    method: "POST",
+    routeGroup: "search",
+    routeKey: "company-knowledge.search",
+    user,
+  });
+  await runOperationsMaintenance();
 
   if (!user) {
-    return jsonError("Authentication required.", 401);
+    return finalizeObservedRequest(observed, {
+      errorCode: "auth_required",
+      outcome: "error",
+      response: buildObservedErrorResponse("Authentication required.", 401),
+    });
+  }
+
+  const rateLimitDecision = await enforceRateLimitPolicy({
+    routeGroup: "search",
+    user,
+  });
+
+  if (rateLimitDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: rateLimitDecision.errorCode,
+      metadata: {
+        limit: rateLimitDecision.limit,
+        scope: rateLimitDecision.scope,
+        windowMs: rateLimitDecision.windowMs,
+      },
+      outcome: "rate_limited",
+      response: buildRateLimitedResponse(rateLimitDecision),
+    });
   }
 
   let body: SearchRequestBody;
@@ -106,13 +139,21 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as SearchRequestBody;
   } catch {
-    return jsonError("Request body must be valid JSON.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_json",
+      outcome: "error",
+      response: buildObservedErrorResponse("Request body must be valid JSON.", 400),
+    });
   }
 
   const query = typeof body.query === "string" ? body.query.trim() : "";
 
   if (!query) {
-    return jsonError("Search query must be a non-empty string.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_query",
+      outcome: "error",
+      response: buildObservedErrorResponse("Search query must be a non-empty string.", 400),
+    });
   }
 
   try {
@@ -124,10 +165,31 @@ export async function POST(request: Request) {
     );
     const roleLabel = getRoleLabel(user.role);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ...result,
       role: user.role,
       summary: buildSummary(query, roleLabel, result),
+    });
+    return finalizeObservedRequest(observed, {
+      metadata: {
+        candidateFileCount: result.candidateFiles.length,
+        recommendedFileCount: result.recommendedFiles.length,
+        selectedFileCount: result.selectedFiles.length,
+      },
+      outcome: "ok",
+      response,
+      usageEvents: [
+        {
+          eventType: "search_request",
+          metadata: {
+            candidateFileCount: result.candidateFiles.length,
+            selectedFileCount: result.selectedFiles.length,
+          },
+          quantity: 1,
+          status: "completed",
+          subjectName: "search_company_knowledge",
+        },
+      ],
     });
   } catch (caughtError) {
     const message =
@@ -135,6 +197,10 @@ export async function POST(request: Request) {
         ? caughtError.message
         : "Company knowledge search failed.";
 
-    return jsonError(message, 500);
+    return finalizeObservedRequest(observed, {
+      errorCode: "search_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(message, 500),
+    });
   }
 }

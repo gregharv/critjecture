@@ -1,5 +1,4 @@
 import { getModel, stream } from "@mariozechner/pi-ai";
-import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import {
@@ -7,6 +6,18 @@ import {
   OPENAI_MODEL_IDS,
   type OpenAiModelId,
 } from "@/lib/chat-models";
+import {
+  attachRequestId,
+  beginObservedRequest,
+  buildBudgetExceededResponse,
+  buildObservedErrorResponse,
+  buildRateLimitedResponse,
+  clampChatMaxTokens,
+  enforceBudgetPolicy,
+  enforceRateLimitPolicy,
+  finalizeObservedRequest,
+  runOperationsMaintenance,
+} from "@/lib/operations";
 
 export const runtime = "nodejs";
 
@@ -42,10 +53,6 @@ type ProxyEvent =
       usage: unknown;
     };
 
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ error: message }, { status });
-}
-
 function encodeEvent(event: ProxyEvent) {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
@@ -54,20 +61,95 @@ function isOpenAiModelId(value: string): value is OpenAiModelId {
   return OPENAI_MODEL_IDS.includes(value as OpenAiModelId);
 }
 
+function getUsageNumber(value: unknown, key: string) {
+  if (typeof value !== "object" || value === null || !(key in value)) {
+    return 0;
+  }
+
+  const nextValue = value[key as keyof typeof value];
+
+  return typeof nextValue === "number" ? nextValue : 0;
+}
+
+function normalizeUsage(value: unknown) {
+  const cost =
+    typeof value === "object" && value !== null && "cost" in value && typeof value.cost === "object"
+      ? value.cost
+      : null;
+
+  return {
+    costUsd: roundCost(getUsageNumber(cost, "total")),
+    inputTokens: getUsageNumber(value, "input"),
+    outputTokens: getUsageNumber(value, "output"),
+    totalTokens: getUsageNumber(value, "totalTokens"),
+  };
+}
+
+function roundCost(value: number) {
+  return Number(value.toFixed(6));
+}
+
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const observed = beginObservedRequest({
+    method: "POST",
+    routeGroup: "chat",
+    routeKey: "chat.stream",
+    user,
+  });
+  await runOperationsMaintenance();
 
   if (!user) {
-    return jsonError("Authentication required.", 401);
+    return finalizeObservedRequest(observed, {
+      errorCode: "auth_required",
+      outcome: "error",
+      response: buildObservedErrorResponse("Authentication required.", 401),
+    });
+  }
+
+  const budgetDecision = await enforceBudgetPolicy({
+    routeGroup: "chat",
+    user,
+  });
+
+  if (budgetDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: budgetDecision.errorCode,
+      metadata: budgetDecision.metadata,
+      outcome: "blocked",
+      response: buildBudgetExceededResponse(budgetDecision),
+    });
+  }
+
+  const rateLimitDecision = await enforceRateLimitPolicy({
+    routeGroup: "chat",
+    user,
+  });
+
+  if (rateLimitDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: rateLimitDecision.errorCode,
+      metadata: {
+        limit: rateLimitDecision.limit,
+        scope: rateLimitDecision.scope,
+        windowMs: rateLimitDecision.windowMs,
+      },
+      outcome: "rate_limited",
+      response: buildRateLimitedResponse(rateLimitDecision),
+    });
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
-    return jsonError(
-      "Missing OPENAI_API_KEY. Add it to apps/web/.env.local before testing live chat.",
-      500,
-    );
+    return finalizeObservedRequest(observed, {
+      errorCode: "missing_openai_api_key",
+      outcome: "error",
+      response: buildObservedErrorResponse(
+        "Missing OPENAI_API_KEY. Add it to apps/web/.env.local before testing live chat.",
+        500,
+      ),
+    });
   }
 
   let body: ProxyRequestBody;
@@ -75,21 +157,36 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as ProxyRequestBody;
   } catch {
-    return jsonError("Request body must be valid JSON.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_json",
+      outcome: "error",
+      response: buildObservedErrorResponse("Request body must be valid JSON.", 400),
+    });
   }
 
   if (!body.context || !Array.isArray(body.context.messages)) {
-    return jsonError("Request body must include a valid context.messages array.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "missing_messages",
+      outcome: "error",
+      response: buildObservedErrorResponse(
+        "Request body must include a valid context.messages array.",
+        400,
+      ),
+    });
   }
 
   const context = body.context;
   const requestedModelId = process.env.OPENAI_MODEL ?? DEFAULT_CHAT_MODEL_ID;
 
   if (!isOpenAiModelId(requestedModelId)) {
-    return jsonError(
-      `Unsupported OPENAI_MODEL "${requestedModelId}". Supported Step 1 models: ${OPENAI_MODEL_IDS.join(", ")}.`,
-      500,
-    );
+    return finalizeObservedRequest(observed, {
+      errorCode: "unsupported_model",
+      outcome: "error",
+      response: buildObservedErrorResponse(
+        `Unsupported OPENAI_MODEL "${requestedModelId}". Supported Step 1 models: ${OPENAI_MODEL_IDS.join(", ")}.`,
+        500,
+      ),
+    });
   }
 
   let model;
@@ -102,10 +199,15 @@ export async function POST(request: Request) {
         ? caughtError.message
         : `Unsupported OpenAI model: ${requestedModelId}`;
 
-    return jsonError(message, 500);
+    return finalizeObservedRequest(observed, {
+      errorCode: "model_initialization_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(message, 500),
+    });
   }
 
   const encoder = new TextEncoder();
+  const maxTokens = clampChatMaxTokens(body.options?.maxTokens);
 
   const responseStream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -114,6 +216,16 @@ export async function POST(request: Request) {
       };
 
       void (async () => {
+        let finalStatusCode = 200;
+        let finalErrorCode: string | null = null;
+        let finalOutcome: "ok" | "error" = "ok";
+        let finalUsage: ReturnType<typeof normalizeUsage> = {
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        };
+
         try {
           const completionStream = stream(
             model,
@@ -125,7 +237,7 @@ export async function POST(request: Request) {
             {
               apiKey,
               signal: request.signal,
-              maxTokens: body.options?.maxTokens,
+              maxTokens,
               reasoning: body.options?.reasoning,
               temperature: body.options?.temperature,
             },
@@ -202,6 +314,7 @@ export async function POST(request: Request) {
                 push({ type: "toolcall_end", contentIndex: event.contentIndex });
                 break;
               case "done":
+                finalUsage = normalizeUsage(event.message.usage);
                 push({
                   type: "done",
                   reason: event.reason,
@@ -209,6 +322,11 @@ export async function POST(request: Request) {
                 });
                 break;
               case "error":
+                finalOutcome = "error";
+                finalStatusCode = 500;
+                finalErrorCode =
+                  event.reason === "aborted" ? "stream_aborted" : "provider_stream_error";
+                finalUsage = normalizeUsage(event.error.usage);
                 push({
                   type: "error",
                   reason: event.reason,
@@ -221,6 +339,9 @@ export async function POST(request: Request) {
         } catch (caughtError) {
           const errorMessage =
             caughtError instanceof Error ? caughtError.message : "Proxy stream failed.";
+          finalOutcome = "error";
+          finalStatusCode = request.signal.aborted ? 499 : 500;
+          finalErrorCode = request.signal.aborted ? "stream_aborted" : "provider_stream_failed";
 
           push({
             type: "error",
@@ -242,17 +363,46 @@ export async function POST(request: Request) {
             },
           });
         } finally {
+          await finalizeObservedRequest(observed, {
+            errorCode: finalErrorCode,
+            metadata: {
+              clampedMaxTokens: maxTokens ?? null,
+              requestedMaxTokens:
+                typeof body.options?.maxTokens === "number" ? body.options.maxTokens : null,
+              streamResponseStatus: 200,
+            },
+            modelName: requestedModelId,
+            outcome: finalOutcome,
+            response: new Response(null, { status: finalStatusCode }),
+            totalCostUsd: finalUsage.costUsd,
+            totalTokens: finalUsage.totalTokens,
+            usageEvents: [
+              {
+                costUsd: finalUsage.costUsd,
+                eventType: "model_completion",
+                inputTokens: finalUsage.inputTokens,
+                metadata: {
+                  completionStatus: finalOutcome,
+                  reasoning: body.options?.reasoning ?? null,
+                },
+                outputTokens: finalUsage.outputTokens,
+                status: finalOutcome === "ok" ? "completed" : "error",
+                subjectName: requestedModelId,
+                totalTokens: finalUsage.totalTokens,
+              },
+            ],
+          });
           controller.close();
         }
       })();
     },
   });
 
-  return new Response(responseStream, {
+  return attachRequestId(new Response(responseStream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     },
-  });
+  }), observed.requestId);
 }

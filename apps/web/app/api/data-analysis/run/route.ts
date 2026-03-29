@@ -13,8 +13,17 @@ import {
   SandboxValidationError,
 } from "@/lib/python-sandbox";
 import {
+  beginObservedRequest,
+  buildBudgetExceededResponse,
+  buildObservedErrorResponse,
+  buildRateLimitedResponse,
+  enforceBudgetPolicy,
+  enforceRateLimitPolicy,
+  finalizeObservedRequest,
+  runOperationsMaintenance,
+} from "@/lib/operations";
+import {
   buildSandboxSummary,
-  jsonError,
   parseSandboxRequest,
   type SandboxRequestBody,
 } from "@/lib/sandbox-route";
@@ -31,9 +40,52 @@ function buildSchemaSummary(csvSchemas: { columns: string[]; file: string }[]) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const observed = beginObservedRequest({
+    method: "POST",
+    routeGroup: "sandbox",
+    routeKey: "data-analysis.run",
+    user,
+  });
+  await runOperationsMaintenance();
 
   if (!user) {
-    return jsonError("Authentication required.", 401);
+    return finalizeObservedRequest(observed, {
+      errorCode: "auth_required",
+      outcome: "error",
+      response: buildObservedErrorResponse("Authentication required.", 401),
+    });
+  }
+
+  const budgetDecision = await enforceBudgetPolicy({
+    routeGroup: "sandbox",
+    user,
+  });
+
+  if (budgetDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: budgetDecision.errorCode,
+      metadata: budgetDecision.metadata,
+      outcome: "blocked",
+      response: buildBudgetExceededResponse(budgetDecision),
+    });
+  }
+
+  const rateLimitDecision = await enforceRateLimitPolicy({
+    routeGroup: "sandbox",
+    user,
+  });
+
+  if (rateLimitDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: rateLimitDecision.errorCode,
+      metadata: {
+        limit: rateLimitDecision.limit,
+        scope: rateLimitDecision.scope,
+        windowMs: rateLimitDecision.windowMs,
+      },
+      outcome: "rate_limited",
+      response: buildRateLimitedResponse(rateLimitDecision),
+    });
   }
 
   let body: SandboxRequestBody;
@@ -41,13 +93,21 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as SandboxRequestBody;
   } catch {
-    return jsonError("Request body must be valid JSON.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_json",
+      outcome: "error",
+      response: buildObservedErrorResponse("Request body must be valid JSON.", 400),
+    });
   }
 
   const parsedRequest = parseSandboxRequest(body);
 
   if ("error" in parsedRequest) {
-    return jsonError(parsedRequest.error, 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_sandbox_request",
+      outcome: "error",
+      response: buildObservedErrorResponse(parsedRequest.error, 400),
+    });
   }
 
   try {
@@ -95,25 +155,81 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       analysisResultId: analysisResult?.id,
       chartReady: Boolean(analysisResult),
       csvSchemas,
       ...result,
       summary: summaryLines.join("\n"),
     });
+    return finalizeObservedRequest(observed, {
+      metadata: {
+        chartReady: Boolean(analysisResult),
+        csvSchemaCount: csvSchemas.length,
+        stagedFileCount: result.stagedFiles.length,
+      },
+      outcome: "ok",
+      response,
+      sandboxRunId: result.sandboxRunId,
+      toolName: "run_data_analysis",
+      usageEvents: [
+        {
+          durationMs: result.limits.timeoutMs,
+          eventType: "sandbox_run",
+          metadata: {
+            sandboxStatus: result.status,
+            stagedFileCount: result.stagedFiles.length,
+          },
+          quantity: 1,
+          status: result.status,
+          subjectName: "run_data_analysis",
+        },
+      ],
+    });
   } catch (caughtError) {
     if (caughtError instanceof SandboxAdmissionError) {
-      return jsonError(caughtError.message, 429, {
-        sandboxRunId: caughtError.sandboxRunId,
-        status: "rejected",
+      return finalizeObservedRequest(observed, {
+        errorCode: "sandbox_admission_rejected",
+        metadata: {
+          sandboxRunId: caughtError.sandboxRunId,
+          status: "rejected",
+        },
+        outcome: "rate_limited",
+        response: buildObservedErrorResponse(caughtError.message, 429, {
+          sandboxRunId: caughtError.sandboxRunId,
+          status: "rejected",
+        }),
       });
     }
 
     if (caughtError instanceof SandboxValidationError) {
-      return jsonError(caughtError.message, 400, {
-        sandboxRunId: caughtError.sandboxRunId ?? undefined,
-        status: "failed",
+      return finalizeObservedRequest(observed, {
+        errorCode: "sandbox_validation_failed",
+        metadata: {
+          sandboxRunId: caughtError.sandboxRunId ?? null,
+          status: "failed",
+        },
+        outcome: "error",
+        response: buildObservedErrorResponse(caughtError.message, 400, {
+          sandboxRunId: caughtError.sandboxRunId ?? undefined,
+          status: "failed",
+        }),
+        sandboxRunId: caughtError.sandboxRunId ?? null,
+        toolName: "run_data_analysis",
+        usageEvents:
+          caughtError.sandboxRunId
+            ? [
+                {
+                  eventType: "sandbox_run",
+                  metadata: {
+                    sandboxStatus: "failed",
+                  },
+                  quantity: 1,
+                  status: "failed",
+                  subjectName: "run_data_analysis",
+                },
+              ]
+            : [],
       });
     }
 
@@ -121,18 +237,39 @@ export async function POST(request: Request) {
       const combinedOutput = [caughtError.stderr.trim(), caughtError.stdout.trim()]
         .filter(Boolean)
         .join("\n");
-
-      return jsonError(
-        combinedOutput || caughtError.message,
-        500,
-        {
+      return finalizeObservedRequest(observed, {
+        errorCode:
+          caughtError.status === "timed_out" ? "sandbox_timed_out" : "sandbox_execution_failed",
+        metadata: {
           exitCode: caughtError.exitCode,
-          sandboxRunId: caughtError.sandboxRunId,
           status: caughtError.status,
-          stderr: caughtError.stderr,
-          stdout: caughtError.stdout,
         },
-      );
+        outcome: "error",
+        response: buildObservedErrorResponse(
+          combinedOutput || caughtError.message,
+          500,
+          {
+            exitCode: caughtError.exitCode,
+            sandboxRunId: caughtError.sandboxRunId,
+            status: caughtError.status,
+            stderr: caughtError.stderr,
+            stdout: caughtError.stdout,
+          },
+        ),
+        sandboxRunId: caughtError.sandboxRunId,
+        toolName: "run_data_analysis",
+        usageEvents: [
+          {
+            eventType: "sandbox_run",
+            metadata: {
+              sandboxStatus: caughtError.status,
+            },
+            quantity: 1,
+            status: caughtError.status,
+            subjectName: "run_data_analysis",
+          },
+        ],
+      });
     }
 
     const message =
@@ -140,6 +277,10 @@ export async function POST(request: Request) {
         ? caughtError.message
         : "Sandbox execution failed.";
 
-    return jsonError(message, 500);
+    return finalizeObservedRequest(observed, {
+      errorCode: "sandbox_route_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(message, 500),
+    });
   }
 }

@@ -8,7 +8,7 @@ import type { SessionUser } from "@/lib/auth-state";
 import { getRoleLabel } from "@/lib/roles";
 
 type WorkspaceShellProps = {
-  activePage: "chat" | "knowledge" | "logs";
+  activePage: "chat" | "knowledge" | "logs" | "operations";
   children: ReactNode;
   user: SessionUser;
 };
@@ -53,12 +53,20 @@ export function WorkspaceShell({
                 Knowledge
               </Link>
               {user.role === "owner" ? (
-                <Link
-                  className={`shell-nav__link ${activePage === "logs" ? "is-active" : ""}`}
-                  href="/admin/logs"
-                >
-                  Audit Logs
-                </Link>
+                <>
+                  <Link
+                    className={`shell-nav__link ${activePage === "operations" ? "is-active" : ""}`}
+                    href="/admin/operations"
+                  >
+                    Operations
+                  </Link>
+                  <Link
+                    className={`shell-nav__link ${activePage === "logs" ? "is-active" : ""}`}
+                    href="/admin/logs"
+                  >
+                    Audit Logs
+                  </Link>
+                </>
               ) : null}
             </nav>
             <div className="shell-user">

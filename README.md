@@ -58,6 +58,19 @@ It shows a newest-first list of chat turn cards scoped to the current organizati
 
 Each card can be filtered to show all events, only assistant responses, or only tool calls. Tool events include raw parameters, accessed files, completion summaries, and any errors. Chat turn cards also show the initiating authenticated user and the chat session id that produced the interaction.
 
+### Operations
+
+The owner operations dashboard lives at `http://localhost:3000/admin/operations`.
+
+It adds:
+
+- route health and dependency checks
+- recent failures and rate-limit activity
+- open operational alerts
+- per-user and per-organization usage and cost summaries
+
+There is also a public `GET /api/health` endpoint for liveness/readiness checks.
+
 ### Knowledge Library
 
 The knowledge library lives at `http://localhost:3000/knowledge`.
@@ -150,6 +163,7 @@ Open:
 - `http://localhost:3000/login`
 - `http://localhost:3000/chat`
 - `http://localhost:3000/knowledge`
+- `http://localhost:3000/admin/operations`
 - `http://localhost:3000/admin/logs`
 
 ## Environment
@@ -170,6 +184,14 @@ CRITJECTURE_OWNER_NAME=Owner Demo
 CRITJECTURE_INTERN_EMAIL=intern@example.com
 CRITJECTURE_INTERN_PASSWORD=change-me-intern
 CRITJECTURE_INTERN_NAME=Intern Demo
+CRITJECTURE_REQUEST_LOG_RETENTION_DAYS=14
+CRITJECTURE_USAGE_RETENTION_DAYS=30
+CRITJECTURE_DAILY_MODEL_COST_CAP_USD_USER=3
+CRITJECTURE_DAILY_MODEL_COST_CAP_USD_ORGANIZATION=20
+CRITJECTURE_DAILY_SANDBOX_RUN_CAP_USER=25
+CRITJECTURE_DAILY_SANDBOX_RUN_CAP_ORGANIZATION=100
+CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
+CRITJECTURE_ALERT_WEBHOOK_URL=
 ```
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
