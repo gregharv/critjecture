@@ -2,26 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 12: Server-Backed Chat History
-
-### Goal
-
-Persist conversations server-side so users can reload, resume, and review prior assistant interactions.
-
-### What Should Be Implemented
-
-- store conversations and messages in the backend
-- associate conversations with authenticated users and tenants
-- support loading prior sessions in the chat UI
-- link audit records to persistent conversation identifiers
-- support safe session reset and history navigation
-
-### Acceptance Criteria
-
-- a user can reload the app and recover prior conversations
-- history is available across browsers or devices for the same account
-- audit entries remain associated with the correct stored conversation
-
 ## Step 13: File Uploads and Knowledge Ingestion
 
 ### Goal

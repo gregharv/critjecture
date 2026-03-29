@@ -6,6 +6,7 @@ import { createChatTurnLog } from "@/lib/audit-log";
 export const runtime = "nodejs";
 
 type CreateChatTurnBody = {
+  conversationId?: unknown;
   chatSessionId?: unknown;
   userPromptText?: unknown;
 };
@@ -31,6 +32,8 @@ export async function POST(request: Request) {
 
   const userPromptText =
     typeof body.userPromptText === "string" ? body.userPromptText.trim() : "";
+  const conversationId =
+    typeof body.conversationId === "string" ? body.conversationId.trim() : "";
   const chatSessionId =
     typeof body.chatSessionId === "string" ? body.chatSessionId.trim() : "";
 
@@ -42,8 +45,13 @@ export async function POST(request: Request) {
     return jsonError("chatSessionId must be a non-empty string.", 400);
   }
 
+  if (!conversationId) {
+    return jsonError("conversationId must be a non-empty string.", 400);
+  }
+
   try {
     const result = await createChatTurnLog({
+      conversationId,
       chatSessionId,
       organizationId: user.organizationId,
       userPromptText,

@@ -61,6 +61,39 @@ export const organizationMemberships = sqliteTable(
   ],
 );
 
+export const conversations = sqliteTable(
+  "conversations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userRole: text("user_role", { enum: ["intern", "owner"] }).notNull(),
+    title: text("title").notNull(),
+    previewText: text("preview_text").notNull(),
+    messageCount: integer("message_count").notNull(),
+    usageJson: text("usage_json").notNull(),
+    sessionDataJson: text("session_data_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "conversations_user_role_check",
+      sql`${table.userRole} in ('intern', 'owner')`,
+    ),
+    index("conversations_organization_id_updated_at_idx").on(
+      table.organizationId,
+      table.updatedAt,
+    ),
+    index("conversations_user_id_updated_at_idx").on(table.userId, table.updatedAt),
+    index("conversations_user_role_idx").on(table.userRole),
+  ],
+);
+
 export const chatTurns = sqliteTable(
   "chat_turns",
   {

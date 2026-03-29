@@ -35,6 +35,12 @@ type AuditTimelineEvent =
       toolCall: ToolCallLog;
     };
 
+const PYTHON_TOOL_NAMES = new Set([
+  "run_data_analysis",
+  "generate_visual_graph",
+  "generate_document",
+]);
+
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -72,28 +78,64 @@ function getAssistantMessageTypeLabel(
   return messageType === "planner-selection" ? "Planner Selection" : "Assistant Response";
 }
 
+function parseToolParameters(toolCall: ToolCallLog) {
+  try {
+    const parsed = JSON.parse(toolCall.toolParametersJson) as Record<string, unknown>;
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function parseInputFilesFromToolParameters(toolCall: ToolCallLog) {
   if (toolCall.accessedFiles.length > 0) {
     return toolCall.accessedFiles;
   }
 
-  try {
-    const parsed = JSON.parse(toolCall.toolParametersJson) as { inputFiles?: unknown };
+  const parsed = parseToolParameters(toolCall);
 
-    if (!Array.isArray(parsed.inputFiles)) {
-      return [];
-    }
-
-    return parsed.inputFiles
-      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-      .filter(Boolean);
-  } catch {
+  if (!parsed || !Array.isArray(parsed.inputFiles)) {
     return [];
   }
+
+  return parsed.inputFiles
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
 }
 
 function getTurnAccessedFiles(turn: ChatTurnLog) {
   return [...new Set(turn.toolCalls.flatMap((toolCall) => parseInputFilesFromToolParameters(toolCall)))];
+}
+
+function getToolParameterDisplay(toolCall: ToolCallLog) {
+  const parsed = parseToolParameters(toolCall);
+
+  if (!parsed) {
+    return {
+      code: "",
+      remainingParametersJson: toolCall.toolParametersJson,
+    };
+  }
+
+  const nextParameters = { ...parsed };
+  const code =
+    PYTHON_TOOL_NAMES.has(toolCall.toolName) && typeof nextParameters.code === "string"
+      ? nextParameters.code.trim()
+      : "";
+
+  if (code) {
+    delete nextParameters.code;
+  }
+
+  return {
+    code,
+    remainingParametersJson: JSON.stringify(nextParameters, null, 2),
+  };
 }
 
 function hasAssistantMessage(turn: ChatTurnLog) {
@@ -188,6 +230,83 @@ function getTimelineEmptyMessage(filter: AuditTimelineFilter) {
   }
 
   return "No timeline events were captured for this interaction.";
+}
+
+function ToolTimelineEvent({ toolCall }: { toolCall: ToolCallLog }) {
+  const inputFiles = parseInputFilesFromToolParameters(toolCall);
+  const parameterDisplay = getToolParameterDisplay(toolCall);
+  const remainingParameters = parameterDisplay.remainingParametersJson.trim();
+  const hasRemainingParameters =
+    remainingParameters.length > 0 && remainingParameters !== "{}";
+
+  return (
+    <section className="audit-timeline__item audit-timeline__item--tool">
+      <div className="audit-timeline__item-header">
+        <div>
+          <div className="audit-timeline__heading-row">
+            <span className="audit-badge audit-badge--trace">Tool</span>
+            <div className="audit-tool__name">{toolCall.toolName}</div>
+          </div>
+          <div className="audit-tool__meta">
+            <span className={`audit-status audit-status--${toolCall.status}`}>
+              {toolCall.status}
+            </span>
+            <span>{formatTimestamp(toolCall.startedAt)}</span>
+            <span>{formatTimestamp(toolCall.completedAt)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="audit-tool__section">
+        <div className="audit-tool__label">Data Files Accessed</div>
+        <div className="audit-card__files">
+          {inputFiles.length > 0 ? (
+            inputFiles.map((filePath) => (
+              <span className="audit-file-badge" key={filePath}>
+                {filePath}
+              </span>
+            ))
+          ) : (
+            <span className="audit-file-badge audit-file-badge--empty">No data files</span>
+          )}
+        </div>
+      </div>
+
+      {parameterDisplay.code ? (
+        <div className="audit-tool__section">
+          <div className="audit-tool__label">Python Code</div>
+          <pre className="audit-tool__code audit-tool__code--python">
+            {parameterDisplay.code}
+          </pre>
+        </div>
+      ) : null}
+
+      {hasRemainingParameters ? (
+        <div className="audit-tool__section">
+          <div className="audit-tool__label">
+            {parameterDisplay.code ? "Other Parameters" : "Parameters"}
+          </div>
+          <pre className="audit-tool__code">{remainingParameters}</pre>
+        </div>
+      ) : null}
+
+      {toolCall.resultSummary ? (
+        <div className="audit-tool__section">
+          <div className="audit-tool__label">Result Summary</div>
+          <p className="audit-tool__summary">{toolCall.resultSummary}</p>
+        </div>
+      ) : null}
+
+      {toolCall.errorMessage ? (
+        <div className="audit-tool__section">
+          <div className="audit-tool__label">Error</div>
+          <p className="audit-tool__summary audit-tool__summary--error">
+            {toolCall.errorMessage}
+          </p>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
@@ -302,66 +421,7 @@ function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
                     <pre className="audit-tool__code">{event.content}</pre>
                   </section>
                 ) : (
-                  <section
-                    className="audit-timeline__item audit-timeline__item--tool"
-                    key={event.id}
-                  >
-                    <div className="audit-timeline__item-header">
-                      <div>
-                        <div className="audit-timeline__heading-row">
-                          <span className="audit-badge audit-badge--trace">Tool</span>
-                          <div className="audit-tool__name">{event.toolCall.toolName}</div>
-                        </div>
-                        <div className="audit-tool__meta">
-                          <span
-                            className={`audit-status audit-status--${event.toolCall.status}`}
-                          >
-                            {event.toolCall.status}
-                          </span>
-                          <span>{formatTimestamp(event.toolCall.startedAt)}</span>
-                          <span>{formatTimestamp(event.toolCall.completedAt)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="audit-tool__section">
-                      <div className="audit-tool__label">Data Files Accessed</div>
-                      <div className="audit-card__files">
-                        {parseInputFilesFromToolParameters(event.toolCall).length > 0 ? (
-                          parseInputFilesFromToolParameters(event.toolCall).map((filePath) => (
-                            <span className="audit-file-badge" key={filePath}>
-                              {filePath}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="audit-file-badge audit-file-badge--empty">
-                            No data files
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="audit-tool__section">
-                      <div className="audit-tool__label">Parameters</div>
-                      <pre className="audit-tool__code">{event.toolCall.toolParametersJson}</pre>
-                    </div>
-
-                    {event.toolCall.resultSummary ? (
-                      <div className="audit-tool__section">
-                        <div className="audit-tool__label">Result Summary</div>
-                        <p className="audit-tool__summary">{event.toolCall.resultSummary}</p>
-                      </div>
-                    ) : null}
-
-                    {event.toolCall.errorMessage ? (
-                      <div className="audit-tool__section">
-                        <div className="audit-tool__label">Error</div>
-                        <p className="audit-tool__summary audit-tool__summary--error">
-                          {event.toolCall.errorMessage}
-                        </p>
-                      </div>
-                    ) : null}
-                  </section>
+                  <ToolTimelineEvent key={event.id} toolCall={event.toolCall} />
                 ),
               )}
             </div>

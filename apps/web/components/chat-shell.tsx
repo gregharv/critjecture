@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { Agent, AgentMessage } from "@mariozechner/pi-web-ui";
+import type { Agent, AgentMessage, SessionData } from "@mariozechner/pi-web-ui";
 
 import type {
   CompanyKnowledgeCandidateFile,
@@ -18,6 +18,12 @@ import {
   type FileSelectionCandidate,
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
+import type {
+  ConversationMetadata,
+  GetConversationResponse,
+  ListConversationsResponse,
+  UpsertConversationResponse,
+} from "@/lib/conversation-types";
 import type {
   AssistantMessageType,
   CreateChatTurnResponse,
@@ -63,6 +69,12 @@ type PendingPlannerSearch = {
   recommendedFiles: string[];
   selectedFiles: string[];
   selectionRequired: boolean;
+};
+
+type ConversationBootstrapState = {
+  createdAt: string;
+  id: string;
+  initialSessionData: SessionData | null;
 };
 
 const AUDIT_MODEL_NAME = "gpt-4o-mini";
@@ -387,6 +399,153 @@ function getSystemPrompt(role: UserRole) {
   ].join(" ");
 }
 
+function generateClientId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `critjecture-${Date.now()}`;
+}
+
+function createDraftConversation(): ConversationBootstrapState {
+  return {
+    createdAt: new Date().toISOString(),
+    id: generateClientId(),
+    initialSessionData: null,
+  };
+}
+
+function hasConversationContent(messages: AgentMessage[]) {
+  return messages.some((message) => {
+    if (message.role === "assistant") {
+      return extractAssistantMessages(message).length > 0;
+    }
+
+    if (message.role === "user" || message.role === "user-with-attachments") {
+      return extractUserTextContent(message.content).length > 0;
+    }
+
+    return false;
+  });
+}
+
+function buildConversationTitle(messages: AgentMessage[]) {
+  for (const message of messages) {
+    if (message.role === "user" || message.role === "user-with-attachments") {
+      const promptText = extractUserTextContent(message.content);
+
+      if (promptText) {
+        return promptText.slice(0, 80).trim();
+      }
+    }
+  }
+
+  return "Untitled conversation";
+}
+
+function upsertConversationMetadata(
+  conversations: ConversationMetadata[],
+  metadata: ConversationMetadata,
+) {
+  const next = conversations.filter((conversation) => conversation.id !== metadata.id);
+  next.unshift(metadata);
+
+  return next.sort((left, right) => right.lastModified.localeCompare(left.lastModified));
+}
+
+function formatRelativeDate(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+  if (days <= 0) {
+    return "Today";
+  }
+
+  if (days === 1) {
+    return "Yesterday";
+  }
+
+  if (days < 7) {
+    return `${days} days ago`;
+  }
+
+  return date.toLocaleDateString();
+}
+
+type ChatHistoryDialogProps = {
+  activeConversationId: string | null;
+  conversations: ConversationMetadata[];
+  loading: boolean;
+  onClose: () => void;
+  onSelect: (conversationId: string) => void;
+};
+
+function ChatHistoryDialog({
+  activeConversationId,
+  conversations,
+  loading,
+  onClose,
+  onSelect,
+}: ChatHistoryDialogProps) {
+  return (
+    <div className="chat-history-backdrop" onClick={onClose} role="presentation">
+      <div
+        aria-label="Conversation history"
+        aria-modal="true"
+        className="chat-history-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="chat-history-dialog__header">
+          <div>
+            <p className="chat-history-dialog__eyebrow">History</p>
+            <h2 className="chat-history-dialog__title">Load a prior conversation</h2>
+          </div>
+          <button className="chat-toolbar__button" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        <div className="chat-history-dialog__list">
+          {loading ? (
+            <div className="chat-history-empty">Loading conversation history...</div>
+          ) : conversations.length === 0 ? (
+            <div className="chat-history-empty">No saved conversations yet.</div>
+          ) : (
+            conversations.map((conversation) => (
+              <button
+                className={`chat-history-card ${
+                  conversation.id === activeConversationId ? "is-active" : ""
+                }`}
+                key={conversation.id}
+                onClick={() => onSelect(conversation.id)}
+                type="button"
+              >
+                <div className="chat-history-card__header">
+                  <span className="chat-history-card__title">
+                    {conversation.title || "Untitled conversation"}
+                  </span>
+                  <span className="chat-history-card__date">
+                    {formatRelativeDate(conversation.lastModified)}
+                  </span>
+                </div>
+                <p className="chat-history-card__preview">
+                  {conversation.preview || "No preview available yet."}
+                </p>
+                <div className="chat-history-card__meta">
+                  <span>{conversation.messageCount} messages</span>
+                  <span>${conversation.usage.cost.total.toFixed(4)}</span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type ChatShellProps = {
   organizationSlug: string;
   role: UserRole;
@@ -396,36 +555,137 @@ type ChatShellProps = {
 export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellProps) {
   const activeTurnIdRef = useRef<string | null>(null);
   const awaitingFileSelectionRef = useRef(false);
+  const browserSessionIdRef = useRef<string>("");
+  const conversationCreatedAtRef = useRef("");
+  const conversationIdRef = useRef<string | null>(null);
+  const conversationPersistedRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const messageIndexRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   const syntheticContinuationRef = useRef(false);
+  const [activeConversationTitle, setActiveConversationTitle] = useState("");
+  const [conversationBootstrap, setConversationBootstrap] =
+    useState<ConversationBootstrapState | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyConversations, setHistoryConversations] = useState<ConversationMetadata[]>(
+    [],
+  );
+  const [isStreaming, setIsStreaming] = useState(false);
   const [{ error, ready }, setState] = useState<ChatShellState>({
     error: null,
     ready: false,
   });
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function initializeConversation() {
+      const url = new URL(window.location.href);
+      const requestedConversationId = url.searchParams.get("conversation")?.trim() ?? "";
+
+      if (!requestedConversationId) {
+        const draft = createDraftConversation();
+
+        if (!cancelled) {
+          conversationCreatedAtRef.current = draft.createdAt;
+          conversationIdRef.current = draft.id;
+          conversationPersistedRef.current = false;
+          setActiveConversationTitle("");
+          setConversationBootstrap(draft);
+        }
+
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/conversations/${requestedConversationId}`);
+        const data = (await response.json()) as
+          | GetConversationResponse
+          | {
+              error: string;
+            };
+
+        if (!response.ok) {
+          throw new Error(getErrorMessage(data, "Failed to load conversation."));
+        }
+
+        if (!("conversation" in data)) {
+          throw new Error("Conversation payload was missing from the response.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const bootstrap = {
+          createdAt: data.conversation.createdAt,
+          id: data.conversation.id,
+          initialSessionData: data.conversation,
+        } satisfies ConversationBootstrapState;
+
+        conversationCreatedAtRef.current = bootstrap.createdAt;
+        conversationIdRef.current = bootstrap.id;
+        conversationPersistedRef.current = true;
+        setActiveConversationTitle(data.conversation.title);
+        setConversationBootstrap(bootstrap);
+      } catch (caughtError) {
+        console.error("Failed to restore conversation from URL.", caughtError);
+        const draft = createDraftConversation();
+
+        if (!cancelled) {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("conversation");
+          window.history.replaceState({}, "", nextUrl.toString());
+          conversationCreatedAtRef.current = draft.createdAt;
+          conversationIdRef.current = draft.id;
+          conversationPersistedRef.current = false;
+          setActiveConversationTitle("");
+          setConversationBootstrap(draft);
+        }
+      }
+    }
+
+    void initializeConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!conversationBootstrap) {
+      return;
+    }
+
+    const initialConversation = conversationBootstrap;
     let mounted = true;
     let cleanup: (() => void) | undefined;
     let agent: Agent | null = null;
 
     setState({ error: null, ready: false });
+    setIsStreaming(false);
+
+    if (!browserSessionIdRef.current) {
+      browserSessionIdRef.current = generateClientId();
+    }
 
     async function bootstrap() {
       try {
-        const sessionId =
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `critjecture-${Date.now()}`;
-
         const [{ Agent, streamProxy }, { Type, getModel }, webUi] = await Promise.all([
           import("@mariozechner/pi-agent-core"),
           import("@mariozechner/pi-ai"),
           import("@mariozechner/pi-web-ui"),
         ]);
+
+        const bootstrapConversationId = initialConversation.id;
+        conversationIdRef.current = bootstrapConversationId;
+        conversationCreatedAtRef.current = initialConversation.createdAt;
+        conversationPersistedRef.current = Boolean(initialConversation.initialSessionData);
+        setActiveConversationTitle(initialConversation.initialSessionData?.title ?? "");
 
         const settings = new webUi.SettingsStore();
         const providerKeys = new webUi.ProviderKeysStore();
@@ -484,6 +744,98 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           return data as TResponse;
         };
 
+        const putConversationJson = async (
+          sessionData: SessionData,
+          signal?: AbortSignal,
+        ) => {
+          const response = await fetch(`/api/conversations/${sessionData.id}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ sessionData }),
+            signal,
+          });
+          const data = (await response.json()) as
+            | UpsertConversationResponse
+            | {
+                error: string;
+              };
+
+          if (!response.ok) {
+            throw new Error(getErrorMessage(data, "Failed to save conversation."));
+          }
+
+          return data as UpsertConversationResponse;
+        };
+
+        const buildSessionData = () => {
+          if (!agent || !conversationIdRef.current || !agent.state.model) {
+            return null;
+          }
+
+          const messages = agent.state.messages as AgentMessage[];
+
+          if (!hasConversationContent(messages)) {
+            return null;
+          }
+
+          return {
+            id: conversationIdRef.current,
+            title: buildConversationTitle(messages),
+            model: agent.state.model,
+            thinkingLevel: agent.state.thinkingLevel,
+            messages,
+            createdAt: conversationCreatedAtRef.current || new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+          } satisfies SessionData;
+        };
+
+        const saveConversationSnapshot = async (signal?: AbortSignal) => {
+          const sessionData = buildSessionData();
+
+          if (!sessionData) {
+            return;
+          }
+
+          await putConversationJson(sessionData, signal).then((result) => {
+            if (!mounted || conversationIdRef.current !== result.conversationId) {
+              return;
+            }
+
+            conversationPersistedRef.current = true;
+            setActiveConversationTitle(result.metadata.title);
+            setHistoryConversations((current) =>
+              upsertConversationMetadata(current, result.metadata),
+            );
+
+            const url = new URL(window.location.href);
+            url.searchParams.set("conversation", result.conversationId);
+            window.history.replaceState({}, "", url.toString());
+          });
+        };
+
+        const scheduleConversationSave = (immediate = false) => {
+          if (!agent) {
+            return;
+          }
+
+          if (saveTimerRef.current) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
+
+          if (immediate) {
+            void saveConversationSnapshot();
+            return;
+          }
+
+          saveTimerRef.current = window.setTimeout(() => {
+            saveTimerRef.current = null;
+            void saveConversationSnapshot();
+          }, 350);
+        };
+
         const queueChatTurn = (
           input: string | AgentMessage | AgentMessage[],
           synthetic: boolean,
@@ -524,6 +876,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
             await originalPrompt(input as never);
           } catch (caughtError) {
+            scheduleConversationSave(true);
             const turnId = activeTurnIdRef.current;
 
             if (turnId) {
@@ -768,9 +1121,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         agent = new Agent({
           initialState: {
             systemPrompt: getSystemPrompt(role),
-            model: getModel("openai", "gpt-4o-mini"),
-            thinkingLevel: "off",
-            messages: [],
+            model:
+              initialConversation.initialSessionData?.model ??
+              getModel("openai", "gpt-4o-mini"),
+            thinkingLevel:
+              initialConversation.initialSessionData?.thinkingLevel ?? "off",
+            messages: initialConversation.initialSessionData?.messages ?? [],
             tools: [
               searchCompanyKnowledgeTool,
               runDataAnalysisTool,
@@ -788,10 +1144,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
               if (!pendingChatTurn.synthetic) {
                 try {
+                  await saveConversationSnapshot(options?.signal);
+
                   const auditResponse = await postAuditJson<CreateChatTurnResponse>(
                     "/api/audit/chat-turns",
                     {
-                      chatSessionId: sessionId,
+                      conversationId: bootstrapConversationId,
+                      chatSessionId: browserSessionIdRef.current,
                       userPromptText: pendingChatTurn.userPromptText,
                     },
                     options?.signal,
@@ -814,7 +1173,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             });
           },
         });
-        agent.sessionId = sessionId;
+        agent.sessionId = browserSessionIdRef.current;
 
         const originalPrompt = agent.prompt.bind(agent);
         const auditedPrompt = (async (
@@ -896,6 +1255,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         }
 
         const unsubscribe = agent.subscribe((event) => {
+          if (event.type === "agent_start") {
+            setIsStreaming(true);
+          }
+
+          if ((event as { type: string }).type === "state-update") {
+            scheduleConversationSave();
+          }
+
           if (event.type === "message_end" && activeTurnIdRef.current) {
             const turnId = activeTurnIdRef.current;
             const assistantMessages = extractAssistantMessages(event.message);
@@ -924,6 +1291,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           }
 
           if (event.type === "agent_end") {
+            setIsStreaming(false);
+
             if (flushPendingPlannerSelection()) {
               return;
             }
@@ -954,6 +1323,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 console.error("Failed to mark chat turn as completed.", caughtError);
               });
             }
+
+            scheduleConversationSave(true);
           }
         });
         const handleFileSelection = (event: Event) => {
@@ -970,6 +1341,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               selection.files,
             ),
           );
+          scheduleConversationSave(true);
 
           if (agent.state.isStreaming) {
             pendingSelectionRef.current = selection;
@@ -997,6 +1369,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             FILE_SELECTION_EVENT,
             handleFileSelection as EventListener,
           );
+          if (saveTimerRef.current) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
           unsubscribe();
           agent?.abort();
           element.remove();
@@ -1021,14 +1397,113 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       mounted = false;
       activeTurnIdRef.current = null;
       awaitingFileSelectionRef.current = false;
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       messageIndexRef.current = 0;
       pendingChatTurnRef.current = null;
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
       syntheticContinuationRef.current = false;
+      setIsStreaming(false);
       cleanup?.();
     };
-  }, [organizationSlug, role, userId]);
+  }, [conversationBootstrap, organizationSlug, role, userId]);
+
+  async function loadConversationHistory() {
+    setHistoryLoading(true);
+
+    try {
+      const response = await fetch("/api/conversations");
+      const data = (await response.json()) as
+        | ListConversationsResponse
+        | {
+            error: string;
+          };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to load conversation history."));
+      }
+
+      if (!("conversations" in data)) {
+        throw new Error("Conversation list payload was missing from the response.");
+      }
+
+      setHistoryConversations(data.conversations);
+    } catch (caughtError) {
+      console.error("Failed to load conversation history.", caughtError);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function handleOpenHistory() {
+    if (isStreaming) {
+      return;
+    }
+
+    setHistoryOpen(true);
+    await loadConversationHistory();
+  }
+
+  async function handleSelectConversation(conversationId: string) {
+    if (isStreaming || conversationId === conversationIdRef.current) {
+      setHistoryOpen(false);
+      return;
+    }
+
+    setState({ error: null, ready: false });
+
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}`);
+      const data = (await response.json()) as
+        | GetConversationResponse
+        | {
+            error: string;
+          };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to load conversation."));
+      }
+
+      if (!("conversation" in data)) {
+        throw new Error("Conversation payload was missing from the response.");
+      }
+
+      conversationIdRef.current = data.conversation.id;
+      conversationCreatedAtRef.current = data.conversation.createdAt;
+      conversationPersistedRef.current = true;
+      setActiveConversationTitle(data.conversation.title);
+      setConversationBootstrap({
+        createdAt: data.conversation.createdAt,
+        id: data.conversation.id,
+        initialSessionData: data.conversation,
+      });
+      setHistoryOpen(false);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Failed to load conversation.";
+      setState({ error: message, ready: false });
+    }
+  }
+
+  function handleNewChat() {
+    if (isStreaming) {
+      return;
+    }
+
+    const draft = createDraftConversation();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("conversation");
+    window.history.replaceState({}, "", url.toString());
+    conversationIdRef.current = draft.id;
+    conversationCreatedAtRef.current = draft.createdAt;
+    conversationPersistedRef.current = false;
+    setActiveConversationTitle("");
+    setHistoryOpen(false);
+    setConversationBootstrap(draft);
+  }
 
   if (error) {
     return (
@@ -1040,11 +1515,50 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
   return (
     <div className="chat-shell">
+      <div className="chat-toolbar">
+        <div className="chat-toolbar__title-group">
+          <span className="chat-toolbar__eyebrow">Conversation</span>
+          <span className="chat-toolbar__title">
+            {activeConversationTitle || "New conversation"}
+          </span>
+        </div>
+        <div className="chat-toolbar__actions">
+          <button
+            className="chat-toolbar__button"
+            disabled={isStreaming || !conversationBootstrap}
+            onClick={() => {
+              void handleOpenHistory();
+            }}
+            type="button"
+          >
+            History
+          </button>
+          <button
+            className="chat-toolbar__button chat-toolbar__button--primary"
+            disabled={isStreaming || !conversationBootstrap}
+            onClick={handleNewChat}
+            type="button"
+          >
+            New chat
+          </button>
+        </div>
+      </div>
       <div className="chat-host" ref={hostRef} />
       {!ready ? (
         <div className="chat-fallback chat-fallback-overlay">
           Loading chat shell...
         </div>
+      ) : null}
+      {historyOpen ? (
+        <ChatHistoryDialog
+          activeConversationId={conversationIdRef.current}
+          conversations={historyConversations}
+          loading={historyLoading}
+          onClose={() => setHistoryOpen(false)}
+          onSelect={(conversationId) => {
+            void handleSelectConversation(conversationId);
+          }}
+        />
       ) : null}
     </div>
   );

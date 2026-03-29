@@ -29,6 +29,7 @@ function normalizeLimit(limit: number) {
 }
 
 export async function createChatTurnLog(input: {
+  conversationId: string;
   chatSessionId: string;
   organizationId: string;
   userPromptText: string;
@@ -40,7 +41,7 @@ export async function createChatTurnLog(input: {
 
   await db.insert(chatTurns).values({
     id: turnId,
-    conversationId: input.chatSessionId,
+    conversationId: input.conversationId,
     organizationId: input.organizationId,
     chatSessionId: input.chatSessionId,
     completedAt: null,

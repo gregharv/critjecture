@@ -740,3 +740,99 @@ Step 11 was implemented as a deliberate development-only schema reset that repla
 - The future vector store is still expected to live outside SQLite. Step 11 prepares the relational IDs and joins without storing vectors in the app database.
 - `audit_events` was intentionally not added. Final assistant output stays in `assistant_messages`, tool execution stays in `tool_calls`, and retrieval state will live in the dedicated retrieval tables when that work is implemented.
 - The local database was intentionally reset as part of this step, so older development audit data is not preserved across the new baseline.
+
+## Step 12: Server-Backed Chat History
+
+### What Was Implemented
+
+Step 12 was implemented as a server-backed conversation history layer for the existing `pi-web-ui` chat shell, plus follow-up audit-log presentation improvements for sandbox tool code.
+
+- Added a dedicated conversations persistence layer on top of the Step 11 baseline:
+  - `apps/web/drizzle/0001_step12_conversations.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds a `conversations` table with:
+    - `id`
+    - `organization_id`
+    - `user_id`
+    - `user_role`
+    - `title`
+    - `preview_text`
+    - `message_count`
+    - `usage_json`
+    - `session_data_json`
+    - `created_at`
+    - `updated_at`
+- Added server-side conversation helpers:
+  - `apps/web/lib/conversations.ts`
+  - `apps/web/lib/conversation-types.ts`
+  - stores full `@mariozechner/pi-web-ui` session snapshots server-side
+  - derives conversation metadata server-side from the saved session state
+  - scopes conversation access to the authenticated user and organization
+  - prevents a lower-access role from loading a conversation saved under a higher-access role
+- Added authenticated conversation APIs:
+  - `apps/web/app/api/conversations/route.ts`
+  - `apps/web/app/api/conversations/[conversationId]/route.ts`
+  - supports:
+    - listing saved conversations
+    - loading one saved conversation
+    - saving or updating one conversation snapshot
+- Updated the chat audit creation flow to separate durable conversation identity from browser session identity:
+  - `apps/web/app/api/audit/chat-turns/route.ts`
+  - `apps/web/lib/audit-log.ts`
+  - `conversation_id` now records the persistent conversation id
+  - `chat_session_id` remains the mounted browser chat session id used for audit correlation
+- Refactored the chat shell to use server-backed history:
+  - `apps/web/components/chat-shell.tsx`
+  - restores a saved conversation from `?conversation=<id>`
+  - creates a new draft conversation when no conversation id is present
+  - autosaves full chat state back to the server as the conversation evolves
+  - opens a history modal to load prior saved conversations
+  - adds a `New chat` action that resets to a fresh draft without deleting prior history
+  - continues using the existing `agent-interface` and `pi-web-ui` session shape for forward compatibility with upstream updates
+- Updated the shared app styling for the history toolbar and modal:
+  - `apps/web/app/globals.css`
+- Improved audit-log tool rendering for sandbox calls:
+  - `apps/web/components/admin-logs-page-client.tsx`
+  - audit log cards now extract Python `code` from sandbox tool parameters for:
+    - `run_data_analysis`
+    - `generate_visual_graph`
+    - `generate_document`
+  - renders Python source separately from the remaining JSON parameters
+  - keeps the rest of the parameters visible as `Other Parameters`
+- Fixed the mobile audit-log layout for the new code blocks:
+  - `apps/web/app/globals.css`
+  - tool metadata stacks cleanly on narrow screens
+  - code blocks stay within the card width and scroll sideways when needed
+  - the disclosure marker no longer renders incorrectly in mobile audit cards
+
+### Current Step 12 Behavior
+
+- Chat history
+  - a signed-in user can reload `/chat` and recover a saved conversation by URL
+  - a signed-in user can open the history modal and resume prior saved conversations
+  - conversation history is available across refreshes, browsers, and devices for the same account
+  - a new conversation draft is not saved until the chat has real content
+- Conversation persistence
+  - full `pi-web-ui` session state is stored server-side per conversation
+  - conversation metadata is derived from the stored messages, including:
+    - title
+    - preview text
+    - message count
+    - usage totals
+  - conversations are private to the authenticated user within the current organization
+- Audit correlation
+  - each chat turn now keeps:
+    - a durable `conversation_id`
+    - a per-mounted-session `chat_session_id`
+  - audit entries remain attached to the correct persistent conversation even when a conversation is resumed later
+- Audit log presentation
+  - sandbox tool calls show Python code as a dedicated code block instead of only raw JSON
+  - long code lines remain readable on mobile via horizontal scrolling within the code block
+
+### Important Implementation Details
+
+- Step 12 chose full `pi-web-ui` session snapshots as the durable history source instead of reconstructing history solely from audit rows.
+- The app still uses IndexedDB locally for `pi-web-ui` settings, provider keys, and other client-side stores; server-backed persistence was added specifically for conversations.
+- No conversation deletion flow was added in this step.
+- History remains per-user rather than shared organization-wide.
+- The remaining roadmap in `steps.md` now starts at Step 13.
