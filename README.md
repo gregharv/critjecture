@@ -10,6 +10,7 @@ The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` a
 - Searches organization data and asks for clarification when multiple files are plausible.
 - Runs structured data analysis in an isolated Python sandbox using Polars.
 - Generates PNG charts and PDF documents from approved company data.
+- Lets authenticated users upload approved tenant files into organization-owned knowledge storage.
 - Records chat turns, tool calls, accessed files, and assistant responses in an audit dashboard.
 
 ## Core Experience
@@ -56,6 +57,17 @@ It shows a newest-first list of chat turn cards scoped to the current organizati
 - tool calls
 
 Each card can be filtered to show all events, only assistant responses, or only tool calls. Tool events include raw parameters, accessed files, completion summaries, and any errors. Chat turn cards also show the initiating authenticated user and the chat session id that produced the interaction.
+
+### Knowledge Library
+
+The knowledge library lives at `http://localhost:3000/knowledge`.
+
+Authenticated users can upload `.csv`, `.txt`, `.md`, and text-extractable `.pdf` files into the current organization's knowledge tree.
+
+- `Intern`: uploads only to `company_data/public/uploads/...`
+- `Owner`: uploads to either `company_data/public/uploads/...` or `company_data/admin/uploads/...`
+
+Uploaded files are indexed on upload, tracked in SQLite metadata, visible in the knowledge library UI, and searchable through the existing `search_company_knowledge` flow. Uploaded files that pass authorization can also be staged into the Python sandbox through the existing `inputFiles` mechanism.
 
 ## Architecture
 
@@ -117,6 +129,7 @@ storage/                  Default local runtime storage root (gitignored)
 - Node.js 20.9 or newer
 - `pnpm` 10.x
 - `uv` 0.11 or newer
+- `pdftotext` available on the host for uploaded PDF ingestion
 - `OPENAI_API_KEY` for live chat
 
 ## Quick Start
@@ -133,6 +146,7 @@ Open:
 
 - `http://localhost:3000/login`
 - `http://localhost:3000/chat`
+- `http://localhost:3000/knowledge`
 - `http://localhost:3000/admin/logs`
 
 ## Environment
@@ -190,6 +204,12 @@ Useful example prompts:
 - `contractor payouts`
 - `Create a bar chart of the top 3 contractor payouts.`
 - `Generate a late rent notice PDF for Unit 4B.`
+
+Useful upload checks:
+
+- Upload a public `.csv` file, then ask the chat to summarize it.
+- Upload an admin `.pdf` as Owner, then search for a phrase from the PDF.
+- Confirm that Intern cannot see or use admin-scope uploads.
 
 ## Development Notes
 

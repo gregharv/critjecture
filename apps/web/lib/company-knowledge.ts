@@ -6,7 +6,10 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
+import { and, eq } from "drizzle-orm";
 
+import { getAppDatabase } from "@/lib/app-db";
+import { documentChunks, documents } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import type {
   CompanyKnowledgeCandidateFile,
@@ -38,6 +41,7 @@ const STOPWORDS = new Set([
 type CandidateAccumulator = {
   file: string;
   filenameMatchedTerms: Set<string>;
+  exactMatchCount: number;
   matchedTerms: Set<string>;
   matchesByLine: Map<string, CompanyKnowledgeMatch>;
 };
@@ -87,11 +91,15 @@ function addMatches(
     const candidate = candidates.get(match.file) ?? {
       file: match.file,
       filenameMatchedTerms: new Set<string>(),
+      exactMatchCount: 0,
       matchedTerms: new Set<string>(),
       matchesByLine: new Map<string, CompanyKnowledgeMatch>(),
     };
 
     candidate.matchedTerms.add(matchedTerm);
+    if (matchedTerm.includes(" ")) {
+      candidate.exactMatchCount += 1;
+    }
     candidate.matchesByLine.set(`${match.line}:${match.text}`, match);
     candidates.set(match.file, candidate);
   }
@@ -287,6 +295,7 @@ async function buildCandidateFiles(
         matches,
         preview,
         score:
+          candidate.exactMatchCount * 16 +
           matches.length * 10 +
           matchedTerms.length * 4 +
           filenameMatchCount * 3 +
@@ -296,6 +305,211 @@ async function buildCandidateFiles(
   );
 
   return candidateFiles.sort((left, right) => {
+    if (left.score === right.score) {
+      return left.file.localeCompare(right.file);
+    }
+
+    return right.score - left.score;
+  });
+}
+
+function getPreviewLinesFromText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function buildPdfExcerpt(chunkText: string, query: string, searchTokens: string[]) {
+  const chunkLower = chunkText.toLowerCase();
+  const exactQuery = query.trim().toLowerCase();
+  const exactQueryIndex = exactQuery ? chunkLower.indexOf(exactQuery) : -1;
+  const tokenIndex = searchTokens
+    .map((token) => chunkLower.indexOf(token))
+    .find((index) => index >= 0);
+  const matchIndex = exactQueryIndex >= 0 ? exactQueryIndex : (tokenIndex ?? -1);
+  const snippetStart = matchIndex >= 0 ? Math.max(0, matchIndex - 80) : 0;
+  const snippetEnd =
+    matchIndex >= 0 ? Math.min(chunkText.length, matchIndex + 240) : Math.min(chunkText.length, 240);
+  const excerpt = chunkText.slice(snippetStart, snippetEnd).trim();
+  const previewLines = getPreviewLinesFromText(excerpt || chunkText);
+
+  return previewLines.length > 0 ? previewLines : ["No preview available."];
+}
+
+async function searchIndexedPdfCandidates(
+  query: string,
+  organizationId: string,
+  role: UserRole,
+  queryYear?: string,
+) {
+  const db = await getAppDatabase();
+  const searchTokens = tokenizeQuery(query);
+  const normalizedQuery = query.trim().toLowerCase();
+  const whereClauses = [
+    eq(documents.organizationId, organizationId),
+    eq(documents.sourceType, "uploaded"),
+    eq(documents.mimeType, "application/pdf"),
+    eq(documents.ingestionStatus, "ready"),
+  ];
+
+  if (role !== "owner") {
+    whereClauses.push(eq(documents.accessScope, "public"));
+  }
+
+  const rows = await db
+    .select({
+      chunkText: documentChunks.chunkText,
+      sourcePath: documents.sourcePath,
+    })
+    .from(documentChunks)
+    .innerJoin(documents, eq(documentChunks.documentId, documents.id))
+    .where(and(...whereClauses));
+
+  const candidates = new Map<
+    string,
+    {
+      exactMatchCount: number;
+      filenameMatchedTerms: Set<string>;
+      matchedTerms: Set<string>;
+      matches: CompanyKnowledgeMatch[];
+      previewLines: string[];
+      score: number;
+    }
+  >();
+
+  for (const row of rows) {
+    const basename = path.basename(row.sourcePath).toLowerCase();
+    const chunkText = row.chunkText.trim();
+    const chunkTextLower = chunkText.toLowerCase();
+    const filenameMatchedTerms = searchTokens.filter((token) => basename.includes(token));
+    const matchedTerms = searchTokens.filter((token) => chunkTextLower.includes(token));
+    const exactMatch = normalizedQuery.length > 0 && chunkTextLower.includes(normalizedQuery);
+
+    if (!exactMatch && matchedTerms.length === 0 && filenameMatchedTerms.length === 0) {
+      continue;
+    }
+
+    const candidate = candidates.get(row.sourcePath) ?? {
+      exactMatchCount: 0,
+      filenameMatchedTerms: new Set<string>(),
+      matchedTerms: new Set<string>(),
+      matches: [],
+      previewLines: [],
+      score: 0,
+    };
+
+    if (exactMatch) {
+      candidate.exactMatchCount += 1;
+      candidate.matchedTerms.add(query.trim());
+    }
+
+    for (const matchedTerm of matchedTerms) {
+      candidate.matchedTerms.add(matchedTerm);
+    }
+
+    for (const filenameMatchedTerm of filenameMatchedTerms) {
+      candidate.filenameMatchedTerms.add(filenameMatchedTerm);
+    }
+
+    const previewLines = buildPdfExcerpt(chunkText, query, searchTokens);
+    const previewText = previewLines.join(" ");
+
+    if (
+      previewText &&
+      !candidate.matches.some((match) => match.text === previewText && match.file === row.sourcePath)
+    ) {
+      candidate.matches.push({
+        file: row.sourcePath,
+        line: 1,
+        text: previewText,
+      });
+    }
+
+    if (candidate.previewLines.length === 0 || exactMatch) {
+      candidate.previewLines = previewLines;
+    }
+
+    const yearMatch =
+      queryYear !== undefined &&
+      (chunkText.includes(queryYear) || previewLines.some((line) => line.includes(queryYear)));
+
+    candidate.score =
+      candidate.exactMatchCount * 16 +
+      candidate.matches.length * 10 +
+      candidate.matchedTerms.size * 4 +
+      candidate.filenameMatchedTerms.size * 3 +
+      (yearMatch ? 25 : 0);
+
+    candidates.set(row.sourcePath, candidate);
+  }
+
+  return [...candidates.entries()]
+    .map(([file, candidate]) => ({
+      file,
+      matchedTerms: [...new Set([...candidate.matchedTerms, ...candidate.filenameMatchedTerms])].sort(),
+      matches: candidate.matches,
+      preview: {
+        kind: "text" as const,
+        lines: candidate.previewLines.slice(0, 3),
+      },
+      score: candidate.score,
+    }))
+    .sort((left, right) => {
+      if (left.score === right.score) {
+        return left.file.localeCompare(right.file);
+      }
+
+      return right.score - left.score;
+    });
+}
+
+function mergeCandidateFiles(
+  primaryCandidates: CompanyKnowledgeCandidateFile[],
+  secondaryCandidates: CompanyKnowledgeCandidateFile[],
+) {
+  const merged = new Map(primaryCandidates.map((candidate) => [candidate.file, candidate]));
+
+  for (const candidate of secondaryCandidates) {
+    const existing = merged.get(candidate.file);
+
+    if (!existing) {
+      merged.set(candidate.file, candidate);
+      continue;
+    }
+
+    const matches = [...existing.matches];
+
+    for (const match of candidate.matches) {
+      if (
+        !matches.some(
+          (existingMatch) =>
+            existingMatch.file === match.file &&
+            existingMatch.line === match.line &&
+            existingMatch.text === match.text,
+        )
+      ) {
+        matches.push(match);
+      }
+    }
+
+    merged.set(candidate.file, {
+      ...existing,
+      matchedTerms: [...new Set([...existing.matchedTerms, ...candidate.matchedTerms])].sort(),
+      matches: matches.sort((left, right) => {
+        if (left.line === right.line) {
+          return left.text.localeCompare(right.text);
+        }
+
+        return left.line - right.line;
+      }),
+      preview: candidate.score > existing.score ? candidate.preview : existing.preview,
+      score: Math.max(existing.score, candidate.score),
+    });
+  }
+
+  return [...merged.values()].sort((left, right) => {
     if (left.score === right.score) {
       return left.file.localeCompare(right.file);
     }
@@ -374,6 +588,7 @@ function pickSelectedFile(
 
 export async function searchCompanyKnowledge(
   query: string,
+  organizationId: string,
   organizationSlug: string,
   role: UserRole,
   maxMatches = DEFAULT_MAX_MATCHES,
@@ -425,6 +640,7 @@ export async function searchCompanyKnowledge(
       const candidate = candidates.get(relativeFile) ?? {
         file: relativeFile,
         filenameMatchedTerms: new Set<string>(),
+        exactMatchCount: 0,
         matchedTerms: new Set<string>(),
         matchesByLine: new Map<string, CompanyKnowledgeMatch>(),
       };
@@ -438,7 +654,14 @@ export async function searchCompanyKnowledge(
   }
 
   const queryYear = extractQueryYear(normalizedQuery);
-  const candidateFiles = await buildCandidateFiles(companyDataRoot, candidates, queryYear);
+  const fileSystemCandidates = await buildCandidateFiles(companyDataRoot, candidates, queryYear);
+  const indexedPdfCandidates = await searchIndexedPdfCandidates(
+    normalizedQuery,
+    organizationId,
+    role,
+    queryYear,
+  );
+  const candidateFiles = mergeCandidateFiles(fileSystemCandidates, indexedPdfCandidates);
   const selection = pickSelectedFile(queryYear, candidateFiles);
 
   return {

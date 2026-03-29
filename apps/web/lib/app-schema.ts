@@ -213,6 +213,19 @@ export const documents = sqliteTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     sourcePath: text("source_path").notNull(),
     sourceType: text("source_type").notNull(),
+    displayName: text("display_name").notNull().default(""),
+    accessScope: text("access_scope", { enum: ["public", "admin"] })
+      .notNull()
+      .default("admin"),
+    ingestionStatus: text("ingestion_status", {
+      enum: ["pending", "ready", "failed"],
+    })
+      .notNull()
+      .default("ready"),
+    ingestionError: text("ingestion_error"),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     contentSha256: text("content_sha256").notNull(),
     mimeType: text("mime_type"),
     byteSize: integer("byte_size"),
@@ -221,8 +234,20 @@ export const documents = sqliteTable(
     lastIndexedAt: integer("last_indexed_at"),
   },
   (table) => [
+    check("documents_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
+    check(
+      "documents_ingestion_status_check",
+      sql`${table.ingestionStatus} in ('pending', 'ready', 'failed')`,
+    ),
     uniqueIndex("documents_org_source_path_idx").on(table.organizationId, table.sourcePath),
     index("documents_organization_id_idx").on(table.organizationId),
+    index("documents_org_source_type_idx").on(table.organizationId, table.sourceType),
+    index("documents_org_access_scope_idx").on(table.organizationId, table.accessScope),
+    index("documents_org_ingestion_status_idx").on(
+      table.organizationId,
+      table.ingestionStatus,
+    ),
+    index("documents_uploaded_by_user_id_idx").on(table.uploadedByUserId),
   ],
 );
 

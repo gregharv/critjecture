@@ -836,3 +836,80 @@ Step 12 was implemented as a server-backed conversation history layer for the ex
 - No conversation deletion flow was added in this step.
 - History remains per-user rather than shared organization-wide.
 - The remaining roadmap in `steps.md` now starts at Step 13.
+
+## Step 13: File Uploads and Knowledge Ingestion
+
+### What Was Implemented
+
+Step 13 was implemented as a tenant-scoped knowledge library with authenticated uploads, synchronous text ingestion, SQLite metadata, and search integration for uploaded files.
+
+- Added a Step 13 document metadata migration:
+  - `apps/web/drizzle/0002_step13_knowledge_uploads.sql`
+- Extended the shared document schema in `apps/web/lib/app-schema.ts`.
+  - `documents` now stores:
+    - `display_name`
+    - `access_scope`
+    - `ingestion_status`
+    - `ingestion_error`
+    - `uploaded_by_user_id`
+- Added shared knowledge types and server helpers:
+  - `apps/web/lib/knowledge-types.ts`
+  - `apps/web/lib/knowledge-files.ts`
+- Added authenticated knowledge APIs:
+  - `apps/web/app/api/knowledge/files/route.ts`
+  - supports:
+    - listing uploaded files for the current organization
+    - filtering by scope and ingestion status
+    - uploading `.csv`, `.txt`, `.md`, and `.pdf` files
+- Implemented upload validation and ingestion behavior:
+  - enforces a 10 MiB file limit
+  - validates extension and MIME compatibility
+  - stores uploads under tenant-owned `company_data/{public|admin}/uploads/YYYY/MM/...`
+  - extracts UTF-8 text from `.csv`, `.txt`, and `.md`
+  - extracts PDF text with local `pdftotext`
+  - writes overlapping text chunks into `document_chunks`
+  - marks failed ingestions without deleting the uploaded file
+- Integrated uploaded files into search:
+  - `apps/web/lib/company-knowledge.ts`
+  - existing filesystem `rg` search now continues to cover uploaded text files
+  - indexed uploaded PDFs are merged into the existing candidate-file search flow
+- Added a dedicated knowledge UI:
+  - `apps/web/app/knowledge/page.tsx`
+  - `apps/web/components/knowledge-page-client.tsx`
+  - `apps/web/components/workspace-shell.tsx`
+  - `apps/web/app/globals.css`
+  - adds:
+    - a new `/knowledge` route
+    - upload controls
+    - owner scope selection
+    - uploaded-file table with status, uploader, timestamps, and indexing errors
+- Updated docs and roadmap files:
+  - `README.md`
+  - `steps.md`
+
+### Current Step 13 Behavior
+
+- `Intern`
+  - can upload only public-scope files
+  - can list only public uploaded files
+  - can search and stage only public uploads
+- `Owner`
+  - can upload to either public or admin scope
+  - can list uploaded files across both scopes
+  - can search uploaded admin PDFs and other uploaded admin text files
+- Knowledge ingestion
+  - uploaded text files are stored durably inside the current tenant's `company_data`
+  - uploaded PDFs are searchable only when they contain extractable text
+  - failed ingestions remain visible in the knowledge library with the recorded error
+- Sandbox access
+  - uploaded files continue to flow through the existing `inputFiles` path
+  - backend authorization still blocks unauthorized file staging by relative path
+
+### Important Implementation Details
+
+- Step 13 keeps the existing `search_company_knowledge` tool contract. No new chat tool was added for uploads.
+- Uploaded text files are searchable via the existing filesystem `rg` path because they now live inside tenant `company_data`.
+- Uploaded PDFs use the existing `documents` and `document_chunks` tables as the searchable indexed path.
+- PDF ingestion currently depends on the local `pdftotext` binary and does not perform OCR.
+- The new knowledge library is the primary admin-visible upload surface for this step; uploads were not added to the audit timeline.
+- The remaining roadmap in `steps.md` now starts at Step 14.

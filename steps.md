@@ -2,28 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 13: File Uploads and Knowledge Ingestion
-
-### Goal
-
-Let customers bring their own files into Critjecture and use them safely in search and tool workflows.
-
-### What Should Be Implemented
-
-- add upload support in the web app
-- validate file size and file type
-- store uploaded files under tenant ownership
-- create an ingestion or indexing path for uploaded content
-- integrate uploaded files into search and sandbox staging
-- track file metadata for audit and admin visibility
-
-### Acceptance Criteria
-
-- authenticated users can upload approved files
-- uploads are stored under the correct tenant
-- uploaded content can be surfaced by the search flow
-- sandbox tools can use approved uploaded files without bypassing authorization
-
 ## Step 14: Sandbox Hardening and Execution Controls
 
 ### Goal
@@ -65,7 +43,30 @@ Add the operational controls needed to run the product safely and supportably.
 - abusive or runaway usage is limited automatically
 - usage and cost data can be reviewed per user or tenant
 
-## Step 16: Test Coverage and Release Readiness
+## Step 16: Bulk Knowledge Imports and Async Ingestion
+
+### Goal
+
+Support real customer knowledge onboarding by importing large file sets safely without blocking web requests.
+
+### What Should Be Implemented
+
+- allow bulk uploads via directory selection or archive upload
+- preserve tenant-relative directory structure for imported files
+- create durable import jobs and per-file import job rows
+- move validation, text extraction, chunking, and indexing into background processing
+- show import progress, partial failures, and retryable errors in the web app
+- keep uploaded files hidden from search and sandbox staging until ingestion is ready
+- lay the groundwork for later embedding/vectorization as a separate async stage
+
+### Acceptance Criteria
+
+- users can start a bulk import without waiting for all files to finish processing inline
+- operators and users can see import-job progress and failures clearly
+- partial failures do not invalidate the whole import job
+- newly imported files only appear in search and tool workflows after successful ingestion
+
+## Step 17: Test Coverage and Release Readiness
 
 ### Goal
 
@@ -86,7 +87,7 @@ Create enough automated verification to ship changes with confidence.
 - major regressions are catchable before release
 - a repeatable release confidence process exists
 
-## Step 17: Admin Operations and Compliance Controls
+## Step 18: Admin Operations and Compliance Controls
 
 ### Goal
 
@@ -109,5 +110,7 @@ Add the operational and governance capabilities expected by real customer deploy
 ## Roadmap Notes
 
 - Chat history and file uploads are important future capabilities, but they should follow authentication and persistence foundations.
+- Bulk directory imports should follow observability work because they depend on background jobs, progress tracking, retries, and clear failure reporting.
+- Embedding and vectorization should be treated as a later stage on top of durable bulk ingestion rather than bundled into the first bulk-import release.
 - The order above reflects dependency order and production risk, not just feature desirability.
 - A small on-prem pilot may be able to adopt parts of this roadmap more gradually than a multi-tenant cloud rollout.
