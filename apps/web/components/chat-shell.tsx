@@ -376,6 +376,7 @@ function getSystemPrompt(role: UserRole) {
     "Never rely on a trailing expression like `mean, median`; use print(...).",
     "If you need to return multiple analytical values, print a single JSON object so the UI can render it clearly.",
     "For any staged CSV input, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
+    "Polars cheat sheet: use DataFrame.group_by(...), not groupby(...). Use df.sort('column', descending=True), not reverse=True or 'desc'. Use exact CSV headers in pl.col(...), for example ledger_year instead of inventing year. Convert plot columns with series.to_list() before passing them to matplotlib.",
     "matplotlib is available for PNG charts. Convert chart columns to plain Python lists before plotting.",
     "reportlab is available for PDFs. For a simple notice, use reportlab.pdfgen.canvas.Canvas with outputs/notice.pdf.",
     "Never claim that you cannot execute Python. You can execute Python through the available tool.",

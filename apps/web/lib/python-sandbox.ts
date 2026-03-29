@@ -3,7 +3,7 @@ import "server-only";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, copyFile, mkdir, readdir, stat } from "node:fs/promises";
+import { access, copyFile, mkdir, open, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -218,7 +218,93 @@ async function resolvePythonExecutable() {
   return pythonExecutable;
 }
 
-function validateCsvAnalysisCode(code: string) {
+async function validatePythonSyntax(pythonExecutable: string, code: string) {
+  try {
+    await execFileAsync(
+      pythonExecutable,
+      ["-c", "import sys; compile(sys.argv[1], '<sandbox>', 'exec')", code],
+      {
+        env: {
+          NODE_ENV: process.env.NODE_ENV ?? "production",
+          PYTHONDONTWRITEBYTECODE: "1",
+          PYTHONUNBUFFERED: "1",
+        },
+        maxBuffer: SANDBOX_MAX_BUFFER,
+      },
+    );
+  } catch (caughtError) {
+    const stderr =
+      typeof caughtError === "object" &&
+      caughtError !== null &&
+      "stderr" in caughtError &&
+      typeof caughtError.stderr === "string"
+        ? caughtError.stderr.trim()
+        : "";
+    const stdout =
+      typeof caughtError === "object" &&
+      caughtError !== null &&
+      "stdout" in caughtError &&
+      typeof caughtError.stdout === "string"
+        ? caughtError.stdout.trim()
+        : "";
+    const combinedOutput = [stderr, stdout].filter(Boolean).join("\n");
+
+    throw new SandboxValidationError(
+      combinedOutput || "Python syntax preflight failed before sandbox execution.",
+    );
+  }
+}
+
+function extractPolarsColumnReferences(code: string) {
+  return [
+    ...new Set(
+      [...code.matchAll(/\bpl\.col\(\s*(['"])([^"'\\]+)\1\s*\)/g)].map((match) => match[2] ?? ""),
+    ),
+  ].filter(Boolean);
+}
+
+async function readFirstLine(filePath: string) {
+  const fileHandle = await open(filePath, "r");
+  const buffer = Buffer.alloc(4096);
+
+  try {
+    const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, 0);
+
+    return buffer.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0]?.trim() ?? "";
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+function splitCsvHeaderColumns(headerLine: string) {
+  return headerLine
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
+}
+
+async function getAvailableCsvColumns(
+  stagedFiles: StagedSandboxFile[],
+  workspaceDir: string,
+) {
+  const csvFiles = stagedFiles.filter((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
+  const availableColumnsByFile = new Map<string, string[]>();
+
+  for (const stagedFile of csvFiles) {
+    const stagedAbsolutePath = path.join(workspaceDir, ...stagedFile.stagedPath.split("/"));
+    const headerLine = await readFirstLine(stagedAbsolutePath);
+
+    availableColumnsByFile.set(stagedFile.sourcePath, splitCsvHeaderColumns(headerLine));
+  }
+
+  return availableColumnsByFile;
+}
+
+async function validateCsvAnalysisCode(
+  code: string,
+  stagedFiles: StagedSandboxFile[],
+  workspaceDir: string,
+) {
   if (/\b(?:import|from)\s+pandas\b/i.test(code) || /\bpd\.read_csv\s*\(/i.test(code)) {
     throw new SandboxValidationError(
       "CSV analysis must use Polars LazyFrames. pandas and pd.read_csv(...) are not allowed.",
@@ -236,6 +322,54 @@ function validateCsvAnalysisCode(code: string) {
       "CSV analysis must use pl.scan_csv(...) with a final .collect() before printing the answer.",
     );
   }
+
+  if (/\.groupby\s*\(/i.test(code)) {
+    throw new SandboxValidationError(
+      "Polars uses group_by(...), not groupby(...).",
+    );
+  }
+
+  if (/\.sort\s*\([\s\S]*?\breverse\s*=/.test(code)) {
+    throw new SandboxValidationError(
+      "Polars sort(...) uses descending=True, not reverse=True.",
+    );
+  }
+
+  if (/\.sort\s*\([\s\S]*?,\s*['"](asc|desc|ascending|descending)['"]/.test(code)) {
+    throw new SandboxValidationError(
+      "Polars sort(...) does not accept string direction arguments like 'desc'. Use descending=True instead.",
+    );
+  }
+
+  if (/\.rows\b(?!\s*\()/i.test(code)) {
+    throw new SandboxValidationError(
+      "Polars DataFrame rows is a method. Use rows() or convert named columns with to_list().",
+    );
+  }
+
+  const referencedColumns = extractPolarsColumnReferences(code);
+
+  if (referencedColumns.length === 0) {
+    return;
+  }
+
+  const availableColumnsByFile = await getAvailableCsvColumns(stagedFiles, workspaceDir);
+  const availableColumns = new Set(
+    [...availableColumnsByFile.values()].flatMap((columns) => columns),
+  );
+  const missingColumns = referencedColumns.filter((column) => !availableColumns.has(column));
+
+  if (missingColumns.length === 0) {
+    return;
+  }
+
+  const availableColumnsSummary = [...availableColumnsByFile.entries()]
+    .map(([filePath, columns]) => `${filePath}: ${columns.join(", ")}`)
+    .join(" | ");
+
+  throw new SandboxValidationError(
+    `CSV analysis referenced unknown column(s): ${missingColumns.join(", ")}. Available staged CSV columns: ${availableColumnsSummary}`,
+  );
 }
 
 async function stageInputFiles(
@@ -338,12 +472,12 @@ export async function executeSandboxedCommand(options: {
     workspaceDir,
   );
   const hasCsvInputs = stagedFiles.some((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
+  const pythonExecutable = await resolvePythonExecutable();
+  await validatePythonSyntax(pythonExecutable, normalizedCode);
 
   if (hasCsvInputs) {
-    validateCsvAnalysisCode(normalizedCode);
+    await validateCsvAnalysisCode(normalizedCode, stagedFiles, workspaceDir);
   }
-
-  const pythonExecutable = await resolvePythonExecutable();
 
   try {
     const { stdout, stderr } = await execFileAsync(

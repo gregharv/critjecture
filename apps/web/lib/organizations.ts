@@ -25,26 +25,65 @@ export type OrganizationMembershipContext = {
   role: UserRole;
 };
 
+const SINGLE_ORGANIZATION_MODE_ERROR =
+  "Step 10 runs in single-organization mode. Resolve the extra organization rows before continuing.";
+
+async function getExistingOrganizations() {
+  const db = await getAppDatabase();
+
+  return db
+    .select()
+    .from(organizations)
+    .orderBy(asc(organizations.createdAt));
+}
+
+async function getSingleConfiguredOrganization() {
+  const slug = getDefaultOrganizationSlug();
+  const organizationsList = await getExistingOrganizations();
+
+  if (organizationsList.length > 1) {
+    throw new Error(SINGLE_ORGANIZATION_MODE_ERROR);
+  }
+
+  const existingOrganization = organizationsList[0] ?? null;
+
+  if (!existingOrganization) {
+    return {
+      configuredSlug: slug,
+      organization: null,
+    };
+  }
+
+  if (existingOrganization.slug !== slug) {
+    throw new Error(
+      `Step 10 runs in single-organization mode. Existing organization slug "${existingOrganization.slug}" does not match configured slug "${slug}".`,
+    );
+  }
+
+  return {
+    configuredSlug: slug,
+    organization: existingOrganization,
+  };
+}
+
 export async function ensureDefaultOrganization() {
   const db = await getAppDatabase();
-  const slug = getDefaultOrganizationSlug();
   const name = getDefaultOrganizationName();
   const now = Date.now();
-  const existingOrganization = await db.query.organizations.findFirst({
-    where: eq(organizations.slug, slug),
-  });
+  const { configuredSlug, organization: existingOrganization } =
+    await getSingleConfiguredOrganization();
 
   if (!existingOrganization) {
     const createdOrganization = {
       createdAt: now,
       id: randomUUID(),
       name,
-      slug,
+      slug: configuredSlug,
       updatedAt: now,
     } satisfies typeof organizations.$inferInsert;
 
     await db.insert(organizations).values(createdOrganization);
-    await ensureOrganizationCompanyDataRoot(slug);
+    await ensureOrganizationCompanyDataRoot(configuredSlug);
 
     return createdOrganization;
   }
@@ -133,6 +172,12 @@ export async function backfillLegacyOrganizationScope(defaultOrganizationId: str
 
 export async function getPrimaryMembershipForUser(userId: string) {
   const db = await getAppDatabase();
+  const { organization } = await getSingleConfiguredOrganization();
+
+  if (!organization) {
+    return null;
+  }
+
   const rows = await db
     .select({
       organizationId: organizations.id,
@@ -142,8 +187,13 @@ export async function getPrimaryMembershipForUser(userId: string) {
     })
     .from(organizationMemberships)
     .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))
-    .where(eq(organizationMemberships.userId, userId))
-    .orderBy(asc(organizations.createdAt), asc(organizationMemberships.createdAt))
+    .where(
+      and(
+        eq(organizationMemberships.userId, userId),
+        eq(organizationMemberships.organizationId, organization.id),
+      ),
+    )
+    .orderBy(asc(organizationMemberships.createdAt))
     .limit(1);
 
   return rows[0] ?? null;
