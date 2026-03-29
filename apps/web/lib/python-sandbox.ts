@@ -424,6 +424,7 @@ async function validateCsvAnalysisCode(
 
 async function stageInputFiles(
   inputFiles: string[],
+  organizationId: string,
   organizationSlug: string,
   role: UserRole,
   workspaceDir: string,
@@ -436,6 +437,7 @@ async function stageInputFiles(
       requestedPath,
       organizationSlug,
       role,
+      organizationId,
     );
     const stagedPath = path.posix.join("inputs", resolvedFile.relativePath);
     const stagedAbsolutePath = path.join(workspaceDir, ...stagedPath.split("/"));
@@ -863,6 +865,7 @@ export async function executeSandboxedCommand(options: {
   try {
     const stagedFiles = await stageInputFiles(
       options.inputFiles ?? [],
+      options.organizationId,
       options.organizationSlug,
       options.role,
       workspaceDir,

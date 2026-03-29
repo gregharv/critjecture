@@ -6,11 +6,12 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { getAppDatabase } from "@/lib/app-db";
 import { documentChunks, documents } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 import type {
   CompanyKnowledgeCandidateFile,
   CompanyKnowledgeMatch,
@@ -349,7 +350,7 @@ async function searchIndexedPdfCandidates(
   const normalizedQuery = query.trim().toLowerCase();
   const whereClauses = [
     eq(documents.organizationId, organizationId),
-    eq(documents.sourceType, "uploaded"),
+    inArray(documents.sourceType, [...KNOWLEDGE_MANAGED_SOURCE_TYPES]),
     eq(documents.mimeType, "application/pdf"),
     eq(documents.ingestionStatus, "ready"),
   ];

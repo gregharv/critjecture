@@ -10,6 +10,7 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNull,
   lt,
   or,
@@ -22,6 +23,7 @@ import { ensureStorageRoot, resolveRepositoryRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
 import {
   operationalAlerts,
+  knowledgeImportJobFiles,
   rateLimitBuckets,
   requestLogs,
   usageEvents,
@@ -1016,6 +1018,7 @@ export function clampChatMaxTokens(value: number | undefined) {
 
 export async function getHealthSummary(): Promise<HealthSummary> {
   const checks: HealthCheckResult[] = [];
+  const now = Date.now();
 
   try {
     const db = await getAppDatabase();
@@ -1076,6 +1079,58 @@ export async function getHealthSummary(): Promise<HealthSummary> {
       detail: "Sandbox host dependencies are present.",
       name: "sandbox",
       status: "ok",
+    });
+  }
+
+  try {
+    const db = await getAppDatabase();
+    const staleCutoff = now - 5 * ONE_MINUTE_MS;
+    const [queuedRows, staleRows] = await Promise.all([
+      db
+        .select({
+          count: sql<number>`count(*)`,
+        })
+        .from(knowledgeImportJobFiles)
+        .where(eq(knowledgeImportJobFiles.stage, "queued")),
+      db
+        .select({
+          count: sql<number>`count(*)`,
+        })
+        .from(knowledgeImportJobFiles)
+        .where(
+          and(
+            inArray(knowledgeImportJobFiles.stage, ["validating", "extracting", "chunking", "indexing"]),
+            lt(knowledgeImportJobFiles.updatedAt, staleCutoff),
+          ),
+        ),
+    ]);
+    const queuedCount = Number(queuedRows[0]?.count ?? 0);
+    const staleCount = Number(staleRows[0]?.count ?? 0);
+
+    if (staleCount > 0) {
+      checks.push({
+        detail: `${staleCount} import file${staleCount === 1 ? "" : "s"} appear stalled.`,
+        name: "knowledge-imports",
+        status: "degraded",
+      });
+    } else {
+      checks.push({
+        detail:
+          queuedCount > 0
+            ? `${queuedCount} import file${queuedCount === 1 ? "" : "s"} queued for ingestion.`
+            : "No queued or stale knowledge imports.",
+        name: "knowledge-imports",
+        status: "ok",
+      });
+    }
+  } catch (caughtError) {
+    checks.push({
+      detail:
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to inspect knowledge import status.",
+      name: "knowledge-imports",
+      status: "degraded",
     });
   }
 

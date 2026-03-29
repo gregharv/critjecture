@@ -124,6 +124,7 @@ export async function POST(request: Request) {
     });
     const csvSchemas = await buildCsvSchemas({
       inputFiles: parsedRequest.inputFiles,
+      organizationId: user.organizationId,
       organizationSlug: user.organizationSlug,
       role: user.role,
     });

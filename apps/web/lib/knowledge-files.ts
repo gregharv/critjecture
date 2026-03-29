@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID, createHash } from "node:crypto";
 import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAppDatabase } from "@/lib/app-db";
 import { documents, documentChunks, users } from "@/lib/app-schema";
+import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 import {
   canRoleAccessKnowledgeScope,
   isKnowledgeAccessScope,
@@ -322,7 +323,7 @@ export async function listKnowledgeFiles(
   const db = await getAppDatabase();
   const whereClauses = [
     eq(documents.organizationId, user.organizationId),
-    eq(documents.sourceType, "uploaded"),
+    inArray(documents.sourceType, [...KNOWLEDGE_MANAGED_SOURCE_TYPES]),
   ];
 
   if (user.role !== "owner") {

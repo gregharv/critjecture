@@ -2,29 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 17: Bulk Knowledge Imports and Async Ingestion
-
-### Goal
-
-Support real customer knowledge onboarding by importing large file sets safely without blocking web requests.
-
-### What Should Be Implemented
-
-- allow bulk uploads via directory selection or archive upload
-- preserve tenant-relative directory structure for imported files
-- create durable import jobs and per-file import job rows
-- move validation, text extraction, chunking, and indexing into background processing
-- show import progress, partial failures, and retryable errors in the web app
-- keep uploaded files hidden from search and sandbox staging until ingestion is ready
-- lay the groundwork for later embedding/vectorization as a separate async stage
-
-### Acceptance Criteria
-
-- users can start a bulk import without waiting for all files to finish processing inline
-- operators and users can see import-job progress and failures clearly
-- partial failures do not invalidate the whole import job
-- newly imported files only appear in search and tool workflows after successful ingestion
-
 ## Step 18: Test Coverage and Release Readiness
 
 ### Goal
@@ -69,7 +46,11 @@ Add the operational and governance capabilities expected by real customer deploy
 ## Roadmap Notes
 
 - Chat history and file uploads are important future capabilities, but they should follow authentication and persistence foundations.
-- Bulk directory imports should follow observability work because they depend on background jobs, progress tracking, retries, and clear failure reporting.
+- Step 17 now provides the first durable async knowledge-import layer:
+  - job-backed bulk uploads
+  - background ingestion
+  - readiness-gated search and sandbox access
+  - partial-failure and retry handling
 - Embedding and vectorization should be treated as a later stage on top of durable bulk ingestion rather than bundled into the first bulk-import release.
 - Step 16 now provides the first local-first operational layer:
   - structured request logging

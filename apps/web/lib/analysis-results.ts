@@ -114,6 +114,7 @@ function splitCsvHeaderColumns(headerLine: string) {
 
 async function readCsvSchemas(input: {
   inputFiles: string[];
+  organizationId: string;
   organizationSlug: string;
   role: UserRole;
 }) {
@@ -129,6 +130,7 @@ async function readCsvSchemas(input: {
       requestedPath,
       input.organizationSlug,
       input.role,
+      input.organizationId,
     );
     const headerLine = (await readFile(resolvedFile.absolutePath, "utf8"))
       .split(/\r?\n/, 1)[0]
@@ -145,6 +147,7 @@ async function readCsvSchemas(input: {
 
 export async function buildCsvSchemas(input: {
   inputFiles: string[];
+  organizationId: string;
   organizationSlug: string;
   role: UserRole;
 }) {

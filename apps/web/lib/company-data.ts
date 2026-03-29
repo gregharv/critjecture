@@ -5,6 +5,7 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { ensureOrganizationCompanyDataRoot } from "@/lib/app-paths";
+import { assertManagedKnowledgeDocumentReady } from "@/lib/knowledge-document-access";
 import type { UserRole } from "@/lib/roles";
 
 export async function resolveCompanyDataRoot(organizationSlug: string) {
@@ -52,6 +53,7 @@ export async function resolveAuthorizedCompanyDataFile(
   relativePath: string,
   organizationSlug: string,
   role: UserRole,
+  organizationId?: string,
 ) {
   const companyDataRoot = await resolveCompanyDataRoot(organizationSlug);
   const normalizedRelativePath = normalizeCompanyDataRelativePath(relativePath);
@@ -82,6 +84,13 @@ export async function resolveAuthorizedCompanyDataFile(
   }
 
   await access(absolutePath, fsConstants.R_OK);
+
+  if (organizationId) {
+    await assertManagedKnowledgeDocumentReady({
+      organizationId,
+      relativePath: normalizedRelativePath,
+    });
+  }
 
   return {
     absolutePath,

@@ -1,14 +1,24 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
+import type {
+  CreateKnowledgeImportJobResponse,
+  GetKnowledgeImportJobResponse,
+  KnowledgeImportJobFileRecord,
+  KnowledgeImportJobRecord,
+  ListKnowledgeImportJobsResponse,
+} from "@/lib/knowledge-import-types";
 import type {
   KnowledgeAccessScope,
   KnowledgeFileRecord,
   KnowledgeIngestionStatus,
   ListKnowledgeFilesResponse,
-  UploadKnowledgeFileResponse,
 } from "@/lib/knowledge-types";
+import {
+  KNOWLEDGE_ARCHIVE_ACCEPT,
+  KNOWLEDGE_ARCHIVE_MAX_BYTES,
+} from "@/lib/knowledge-import-types";
 import {
   KNOWLEDGE_UPLOAD_ACCEPT,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
@@ -20,23 +30,35 @@ type KnowledgePageClientProps = {
 };
 
 type KnowledgePageState = {
+  activeJobDetail: GetKnowledgeImportJobResponse | null;
+  activeJobId: string | null;
   error: string | null;
   files: KnowledgeFileRecord[];
+  jobs: KnowledgeImportJobRecord[];
   loading: boolean;
-  uploading: boolean;
+  submitting: boolean;
 };
 
 type ScopeFilterValue = "all" | KnowledgeAccessScope;
 type StatusFilterValue = "all" | KnowledgeIngestionStatus;
+type ImportScopeValue = KnowledgeAccessScope;
+
+type UploadLikeFile = File & {
+  webkitRelativePath?: string;
+};
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+const DIRECTORY_INPUT_PROPS = {
+  directory: "",
+  webkitdirectory: "",
+} as Record<string, string>;
 
 function formatTimestamp(timestamp: number | null) {
   if (!timestamp) {
-    return "Not indexed yet";
+    return "Not yet";
   }
 
   return DATE_TIME_FORMATTER.format(timestamp);
@@ -70,12 +92,36 @@ function getUploaderLabel(file: KnowledgeFileRecord) {
   return file.uploadedByUserEmail ?? "Unknown uploader";
 }
 
-function getStatusTone(status: KnowledgeIngestionStatus) {
+function getFileStatusTone(status: KnowledgeIngestionStatus) {
   if (status === "ready") {
     return "is-ready";
   }
 
   if (status === "failed") {
+    return "is-failed";
+  }
+
+  return "is-pending";
+}
+
+function getJobStatusTone(status: KnowledgeImportJobRecord["status"]) {
+  if (status === "completed") {
+    return "is-ready";
+  }
+
+  if (status === "failed" || status === "completed_with_errors") {
+    return "is-failed";
+  }
+
+  return "is-pending";
+}
+
+function getJobFileTone(stage: KnowledgeImportJobFileRecord["stage"]) {
+  if (stage === "ready") {
+    return "is-ready";
+  }
+
+  if (stage === "failed" || stage === "retryable_failed") {
     return "is-failed";
   }
 
@@ -95,23 +141,48 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
   return fallbackMessage;
 }
 
+function shouldRepoll(jobs: KnowledgeImportJobRecord[]) {
+  return jobs.some((job) => job.status === "queued" || job.status === "running");
+}
+
+function getProgress(job: KnowledgeImportJobRecord) {
+  if (job.totalFileCount <= 0) {
+    return 0;
+  }
+
+  return Math.round(
+    ((job.readyFileCount + job.failedFileCount + job.retryableFailedFileCount) /
+      job.totalFileCount) *
+      100,
+  );
+}
+
 export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
-  const [{ error, files, loading, uploading }, setState] = useState<KnowledgePageState>({
+  const [importScope, setImportScope] = useState<ImportScopeValue>("public");
+  const [state, setState] = useState<KnowledgePageState>({
+    activeJobDetail: null,
+    activeJobId: null,
     error: null,
     files: [],
+    jobs: [],
     loading: true,
-    uploading: false,
+    submitting: false,
   });
 
-  async function loadFiles(nextScopeFilter = scopeFilter, nextStatusFilter = statusFilter) {
-    setState((current) => ({
-      ...current,
-      error: null,
-      loading: true,
-    }));
+  const activeJob = useMemo(() => {
+    if (!state.activeJobId) {
+      return null;
+    }
 
+    return state.jobs.find((job) => job.id === state.activeJobId) ?? state.activeJobDetail?.job ?? null;
+  }, [state.activeJobDetail, state.activeJobId, state.jobs]);
+
+  const loadFiles = useCallback(async (
+    nextScopeFilter = scopeFilter,
+    nextStatusFilter = statusFilter,
+  ) => {
     const searchParams = new URLSearchParams();
 
     if (nextScopeFilter !== "all" && role === "owner") {
@@ -122,40 +193,115 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
       searchParams.set("status", nextStatusFilter);
     }
 
-    const query = searchParams.toString();
+    const response = await fetch(`/api/knowledge/files${searchParams.toString() ? `?${searchParams}` : ""}`, {
+      cache: "no-store",
+    });
+    const data = (await response.json()) as ListKnowledgeFilesResponse | { error?: string };
+
+    if (!response.ok || !("files" in data)) {
+      throw new Error(getErrorMessage(data, "Failed to load knowledge files."));
+    }
+
+    return data.files;
+  }, [role, scopeFilter, statusFilter]);
+
+  const loadJobs = useCallback(async () => {
+    const response = await fetch("/api/knowledge/import-jobs", {
+      cache: "no-store",
+    });
+    const data = (await response.json()) as ListKnowledgeImportJobsResponse | { error?: string };
+
+    if (!response.ok || !("jobs" in data)) {
+      throw new Error(getErrorMessage(data, "Failed to load import jobs."));
+    }
+
+    return data.jobs;
+  }, []);
+
+  const loadJobDetail = useCallback(async (jobId: string) => {
+    const response = await fetch(`/api/knowledge/import-jobs/${encodeURIComponent(jobId)}`, {
+      cache: "no-store",
+    });
+    const data = (await response.json()) as GetKnowledgeImportJobResponse | { error?: string };
+
+    if (!response.ok || !("job" in data)) {
+      throw new Error(getErrorMessage(data, "Failed to load import job details."));
+    }
+
+    return data;
+  }, []);
+
+  const refreshAll = useCallback(async (options?: {
+    keepSubmitting?: boolean;
+    nextScopeFilter?: ScopeFilterValue;
+    nextStatusFilter?: StatusFilterValue;
+    selectedJobId?: string | null;
+  }) => {
+    const selectedJobId = options?.selectedJobId ?? state.activeJobId;
+    const nextScopeFilter = options?.nextScopeFilter ?? scopeFilter;
+    const nextStatusFilter = options?.nextStatusFilter ?? statusFilter;
+
+    setState((current) => ({
+      ...current,
+      error: null,
+      loading: current.files.length === 0 && current.jobs.length === 0,
+      submitting: options?.keepSubmitting ?? current.submitting,
+    }));
 
     try {
-      const response = await fetch(`/api/knowledge/files${query ? `?${query}` : ""}`);
-      const data = (await response.json()) as ListKnowledgeFilesResponseFallback;
+      const [files, jobs] = await Promise.all([
+        loadFiles(nextScopeFilter, nextStatusFilter),
+        loadJobs(),
+      ]);
+      const fallbackJobId =
+        selectedJobId ??
+        jobs.find((job) => job.status === "queued" || job.status === "running")?.id ??
+        jobs[0]?.id ??
+        null;
+      const activeJobDetail = fallbackJobId ? await loadJobDetail(fallbackJobId) : null;
 
-      if (!response.ok || !("files" in data)) {
-        throw new Error(getErrorMessage(data, "Failed to load knowledge files."));
-      }
-
-      setState({
+      setState((current) => ({
+        ...current,
+        activeJobDetail,
+        activeJobId: fallbackJobId,
         error: null,
-        files: data.files,
+        files,
+        jobs,
         loading: false,
-        uploading: false,
-      });
+        submitting: false,
+      }));
     } catch (caughtError) {
       setState((current) => ({
         ...current,
         error:
           caughtError instanceof Error
             ? caughtError.message
-            : "Failed to load knowledge files.",
+            : "Failed to refresh knowledge imports.",
         loading: false,
+        submitting: false,
       }));
     }
-  }
+  }, [loadFiles, loadJobDetail, loadJobs, scopeFilter, state.activeJobId, statusFilter]);
 
   useEffect(() => {
-    void loadFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void refreshAll({ selectedJobId: null });
+  }, [refreshAll]);
 
-  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!shouldRepoll(state.jobs)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshAll({ selectedJobId: state.activeJobId });
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [refreshAll, state.activeJobId, state.jobs]);
+
+  async function handleQuickUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const form = event.currentTarget;
@@ -173,27 +319,152 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
     setState((current) => ({
       ...current,
       error: null,
-      uploading: true,
+      submitting: true,
     }));
 
     try {
+      formData.set("scope", importScope);
       const response = await fetch("/api/knowledge/files", {
         body: formData,
         method: "POST",
       });
-      const data = (await response.json()) as UploadKnowledgeFileResponseFallback;
+      const data = (await response.json()) as CreateKnowledgeImportJobResponse | { error?: string };
 
-      if (!response.ok || !("file" in data)) {
+      if (!response.ok || !("job" in data)) {
         throw new Error(getErrorMessage(data, "Upload failed."));
       }
 
       form.reset();
-      await loadFiles();
+      await refreshAll({ selectedJobId: data.job.id });
     } catch (caughtError) {
       setState((current) => ({
         ...current,
         error: caughtError instanceof Error ? caughtError.message : "Upload failed.",
-        uploading: false,
+        submitting: false,
+      }));
+    }
+  }
+
+  async function handleDirectoryImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const input = form.elements.namedItem("directory-files");
+
+    if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
+      setState((current) => ({
+        ...current,
+        error: "Choose a directory before importing.",
+      }));
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("mode", "directory");
+    formData.set("scope", importScope);
+
+    for (const file of Array.from(input.files)) {
+      const relativePath = (file as UploadLikeFile).webkitRelativePath?.trim() || file.name;
+      formData.append("files", file);
+      formData.append("paths", relativePath);
+    }
+
+    setState((current) => ({
+      ...current,
+      error: null,
+      submitting: true,
+    }));
+
+    try {
+      const response = await fetch("/api/knowledge/import-jobs", {
+        body: formData,
+        method: "POST",
+      });
+      const data = (await response.json()) as CreateKnowledgeImportJobResponse | { error?: string };
+
+      if (!response.ok || !("job" in data)) {
+        throw new Error(getErrorMessage(data, "Directory import failed."));
+      }
+
+      form.reset();
+      await refreshAll({ selectedJobId: data.job.id });
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Directory import failed.",
+        submitting: false,
+      }));
+    }
+  }
+
+  async function handleArchiveImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const archive = formData.get("archive");
+
+    if (!(archive instanceof File) || !archive.name.trim()) {
+      setState((current) => ({
+        ...current,
+        error: "Choose a .zip archive before importing.",
+      }));
+      return;
+    }
+
+    formData.set("scope", importScope);
+
+    setState((current) => ({
+      ...current,
+      error: null,
+      submitting: true,
+    }));
+
+    try {
+      const response = await fetch("/api/knowledge/import-jobs", {
+        body: formData,
+        method: "POST",
+      });
+      const data = (await response.json()) as CreateKnowledgeImportJobResponse | { error?: string };
+
+      if (!response.ok || !("job" in data)) {
+        throw new Error(getErrorMessage(data, "Archive import failed."));
+      }
+
+      form.reset();
+      await refreshAll({ selectedJobId: data.job.id });
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Archive import failed.",
+        submitting: false,
+      }));
+    }
+  }
+
+  async function handleRetry(jobId: string) {
+    setState((current) => ({
+      ...current,
+      error: null,
+      submitting: true,
+    }));
+
+    try {
+      const response = await fetch(`/api/knowledge/import-jobs/${encodeURIComponent(jobId)}/retry`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as CreateKnowledgeImportJobResponse | { error?: string };
+
+      if (!response.ok || !("job" in data)) {
+        throw new Error(getErrorMessage(data, "Retry failed."));
+      }
+
+      await refreshAll({ selectedJobId: data.job.id });
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Retry failed.",
+        submitting: false,
       }));
     }
   }
@@ -204,55 +475,241 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
         <div className="knowledge-panel__header">
           <div>
             <p className="knowledge-panel__eyebrow">Knowledge Library</p>
-            <h1 className="knowledge-panel__title">Upload tenant files for search and analysis</h1>
+            <h1 className="knowledge-panel__title">Async imports for search and analysis</h1>
           </div>
           <p className="knowledge-panel__copy">
-            Uploaded files are stored inside your organization&apos;s protected knowledge tree and
-            become available to the existing search and sandbox workflows after ingestion.
+            Bulk imports stage files outside the live knowledge tree, process them in the
+            background, and only expose them to search and sandbox workflows after ingestion is
+            ready.
           </p>
         </div>
 
-        <form className="knowledge-upload" onSubmit={handleUpload}>
-          <label className="knowledge-field">
-            <span className="knowledge-field__label">File</span>
-            <input accept={KNOWLEDGE_UPLOAD_ACCEPT} name="file" type="file" />
-          </label>
-
-          {role === "owner" ? (
-            <label className="knowledge-field">
-              <span className="knowledge-field__label">Scope</span>
-              <select defaultValue="public" name="scope">
+        <div className="knowledge-import-scope">
+          <label className="knowledge-field knowledge-field--compact">
+            <span className="knowledge-field__label">Import scope</span>
+            {role === "owner" ? (
+              <select
+                onChange={(event) => {
+                  setImportScope(event.currentTarget.value as ImportScopeValue);
+                }}
+                value={importScope}
+              >
                 <option value="public">Public</option>
                 <option value="admin">Admin</option>
               </select>
-            </label>
-          ) : (
-            <div className="knowledge-field">
-              <span className="knowledge-field__label">Scope</span>
+            ) : (
               <div className="knowledge-field__static">Public</div>
-              <input name="scope" type="hidden" value="public" />
-            </div>
-          )}
+            )}
+          </label>
+        </div>
 
-          <div className="knowledge-upload__actions">
-            <button className="knowledge-button knowledge-button--primary" disabled={uploading}>
-              {uploading ? "Uploading..." : "Upload file"}
+        <div className="knowledge-import-grid">
+          <form className="knowledge-import-card" onSubmit={handleQuickUpload}>
+            <div>
+              <p className="knowledge-panel__eyebrow">Quick Upload</p>
+              <h2 className="knowledge-subtitle">Single file</h2>
+            </div>
+            <label className="knowledge-field">
+              <span className="knowledge-field__label">File</span>
+              <input accept={KNOWLEDGE_UPLOAD_ACCEPT} name="file" type="file" />
+            </label>
+            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+              {state.submitting ? "Submitting..." : "Start upload job"}
             </button>
             <p className="knowledge-upload__hint">
-              Accepted: `.csv`, `.txt`, `.md`, `.pdf`. Limit {formatBytes(KNOWLEDGE_UPLOAD_MAX_BYTES)}.
-              PDFs must contain extractable text.
+              Accepted: `.csv`, `.txt`, `.md`, `.pdf`. Per-file limit {formatBytes(KNOWLEDGE_UPLOAD_MAX_BYTES)}.
             </p>
-          </div>
-        </form>
+          </form>
 
-        {error ? <div className="knowledge-banner knowledge-banner--error">{error}</div> : null}
+          <form className="knowledge-import-card" onSubmit={handleDirectoryImport}>
+            <div>
+              <p className="knowledge-panel__eyebrow">Bulk Import</p>
+              <h2 className="knowledge-subtitle">Directory picker</h2>
+            </div>
+            <label className="knowledge-field">
+              <span className="knowledge-field__label">Directory</span>
+              <input
+                {...DIRECTORY_INPUT_PROPS}
+                accept={KNOWLEDGE_UPLOAD_ACCEPT}
+                multiple
+                name="directory-files"
+                type="file"
+              />
+            </label>
+            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+              {state.submitting ? "Submitting..." : "Start directory job"}
+            </button>
+            <p className="knowledge-upload__hint">
+              Preserves directory-relative paths under a scoped import root.
+            </p>
+          </form>
+
+          <form className="knowledge-import-card" onSubmit={handleArchiveImport}>
+            <div>
+              <p className="knowledge-panel__eyebrow">Bulk Import</p>
+              <h2 className="knowledge-subtitle">ZIP archive</h2>
+            </div>
+            <label className="knowledge-field">
+              <span className="knowledge-field__label">Archive</span>
+              <input accept={KNOWLEDGE_ARCHIVE_ACCEPT} name="archive" type="file" />
+            </label>
+            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+              {state.submitting ? "Submitting..." : "Start archive job"}
+            </button>
+            <p className="knowledge-upload__hint">
+              `.zip` only. Archive limit {formatBytes(KNOWLEDGE_ARCHIVE_MAX_BYTES)}.
+            </p>
+          </form>
+        </div>
+
+        {state.error ? <div className="knowledge-banner knowledge-banner--error">{state.error}</div> : null}
       </div>
 
       <div className="knowledge-panel">
         <div className="knowledge-toolbar">
           <div>
-            <p className="knowledge-panel__eyebrow">Uploaded Files</p>
-            <h2 className="knowledge-subtitle">Current organization knowledge</h2>
+            <p className="knowledge-panel__eyebrow">Import Jobs</p>
+            <h2 className="knowledge-subtitle">Background ingestion status</h2>
+          </div>
+          <button
+            className="knowledge-button"
+            onClick={() => {
+              void refreshAll({ selectedJobId: state.activeJobId });
+            }}
+            type="button"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {state.loading ? (
+          <div className="knowledge-empty">Loading import jobs...</div>
+        ) : state.jobs.length === 0 ? (
+          <div className="knowledge-empty">No import jobs yet.</div>
+        ) : (
+          <div className="knowledge-jobs">
+            {state.jobs.map((job) => (
+              <article
+                className={`knowledge-job-card${state.activeJobId === job.id ? " is-active" : ""}`}
+                key={job.id}
+              >
+                <div className="knowledge-job-card__header">
+                  <div>
+                    <strong>{job.sourceKind.replaceAll("_", " ")}</strong>
+                    <div className="knowledge-job-card__meta">
+                      {job.accessScope} · {job.totalFileCount} file{job.totalFileCount === 1 ? "" : "s"} · updated{" "}
+                      {formatTimestamp(job.updatedAt)}
+                    </div>
+                  </div>
+                  <div className={`knowledge-status ${getJobStatusTone(job.status)}`}>{job.status.replaceAll("_", " ")}</div>
+                </div>
+                <div className="knowledge-job-progress">
+                  <div
+                    className="knowledge-job-progress__bar"
+                    style={{ width: `${getProgress(job)}%` }}
+                  />
+                </div>
+                <div className="knowledge-job-card__meta">
+                  Ready {job.readyFileCount} · Failed {job.failedFileCount} · Retryable {job.retryableFailedFileCount}
+                </div>
+                <div className="knowledge-job-card__actions">
+                  <button
+                    className="knowledge-button"
+                    onClick={() => {
+                      void refreshAll({ selectedJobId: job.id });
+                    }}
+                    type="button"
+                  >
+                    View files
+                  </button>
+                  {job.retryableFailedFileCount > 0 ? (
+                    <button
+                      className="knowledge-button"
+                      disabled={state.submitting}
+                      onClick={() => {
+                        void handleRetry(job.id);
+                      }}
+                      type="button"
+                    >
+                      Retry failures
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {activeJob && state.activeJobDetail ? (
+        <div className="knowledge-panel">
+          <div className="knowledge-toolbar">
+            <div>
+              <p className="knowledge-panel__eyebrow">Selected Job</p>
+              <h2 className="knowledge-subtitle">Imported files for {activeJob.id}</h2>
+            </div>
+            <div className={`knowledge-status ${getJobStatusTone(activeJob.status)}`}>{activeJob.status.replaceAll("_", " ")}</div>
+          </div>
+
+          <div className="knowledge-job-detail__meta">
+            Created {formatTimestamp(activeJob.createdAt)} · Started {formatTimestamp(activeJob.startedAt)} · Completed {formatTimestamp(activeJob.completedAt)}
+          </div>
+
+          <div className="knowledge-table-wrap">
+            <table className="knowledge-table">
+              <thead>
+                <tr>
+                  <th>Relative path</th>
+                  <th>Stage</th>
+                  <th>Size</th>
+                  <th>Attempts</th>
+                  <th>Error</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.activeJobDetail.files.map((file) => (
+                  <tr key={file.id}>
+                    <td>
+                      <code className="knowledge-code">{file.relativePath}</code>
+                    </td>
+                    <td>
+                      <div className={`knowledge-status ${getJobFileTone(file.stage)}`}>
+                        {file.stage.replaceAll("_", " ")}
+                      </div>
+                    </td>
+                    <td>{formatBytes(file.byteSize)}</td>
+                    <td>{file.attemptCount}</td>
+                    <td>{file.lastError ?? "None"}</td>
+                    <td>
+                      {file.stage === "retryable_failed" ? (
+                        <button
+                          className="knowledge-button"
+                          disabled={state.submitting}
+                          onClick={() => {
+                            void handleRetry(activeJob.id);
+                          }}
+                          type="button"
+                        >
+                          Retry job
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="knowledge-panel">
+        <div className="knowledge-toolbar">
+          <div>
+            <p className="knowledge-panel__eyebrow">Knowledge Library</p>
+            <h2 className="knowledge-subtitle">Ready and failed documents</h2>
           </div>
 
           <div className="knowledge-toolbar__filters">
@@ -263,7 +720,10 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                   onChange={(event) => {
                     const nextValue = event.currentTarget.value as ScopeFilterValue;
                     setScopeFilter(nextValue);
-                    void loadFiles(nextValue, statusFilter);
+                    void refreshAll({
+                      nextScopeFilter: nextValue,
+                      selectedJobId: state.activeJobId,
+                    });
                   }}
                   value={scopeFilter}
                 >
@@ -280,7 +740,10 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                 onChange={(event) => {
                   const nextValue = event.currentTarget.value as StatusFilterValue;
                   setStatusFilter(nextValue);
-                  void loadFiles(scopeFilter, nextValue);
+                  void refreshAll({
+                    nextStatusFilter: nextValue,
+                    selectedJobId: state.activeJobId,
+                  });
                 }}
                 value={statusFilter}
               >
@@ -293,12 +756,10 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
           </div>
         </div>
 
-        {loading ? (
-          <div className="knowledge-empty">Loading uploaded files...</div>
-        ) : files.length === 0 ? (
-          <div className="knowledge-empty">
-            No uploaded files yet. Add a tenant file above to make it available to the chat tools.
-          </div>
+        {state.loading ? (
+          <div className="knowledge-empty">Loading knowledge files...</div>
+        ) : state.files.length === 0 ? (
+          <div className="knowledge-empty">No managed knowledge files yet.</div>
         ) : (
           <div className="knowledge-table-wrap">
             <table className="knowledge-table">
@@ -316,7 +777,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                 </tr>
               </thead>
               <tbody>
-                {files.map((file) => (
+                {state.files.map((file) => (
                   <tr key={file.id}>
                     <td>
                       <div className="knowledge-table__title">{file.displayName}</div>
@@ -328,7 +789,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                     <td>{file.mimeType ?? file.sourceType}</td>
                     <td>{formatBytes(file.byteSize)}</td>
                     <td>
-                      <div className={`knowledge-status ${getStatusTone(file.ingestionStatus)}`}>
+                      <div className={`knowledge-status ${getFileStatusTone(file.ingestionStatus)}`}>
                         {file.ingestionStatus}
                       </div>
                       {file.ingestionError ? (
@@ -348,15 +809,3 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
     </section>
   );
 }
-
-type ListKnowledgeFilesResponseFallback =
-  | ListKnowledgeFilesResponse
-  | {
-      error?: string;
-    };
-
-type UploadKnowledgeFileResponseFallback =
-  | UploadKnowledgeFileResponse
-  | {
-      error?: string;
-    };

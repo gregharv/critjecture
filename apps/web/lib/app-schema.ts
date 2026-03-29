@@ -311,6 +311,105 @@ export const documents = sqliteTable(
   ],
 );
 
+export const knowledgeImportJobs = sqliteTable(
+  "knowledge_import_jobs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    accessScope: text("access_scope", { enum: ["public", "admin"] }).notNull(),
+    sourceKind: text("source_kind", {
+      enum: ["single_file", "directory", "zip"],
+    }).notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "completed_with_errors", "failed"],
+    }).notNull(),
+    totalFileCount: integer("total_file_count").notNull().default(0),
+    queuedFileCount: integer("queued_file_count").notNull().default(0),
+    runningFileCount: integer("running_file_count").notNull().default(0),
+    readyFileCount: integer("ready_file_count").notNull().default(0),
+    failedFileCount: integer("failed_file_count").notNull().default(0),
+    retryableFailedFileCount: integer("retryable_failed_file_count").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check("knowledge_import_jobs_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
+    check(
+      "knowledge_import_jobs_source_kind_check",
+      sql`${table.sourceKind} in ('single_file', 'directory', 'zip')`,
+    ),
+    check(
+      "knowledge_import_jobs_status_check",
+      sql`${table.status} in ('queued', 'running', 'completed', 'completed_with_errors', 'failed')`,
+    ),
+    index("knowledge_import_jobs_org_created_at_idx").on(table.organizationId, table.createdAt),
+    index("knowledge_import_jobs_org_status_updated_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("knowledge_import_jobs_created_by_user_id_idx").on(table.createdByUserId),
+  ],
+);
+
+export const knowledgeImportJobFiles = sqliteTable(
+  "knowledge_import_job_files",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => knowledgeImportJobs.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
+    relativePath: text("relative_path").notNull(),
+    displayName: text("display_name").notNull(),
+    mimeType: text("mime_type"),
+    byteSize: integer("byte_size"),
+    contentSha256: text("content_sha256"),
+    archiveEntryPath: text("archive_entry_path"),
+    stagingStoragePath: text("staging_storage_path").notNull(),
+    stage: text("stage", {
+      enum: ["queued", "validating", "extracting", "chunking", "indexing", "ready", "retryable_failed", "failed"],
+    }).notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    lastErrorCode: text("last_error_code"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "knowledge_import_job_files_stage_check",
+      sql`${table.stage} in ('queued', 'validating', 'extracting', 'chunking', 'indexing', 'ready', 'retryable_failed', 'failed')`,
+    ),
+    uniqueIndex("knowledge_import_job_files_job_relative_path_idx").on(
+      table.jobId,
+      table.relativePath,
+    ),
+    index("knowledge_import_job_files_org_stage_updated_at_idx").on(
+      table.organizationId,
+      table.stage,
+      table.updatedAt,
+    ),
+    index("knowledge_import_job_files_job_stage_updated_at_idx").on(
+      table.jobId,
+      table.stage,
+      table.updatedAt,
+    ),
+  ],
+);
+
 export const documentChunks = sqliteTable(
   "document_chunks",
   {

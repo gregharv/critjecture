@@ -1139,6 +1139,66 @@ a {
   align-items: end;
 }
 
+.knowledge-import-scope {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.knowledge-import-grid,
+.knowledge-jobs {
+  display: grid;
+  gap: 14px;
+}
+
+.knowledge-import-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.knowledge-import-card,
+.knowledge-job-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklab, var(--border) 64%, transparent 36%);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
+}
+
+.knowledge-job-card.is-active {
+  border-color: color-mix(in oklab, var(--primary) 44%, var(--border) 56%);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent 78%);
+}
+
+.knowledge-job-card__header,
+.knowledge-job-card__actions {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.knowledge-job-card__meta,
+.knowledge-job-detail__meta {
+  color: var(--muted-foreground);
+  font-size: 0.86rem;
+}
+
+.knowledge-job-progress {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--card) 76%, transparent 24%);
+}
+
+.knowledge-job-progress__bar {
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgb(96 165 250 / 0.92), rgb(37 99 235 / 0.92)),
+    color-mix(in oklab, var(--accent) 78%, transparent 22%);
+}
+
 .knowledge-toolbar {
   display: flex;
   align-items: end;
@@ -1334,6 +1394,10 @@ a {
 @media (max-width: 960px) {
   .knowledge-panel__header,
   .knowledge-upload {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-import-grid {
     grid-template-columns: 1fr;
   }
 }

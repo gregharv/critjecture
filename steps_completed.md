@@ -1126,3 +1126,102 @@ Step 16 was implemented as a local-first operational control layer on top of the
 - Route instrumentation adds `x-critjecture-request-id` headers so request ids can be correlated across logs and operator debugging.
 - This step added operational visibility and controls, but it did not yet add a full automated test suite. That remains Step 18 work.
 - The remaining roadmap in `steps.md` now starts at Step 17.
+
+## Step 17: Bulk Knowledge Imports and Async Ingestion
+
+### What Was Implemented
+
+Step 17 was implemented as a durable async knowledge-import pipeline on top of the existing tenant, upload, search, sandbox, and operations foundations.
+
+- Added new bulk-import persistence and migration support:
+  - `apps/web/drizzle/0005_step17_bulk_imports.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds:
+    - `knowledge_import_jobs`
+    - `knowledge_import_job_files`
+- Added shared import and ingestion modules:
+  - `apps/web/lib/knowledge-imports.ts`
+  - `apps/web/lib/knowledge-import-types.ts`
+  - `apps/web/lib/knowledge-ingestion.ts`
+  - `apps/web/lib/knowledge-document-access.ts`
+  - `apps/web/lib/zip-reader.ts`
+- Reworked knowledge ingestion from inline request-time processing into a background worker flow:
+  - uploads and bulk imports now stage bytes under organization-local `knowledge_staging`
+  - an in-process claim-based worker loop processes queued files asynchronously
+  - successful files are promoted into tenant `company_data/.../uploads/...`
+  - failed files remain out of the live knowledge tree and are tracked as per-file failures
+- Added new import-job APIs:
+  - `apps/web/app/api/knowledge/import-jobs/route.ts`
+  - `apps/web/app/api/knowledge/import-jobs/[jobId]/route.ts`
+  - `apps/web/app/api/knowledge/import-jobs/[jobId]/retry/route.ts`
+- Reworked the existing single-file upload route:
+  - `apps/web/app/api/knowledge/files/route.ts`
+  - single-file uploads now create async import jobs instead of waiting for ingestion inline
+- Expanded the knowledge UI:
+  - `apps/web/components/knowledge-page-client.tsx`
+  - `apps/web/app/globals.css`
+  - adds:
+    - quick single-file upload jobs
+    - directory-based bulk import
+    - `.zip` archive import
+    - import-job cards with progress
+    - per-file job detail views
+    - retry support for retryable failures
+- Hardened readiness and access checks:
+  - `apps/web/lib/company-data.ts`
+  - `apps/web/lib/python-sandbox.ts`
+  - `apps/web/lib/analysis-results.ts`
+  - `apps/web/lib/company-knowledge.ts`
+  - `apps/web/lib/knowledge-files.ts`
+  - managed uploaded/imported files now require `ingestionStatus = ready` before they can be searched through indexed paths or staged into sandbox-backed tools
+- Extended operations visibility for imports:
+  - `apps/web/lib/operations-policy.ts`
+  - `apps/web/lib/operations.ts`
+  - adds:
+    - `knowledge_import` route-group limits
+    - import backlog/staleness health checks
+    - import usage events
+    - import failure / stale-work alerts
+
+### Current Step 17 Behavior
+
+- `Intern`
+  - can create only public-scope import jobs
+  - can list only public import jobs and public managed knowledge files
+  - cannot retry or inspect admin-scope imports
+- `Owner`
+  - can create public or admin import jobs
+  - can import either:
+    - a single file
+    - a directory selection
+    - a `.zip` archive
+  - can inspect file-by-file progress and retry retryable failures
+- Import processing
+  - bulk import requests return quickly with job metadata instead of waiting for full ingestion
+  - jobs track queued, running, ready, failed, and retryable-failed files separately
+  - partial failures do not invalidate successful files in the same job
+  - files become live only after successful ingestion and promotion into tenant `company_data`
+- Search and sandbox access
+  - indexed PDF search continues to require `documents.ingestionStatus = ready`
+  - managed uploaded/imported files are blocked from sandbox staging until ingestion is ready
+  - seeded sample files continue to work without a managed document row
+- Operations
+  - owner health summaries now report knowledge-import queue / stale-work state
+  - import job creation, retries, per-file success, and per-file failures emit usage/ops events
+
+### Important Implementation Details
+
+- Step 17 intentionally uses an in-app worker loop instead of a separate worker service:
+  - this fits the current SQLite-first, local/on-prem, single-service deployment model
+  - it keeps the async boundary inside the existing Next.js runtime for now
+- Archive support is intentionally limited to `.zip` for the first release.
+- Imported files are quarantined outside the live knowledge tree until processing succeeds.
+- The existing `documents` and `document_chunks` tables remain the canonical searchable document/index storage:
+  - Step 17 adds import-job tracking around them
+  - it does not replace them
+- Retry behavior is per-file, not whole-job replay.
+- This step lays the groundwork for later embedding/vectorization, but does not add vector storage or embedding workers yet.
+- Verification completed for this implementation:
+  - `pnpm --filter web lint`
+  - `pnpm --filter web build`
+- The remaining roadmap in `steps.md` now starts at Step 18.

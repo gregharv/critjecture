@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { createKnowledgeImportJobFromFiles } from "@/lib/knowledge-imports";
 import {
-  listKnowledgeFiles,
-  parseKnowledgeScopeFilter,
-  parseKnowledgeStatusFilter,
-} from "@/lib/knowledge-files";
+  createKnowledgeImportJobFromArchive,
+  createKnowledgeImportJobFromFiles,
+  listKnowledgeImportJobs,
+} from "@/lib/knowledge-imports";
 import {
   beginObservedRequest,
   buildObservedErrorResponse,
@@ -22,37 +21,26 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET(request: Request) {
+function getStringFormValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export async function GET() {
   const user = await getSessionUser();
 
   if (!user) {
     return jsonError("Authentication required.", 401);
   }
 
-  const { searchParams } = new URL(request.url);
-  const scope = parseKnowledgeScopeFilter(searchParams.get("scope"));
-  const status = parseKnowledgeStatusFilter(searchParams.get("status"));
-
-  if (scope === null) {
-    return jsonError("scope must be public or admin.", 400);
-  }
-
-  if (status === null) {
-    return jsonError("status must be pending, ready, or failed.", 400);
-  }
-
   try {
-    const files = await listKnowledgeFiles(user, {
-      scope: scope ?? undefined,
-      status: status ?? undefined,
-    });
-
-    return NextResponse.json({ files });
+    const jobs = await listKnowledgeImportJobs(user);
+    return NextResponse.json({ jobs });
   } catch (caughtError) {
-    const message =
-      caughtError instanceof Error ? caughtError.message : "Failed to load knowledge files.";
-
-    return jsonError(message, 500);
+    return jsonError(
+      caughtError instanceof Error ? caughtError.message : "Failed to load knowledge import jobs.",
+      500,
+    );
   }
 }
 
@@ -61,7 +49,7 @@ export async function POST(request: Request) {
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "knowledge_import",
-    routeKey: "knowledge.files.upload_async",
+    routeKey: "knowledge.import_jobs.create",
     user,
   });
   await runOperationsMaintenance();
@@ -104,43 +92,54 @@ export async function POST(request: Request) {
     });
   }
 
-  const file = formData.get("file");
-  const scope = formData.get("scope");
-
-  if (!(file instanceof File)) {
-    return finalizeObservedRequest(observed, {
-      errorCode: "missing_file",
-      outcome: "error",
-      response: buildObservedErrorResponse("file must be provided as a multipart upload.", 400),
-    });
-  }
-
-  if (typeof scope !== "string" && user.role === "owner") {
-    return finalizeObservedRequest(observed, {
-      errorCode: "missing_scope",
-      outcome: "error",
-      response: buildObservedErrorResponse("scope must be provided for owner uploads.", 400),
-    });
-  }
+  const scope = getStringFormValue(formData, "scope") || "public";
+  const mode = getStringFormValue(formData, "mode") || "directory";
+  const archive = formData.get("archive");
 
   try {
-    const job = await createKnowledgeImportJobFromFiles({
-      files: [
-        {
-          file,
-          relativePath: file.name,
-        },
-      ],
-      requestedScope: typeof scope === "string" ? scope : "public",
-      sourceKind: "single_file",
-      user,
-    });
+    let job;
+
+    if (archive instanceof File) {
+      job = await createKnowledgeImportJobFromArchive({
+        archive,
+        requestedScope: scope,
+        user,
+      });
+    } else {
+      const fileEntries = formData.getAll("files");
+      const pathEntries = formData.getAll("paths");
+      const files = fileEntries
+        .map((entry, index) => {
+          if (!(entry instanceof File)) {
+            return null;
+          }
+
+          const relativePath =
+            typeof pathEntries[index] === "string" && String(pathEntries[index]).trim()
+              ? String(pathEntries[index]).trim()
+              : entry.name;
+
+          return {
+            file: entry,
+            relativePath,
+          };
+        })
+        .filter((entry): entry is { file: File; relativePath: string } => entry !== null);
+
+      job = await createKnowledgeImportJobFromFiles({
+        files,
+        requestedScope: scope,
+        sourceKind: mode === "single_file" ? "single_file" : "directory",
+        user,
+      });
+    }
 
     const response = NextResponse.json({ job }, { status: 202 });
     return finalizeObservedRequest(observed, {
       metadata: {
         accessScope: job.accessScope,
         jobId: job.id,
+        sourceKind: job.sourceKind,
         totalFileCount: job.totalFileCount,
       },
       outcome: "ok",
@@ -159,13 +158,13 @@ export async function POST(request: Request) {
       ],
     });
   } catch (caughtError) {
-    const message =
-      caughtError instanceof Error ? caughtError.message : "Knowledge upload failed.";
-
     return finalizeObservedRequest(observed, {
-      errorCode: "knowledge_upload_failed",
+      errorCode: "knowledge_import_failed",
       outcome: "error",
-      response: buildObservedErrorResponse(message, 400),
+      response: buildObservedErrorResponse(
+        caughtError instanceof Error ? caughtError.message : "Knowledge import failed.",
+        400,
+      ),
     });
   }
 }

@@ -1,6 +1,11 @@
 import "server-only";
 
-export type OperationsRouteGroup = "chat" | "search" | "sandbox" | "knowledge_upload";
+export type OperationsRouteGroup =
+  | "chat"
+  | "search"
+  | "sandbox"
+  | "knowledge_upload"
+  | "knowledge_import";
 
 export type RouteRateLimitPolicy = {
   maxRequests: number;
@@ -26,6 +31,9 @@ export type OperationsPoliciesSnapshot = {
     rateLimits: RouteRateLimitPolicy[];
   };
   knowledgeUpload: {
+    rateLimits: RouteRateLimitPolicy[];
+  };
+  knowledgeImport: {
     rateLimits: RouteRateLimitPolicy[];
   };
   sandbox: {
@@ -111,6 +119,13 @@ export const OPERATIONS_ROUTE_POLICIES: Record<OperationsRouteGroup, RouteGroupP
       { maxRequests: 40, scope: "organization", windowMs: HOUR },
     ],
   },
+  knowledge_import: {
+    group: "knowledge_import",
+    rateLimits: [
+      { maxRequests: 12, scope: "user", windowMs: HOUR },
+      { maxRequests: 40, scope: "organization", windowMs: HOUR },
+    ],
+  },
 };
 
 export function getRouteGroupPolicy(group: OperationsRouteGroup) {
@@ -132,6 +147,9 @@ export function getOperationsPoliciesSnapshot(): OperationsPoliciesSnapshot {
     },
     knowledgeUpload: {
       rateLimits: OPERATIONS_ROUTE_POLICIES.knowledge_upload.rateLimits,
+    },
+    knowledgeImport: {
+      rateLimits: OPERATIONS_ROUTE_POLICIES.knowledge_import.rateLimits,
     },
     sandbox: {
       rateLimits: OPERATIONS_ROUTE_POLICIES.sandbox.rateLimits,
