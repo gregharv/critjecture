@@ -195,7 +195,7 @@ Open:
 ```bash
 AUTH_SECRET=replace-with-a-long-random-string
 OPENAI_API_KEY=your-key-here
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.4-mini
 DATABASE_URL=./storage/critjecture.sqlite
 CRITJECTURE_STORAGE_ROOT=./storage
 CRITJECTURE_DEPLOYMENT_MODE=single_org

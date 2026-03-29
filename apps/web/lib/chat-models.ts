@@ -1,12 +1,7 @@
 export const DEFAULT_CHAT_MODEL_ID = "gpt-5.4-mini";
 export const DEFAULT_CHAT_THINKING_LEVEL = "low";
 
-export const OPENAI_MODEL_IDS = [
-  DEFAULT_CHAT_MODEL_ID,
-  "gpt-4o",
-  "gpt-4.1-mini",
-  "gpt-4.1",
-] as const;
+export const OPENAI_MODEL_IDS = [DEFAULT_CHAT_MODEL_ID] as const;
 
 export type OpenAiModelId = (typeof OPENAI_MODEL_IDS)[number];
 

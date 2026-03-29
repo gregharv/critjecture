@@ -10,6 +10,8 @@ coverage
 apps/web/data/*.sqlite
 apps/web/data/*.sqlite-shm
 apps/web/data/*.sqlite-wal
+apps/web/data/*.db
+*.tsbuildinfo
 storage
 .playwright-storage
 apps/web/.playwright-storage

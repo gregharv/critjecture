@@ -43,12 +43,9 @@ The current Step 1 app is intentionally minimal.
 
 ### Model and Env Behavior
 
-- Default model: `gpt-4o-mini`
-- Supported env override values for `OPENAI_MODEL` are currently:
-  - `gpt-4o-mini`
-  - `gpt-4o`
-  - `gpt-4.1-mini`
-  - `gpt-4.1`
+- Default model: `gpt-5.4-mini`
+- Supported env override value for `OPENAI_MODEL` is currently:
+  - `gpt-5.4-mini`
 - `OPENAI_API_KEY` must be present for live chat.
 - If `OPENAI_API_KEY` is missing, the API route returns a clear JSON error.
 - If `OPENAI_MODEL` is invalid, the API route returns a clear JSON error.

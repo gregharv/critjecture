@@ -183,7 +183,7 @@ export async function POST(request: Request) {
       errorCode: "unsupported_model",
       outcome: "error",
       response: buildObservedErrorResponse(
-        `Unsupported OPENAI_MODEL "${requestedModelId}". Supported Step 1 models: ${OPENAI_MODEL_IDS.join(", ")}.`,
+        `Unsupported OPENAI_MODEL "${requestedModelId}". Supported model: ${OPENAI_MODEL_IDS.join(", ")}.`,
         500,
       ),
     });
