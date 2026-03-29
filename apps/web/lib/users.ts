@@ -175,6 +175,26 @@ async function getAuthenticatedUserForRecord(user: AppUser): Promise<Authenticat
   };
 }
 
+export async function getAuthenticatedUserById(id: string) {
+  const user = await getUserById(id);
+
+  if (!user) {
+    return null;
+  }
+
+  return getAuthenticatedUserForRecord(user);
+}
+
+export async function getAuthenticatedUserByEmail(email: string) {
+  const user = await getUserByEmail(email);
+
+  if (!user) {
+    return null;
+  }
+
+  return getAuthenticatedUserForRecord(user);
+}
+
 export async function authenticateUser(email: string, password: string) {
   const user = await getUserByEmail(email);
 

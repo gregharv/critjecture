@@ -5,6 +5,7 @@ import type { Session } from "next-auth";
 
 import { auth } from "@/auth";
 import { isUserRole, type UserRole } from "@/lib/roles";
+import { getAuthenticatedUserByEmail, getAuthenticatedUserById } from "@/lib/users";
 
 export type SessionUser = {
   email: string;
@@ -47,8 +48,16 @@ function getSafeSessionUser(session: Session | null): SessionUser | null {
 
 export async function getSessionUser() {
   const session = await auth();
+  const user = getSafeSessionUser(session);
 
-  return getSafeSessionUser(session);
+  if (!user) {
+    return null;
+  }
+
+  return (
+    (await getAuthenticatedUserById(user.id)) ??
+    (await getAuthenticatedUserByEmail(user.email))
+  );
 }
 
 export async function requirePageUser() {

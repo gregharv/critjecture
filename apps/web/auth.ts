@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 
-import { authenticateUser } from "@/lib/users";
+import { authenticateUser, getAuthenticatedUserByEmail } from "@/lib/users";
 import { isUserRole } from "@/lib/roles";
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
@@ -83,18 +83,31 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
+      const refreshedUser =
+        typeof token.email === "string"
+          ? await getAuthenticatedUserByEmail(token.email)
+          : null;
+
       if (session.user) {
-        session.user.email =
-          typeof token.email === "string" ? token.email : session.user.email ?? "";
-        session.user.id = typeof token.sub === "string" ? token.sub : "";
-        session.user.name = typeof token.name === "string" ? token.name : null;
-        session.user.organizationId =
-          typeof token.organizationId === "string" ? token.organizationId : "";
-        session.user.organizationName =
-          typeof token.organizationName === "string" ? token.organizationName : "";
-        session.user.organizationSlug =
-          typeof token.organizationSlug === "string" ? token.organizationSlug : "";
-        session.user.role = isUserRole(token.role) ? token.role : "intern";
+        session.user.email = refreshedUser?.email ?? (
+          typeof token.email === "string" ? token.email : session.user.email ?? ""
+        );
+        session.user.id = refreshedUser?.id ?? (
+          typeof token.sub === "string" ? token.sub : ""
+        );
+        session.user.name = refreshedUser?.name ?? (
+          typeof token.name === "string" ? token.name : null
+        );
+        session.user.organizationId = refreshedUser?.organizationId ?? (
+          typeof token.organizationId === "string" ? token.organizationId : ""
+        );
+        session.user.organizationName = refreshedUser?.organizationName ?? (
+          typeof token.organizationName === "string" ? token.organizationName : ""
+        );
+        session.user.organizationSlug = refreshedUser?.organizationSlug ?? (
+          typeof token.organizationSlug === "string" ? token.organizationSlug : ""
+        );
+        session.user.role = refreshedUser?.role ?? (isUserRole(token.role) ? token.role : "intern");
       }
 
       return session;
