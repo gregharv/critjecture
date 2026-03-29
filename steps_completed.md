@@ -1035,3 +1035,94 @@ Step 15 was implemented as a documentation pass to make the current product boun
   - sandbox hardening
   - analysis-first chart generation
 - The remaining roadmap in `steps.md` now starts at Step 16.
+
+## Step 16: Observability, Rate Limits, and Cost Controls
+
+### What Was Implemented
+
+Step 16 was implemented as a local-first operational control layer on top of the existing auth, audit, tenant, and sandbox foundations.
+
+- Added new operational persistence and migration support:
+  - `apps/web/drizzle/0004_step16_operations.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds:
+    - `request_logs`
+    - `usage_events`
+    - `rate_limit_buckets`
+    - `operational_alerts`
+- Added shared operations modules:
+  - `apps/web/lib/operations.ts`
+  - `apps/web/lib/operations-policy.ts`
+  - `apps/web/lib/operations-types.ts`
+  - centralizes:
+    - structured request logging
+    - rolling rate-limit checks
+    - rolling model-cost and sandbox-run budget enforcement
+    - alert opening / resolution
+    - health summaries
+    - owner-facing operations aggregates
+- Instrumented the main expensive and support-sensitive routes:
+  - `apps/web/app/api/stream/route.ts`
+  - `apps/web/app/api/company-knowledge/search/route.ts`
+  - `apps/web/app/api/data-analysis/run/route.ts`
+  - `apps/web/app/api/visual-graph/run/route.ts`
+  - `apps/web/app/api/document/generate/route.ts`
+  - `apps/web/app/api/knowledge/files/route.ts`
+- Those routes now:
+  - assign a request id
+  - emit structured request-start and request-finish logs
+  - enforce route-group rate limits
+  - block chat and sandbox requests when rolling daily budgets are exhausted
+  - record usage and cost events for later review
+  - open operational alerts on repeated 5xx, repeated 429s, and sandbox bursts
+- Added new operator surfaces:
+  - `apps/web/app/api/health/route.ts`
+  - `apps/web/app/api/admin/operations/summary/route.ts`
+  - `apps/web/app/admin/operations/page.tsx`
+  - `apps/web/components/operations-page-client.tsx`
+  - `apps/web/components/workspace-shell.tsx`
+  - `apps/web/app/globals.css`
+- Added operator-facing docs and env examples:
+  - `README.md`
+  - `apps/web/.env.local.example`
+
+### Current Step 16 Behavior
+
+- `Owner`
+  - Can open `/admin/operations`
+  - Can review health checks, open alerts, recent 429/5xx failures, route metrics, and per-user usage summaries for the current organization
+  - Can still use `/admin/logs` for the detailed product audit trail
+- `Intern`
+  - Cannot access the owner operations page or owner operations API
+- Health and diagnostics
+  - `GET /api/health` now reports `ok`, `degraded`, or `fail`
+  - the health summary checks:
+    - SQLite readiness
+    - storage-root access
+    - sandbox host dependencies
+- Request governance
+  - chat, search, sandbox, and knowledge-upload routes now have server-enforced rate limits
+  - chat requests now clamp `maxTokens` to the configured hard cap
+  - chat model usage is blocked when the rolling 24-hour user or organization spend cap is already exhausted
+  - sandbox-backed routes are blocked when the rolling 24-hour user or organization sandbox-run cap is already exhausted
+- Usage accounting
+  - model completions now persist token and cost usage
+  - search, upload, and sandbox routes now persist route-specific usage events
+  - the owner operations summary can group usage by route group, event type, and user
+
+### Important Implementation Details
+
+- Step 16 intentionally stayed local-first:
+  - structured logs go to stdout/stderr
+  - operational aggregates and alerts persist in SQLite
+  - no external observability vendor is required
+- The existing owner audit timeline remains the product-behavior trace, while Step 16 adds a separate system-operations layer.
+- Budget enforcement uses rolling 24-hour windows:
+  - model usage is measured by provider-reported cost totals
+  - sandbox usage is measured by counted sandbox runs
+- Warning and exhaustion thresholds are tracked separately:
+  - alerts begin at the warning threshold
+  - requests are blocked only once the hard cap is reached
+- Route instrumentation adds `x-critjecture-request-id` headers so request ids can be correlated across logs and operator debugging.
+- This step added operational visibility and controls, but it did not yet add a full automated test suite. That remains Step 18 work.
+- The remaining roadmap in `steps.md` now starts at Step 17.

@@ -2,27 +2,6 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 16: Observability, Rate Limits, and Cost Controls
-
-### Goal
-
-Add the operational controls needed to run the product safely and supportably.
-
-### What Should Be Implemented
-
-- structured server logs
-- error reporting and alerting
-- health checks and operational diagnostics
-- rate limiting for chat and tool routes
-- usage accounting for model and tool execution
-- cost and abuse controls at user and tenant levels
-
-### Acceptance Criteria
-
-- operators can identify failures and degraded routes quickly
-- abusive or runaway usage is limited automatically
-- usage and cost data can be reviewed per user or tenant
-
 ## Step 17: Bulk Knowledge Imports and Async Ingestion
 
 ### Goal
@@ -92,5 +71,10 @@ Add the operational and governance capabilities expected by real customer deploy
 - Chat history and file uploads are important future capabilities, but they should follow authentication and persistence foundations.
 - Bulk directory imports should follow observability work because they depend on background jobs, progress tracking, retries, and clear failure reporting.
 - Embedding and vectorization should be treated as a later stage on top of durable bulk ingestion rather than bundled into the first bulk-import release.
+- Step 16 now provides the first local-first operational layer:
+  - structured request logging
+  - health checks
+  - owner-facing operations summaries
+  - rate limits and rolling budget controls
 - The order above reflects dependency order and production risk, not just feature desirability.
 - A small on-prem pilot may be able to adopt parts of this roadmap more gradually than a multi-tenant cloud rollout.
