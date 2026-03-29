@@ -6,8 +6,8 @@ import { randomUUID } from "node:crypto";
 import { getAppDatabase } from "@/lib/app-db";
 import { users } from "@/lib/app-schema";
 import {
-  backfillLegacyOrganizationScope,
   ensureDefaultOrganization,
+  ensureOrganizationMembership,
   getPrimaryMembershipForUser,
 } from "@/lib/organizations";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
@@ -74,8 +74,10 @@ async function upsertSeedUser(input: SeedUserInput) {
   });
 
   if (!existingUser) {
+    const createdUserId = randomUUID();
+
     await db.insert(users).values({
-      id: randomUUID(),
+      id: createdUserId,
       email: input.email,
       name: input.name,
       passwordHash,
@@ -83,6 +85,10 @@ async function upsertSeedUser(input: SeedUserInput) {
       createdAt: now,
       updatedAt: now,
     });
+
+    const defaultOrganization = await ensureDefaultOrganization();
+
+    await ensureOrganizationMembership(createdUserId, defaultOrganization.id, input.role);
 
     return;
   }
@@ -97,6 +103,10 @@ async function upsertSeedUser(input: SeedUserInput) {
       updatedAt: now,
     })
     .where(eq(users.id, existingUser.id));
+
+  const defaultOrganization = await ensureDefaultOrganization();
+
+  await ensureOrganizationMembership(existingUser.id, defaultOrganization.id, input.role);
 }
 
 async function ensureSeedUsers() {
@@ -114,8 +124,7 @@ export async function ensureSeedState() {
   if (!seedStatePromise) {
     seedStatePromise = (async () => {
       await ensureSeedUsers();
-      const defaultOrganization = await ensureDefaultOrganization();
-      await backfillLegacyOrganizationScope(defaultOrganization.id);
+      await ensureDefaultOrganization();
     })().catch((error) => {
       seedStatePromise = null;
       throw error;

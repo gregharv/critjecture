@@ -19,7 +19,9 @@ import {
   type FileSelectionEventDetail,
 } from "@/lib/file-selection-messages";
 import type {
+  AssistantMessageType,
   CreateChatTurnResponse,
+  FinishChatTurnResponse,
   ToolCallStatus,
 } from "@/lib/audit-types";
 import type {
@@ -62,6 +64,8 @@ type PendingPlannerSearch = {
   selectedFiles: string[];
   selectionRequired: boolean;
 };
+
+const AUDIT_MODEL_NAME = "gpt-4o-mini";
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
@@ -275,7 +279,6 @@ function extractAssistantMessages(message: AgentMessage) {
 
   return message.content.flatMap<{
     messageText: string;
-    messageTitle: string;
   }>((entry) => {
     if (typeof entry !== "object" || entry === null || !("type" in entry)) {
       return [];
@@ -288,7 +291,6 @@ function extractAssistantMessages(message: AgentMessage) {
         ? [
             {
               messageText,
-              messageTitle: "Assistant Response",
             },
           ]
         : [];
@@ -395,6 +397,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const activeTurnIdRef = useRef<string | null>(null);
   const awaitingFileSelectionRef = useRef(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const messageIndexRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
@@ -513,12 +516,35 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             syntheticContinuationRef.current = true;
           }
 
-          if (typeof input === "string") {
-            await originalPrompt(input, images as never);
-            return;
-          }
+          try {
+            if (typeof input === "string") {
+              await originalPrompt(input, images as never);
+              return;
+            }
 
-          await originalPrompt(input as never);
+            await originalPrompt(input as never);
+          } catch (caughtError) {
+            const turnId = activeTurnIdRef.current;
+
+            if (turnId) {
+              activeTurnIdRef.current = null;
+              messageIndexRef.current = 0;
+              plannerSearchesRef.current = [];
+              syntheticContinuationRef.current = false;
+
+              void postAuditJson<FinishChatTurnResponse>(
+                "/api/audit/chat-turns/finish",
+                {
+                  status: "failed",
+                  turnId,
+                },
+              ).catch((finishError) => {
+                console.error("Failed to mark chat turn as failed.", finishError);
+              });
+            }
+
+            throw caughtError;
+          }
         };
 
         const hasPendingPlannerSelection = () =>
@@ -772,9 +798,11 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                   );
 
                   activeTurnIdRef.current = auditResponse.turnId;
+                  messageIndexRef.current = 0;
                 } catch (caughtError) {
                   console.error("Failed to create chat turn before streaming.", caughtError);
                   activeTurnIdRef.current = null;
+                  messageIndexRef.current = 0;
                 }
               }
             }
@@ -871,18 +899,26 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           if (event.type === "message_end" && activeTurnIdRef.current) {
             const turnId = activeTurnIdRef.current;
             const assistantMessages = extractAssistantMessages(event.message);
+            const messageType: AssistantMessageType = hasPendingPlannerSelection()
+              ? "planner-selection"
+              : "final-response";
 
             if (assistantMessages.length > 0) {
               void Promise.all(
-                assistantMessages.map((assistantMessage) =>
-                  postAuditJson<{ ok: true }>("/api/audit/assistant-messages", {
+                assistantMessages.map((assistantMessage) => {
+                  const messageIndex = messageIndexRef.current;
+                  messageIndexRef.current += 1;
+
+                  return postAuditJson<{ ok: true }>("/api/audit/assistant-messages", {
+                    messageIndex,
                     messageText: assistantMessage.messageText,
-                    messageTitle: assistantMessage.messageTitle,
+                    messageType,
+                    modelName: AUDIT_MODEL_NAME,
                     turnId,
                   }).catch((caughtError) => {
                     console.error("Failed to audit assistant message.", caughtError);
-                  }),
-                ),
+                  });
+                }),
               );
             }
           }
@@ -905,8 +941,19 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               syntheticContinuationRef.current = false;
             }
 
+            const turnId = activeTurnIdRef.current;
             activeTurnIdRef.current = null;
+            messageIndexRef.current = 0;
             plannerSearchesRef.current = [];
+
+            if (turnId) {
+              void postAuditJson<FinishChatTurnResponse>("/api/audit/chat-turns/finish", {
+                status: "completed",
+                turnId,
+              }).catch((caughtError) => {
+                console.error("Failed to mark chat turn as completed.", caughtError);
+              });
+            }
           }
         });
         const handleFileSelection = (event: Event) => {
@@ -974,6 +1021,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       mounted = false;
       activeTurnIdRef.current = null;
       awaitingFileSelectionRef.current = false;
+      messageIndexRef.current = 0;
       pendingChatTurnRef.current = null;
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;

@@ -2,17 +2,30 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import { chatTurnBelongsToUser, createAssistantMessageLog } from "@/lib/audit-log";
+import {
+  ASSISTANT_MESSAGE_TYPES,
+  type AssistantMessageType,
+} from "@/lib/audit-types";
 
 export const runtime = "nodejs";
 
 type CreateAssistantMessageBody = {
+  messageIndex?: unknown;
   messageText?: unknown;
-  messageTitle?: unknown;
+  messageType?: unknown;
+  modelName?: unknown;
   turnId?: unknown;
 };
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function isAssistantMessageType(value: unknown): value is AssistantMessageType {
+  return (
+    typeof value === "string" &&
+    ASSISTANT_MESSAGE_TYPES.includes(value as AssistantMessageType)
+  );
 }
 
 export async function POST(request: Request) {
@@ -31,16 +44,23 @@ export async function POST(request: Request) {
   }
 
   const turnId = typeof body.turnId === "string" ? body.turnId.trim() : "";
-  const messageTitle =
-    typeof body.messageTitle === "string" ? body.messageTitle.trim() : "";
   const messageText =
     typeof body.messageText === "string" ? body.messageText.trim() : "";
+  const modelName = typeof body.modelName === "string" ? body.modelName.trim() : "";
+  const messageIndex =
+    typeof body.messageIndex === "number" && Number.isInteger(body.messageIndex)
+      ? body.messageIndex
+      : Number.NaN;
 
-  if (!turnId || !messageTitle || !messageText) {
+  if (!turnId || !messageText || !modelName || !Number.isInteger(messageIndex) || messageIndex < 0) {
     return jsonError(
-      "turnId, messageTitle, and messageText must all be non-empty strings.",
+      "turnId, messageText, modelName, and a non-negative integer messageIndex are required.",
       400,
     );
+  }
+
+  if (!isAssistantMessageType(body.messageType)) {
+    return jsonError('messageType must be "final-response" or "planner-selection".', 400);
   }
 
   try {
@@ -55,8 +75,10 @@ export async function POST(request: Request) {
     }
 
     await createAssistantMessageLog({
+      messageIndex,
       messageText,
-      messageTitle,
+      messageType: body.messageType,
+      modelName,
       turnId,
     });
 

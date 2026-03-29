@@ -649,3 +649,94 @@ Step 10 was implemented as a SQLite-first tenant and storage foundation that sup
 - Runtime company data is no longer sourced directly from the repo root during normal operation.
 - Database migrations remain forward-only SQL files and can be run explicitly with `pnpm db:migrate`.
 - Sandbox workspaces remain ephemeral and are still out of durable backup scope.
+
+## Step 11: Audit Schema Reset and RAG-Ready Database Baseline
+
+### What Was Implemented
+
+Step 11 was implemented as a deliberate development-only schema reset that replaced the layered Step 6/9/10 audit migration history with one clean SQLite baseline designed for future RAG work.
+
+- Replaced the older incremental SQL migration stack in `apps/web/drizzle/` with a single baseline migration:
+  - `apps/web/drizzle/0000_baseline.sql`
+- Reworked the shared Drizzle schema in `apps/web/lib/app-schema.ts`.
+  - Keeps the current auth, tenant, audit, and sandbox tables
+  - Normalizes `chat_turns` to include:
+    - `conversation_id`
+    - `status`
+    - `completed_at`
+  - Normalizes `assistant_messages` to include:
+    - `message_index`
+    - `message_type`
+    - `model_name`
+  - Keeps `tool_calls` as the structured tool execution table
+  - Adds future-RAG registry tables:
+    - `documents`
+    - `document_chunks`
+  - Adds future retrieval/audit tables:
+    - `retrieval_runs`
+    - `retrieval_rewrites`
+    - `retrieval_candidates`
+    - `response_citations`
+- Reworked the audit server helpers in `apps/web/lib/audit-log.ts`.
+  - Chat turns now start in a lifecycle state and can be marked complete or failed
+  - Assistant messages are stored with ordered indexes and typed semantics instead of a UI-only title string
+  - Admin log projections now return turn lifecycle fields plus empty-ready retrieval and citation collections
+- Added the new turn-finish API route:
+  - `apps/web/app/api/audit/chat-turns/finish/route.ts`
+- Updated the assistant-message audit route:
+  - `apps/web/app/api/audit/assistant-messages/route.ts`
+  - Validates `messageIndex`, `messageType`, and `modelName`
+- Updated the chat audit wiring in `apps/web/components/chat-shell.tsx`.
+  - Starts turns in `started`
+  - Marks turns `completed` or `failed`
+  - Records assistant outputs with message ordering and typed intent
+  - Marks planner-selection assistant output separately from final responses
+- Updated the owner audit UI in `apps/web/components/admin-logs-page-client.tsx`.
+  - Shows turn lifecycle state
+  - Shows turn completion time
+  - Uses assistant message metadata instead of the old `message_title` convention
+  - Is now structurally ready for future retrieval and citation display
+- Removed the older backfill-first org/audit assumptions from:
+  - `apps/web/lib/organizations.ts`
+  - `apps/web/lib/users.ts`
+  - Seeded users now get memberships directly in the clean baseline flow
+- Reset the local development database and rebuilt it from the new baseline migration.
+
+### Current Step 11 Behavior
+
+- Local development
+  - Uses a fresh baseline SQLite schema instead of replaying separate Step 6, Step 9, and Step 10 migration eras
+  - Recreates `storage/critjecture.sqlite` cleanly via `pnpm db:migrate`
+- Chat turns
+  - Start with a lifecycle status
+  - End as `completed` or `failed`
+  - Retain the current `chat_session_id` while also storing a `conversation_id`
+- Assistant audit rows
+  - Are ordered per turn with `message_index`
+  - Distinguish final responses from planner-selection assistant output
+  - Store the model name used for the assistant-visible output
+- Tool audit rows
+  - Still store runtime tool id, arguments, accessed files, status, summaries, and errors
+  - Continue to serve as the structured execution audit layer
+- Future RAG support
+  - The database now has stable document and chunk tables ready for indexing work later
+  - The database now has retrieval and citation tables ready for contextual rewrite, HyDE, hybrid retrieval, reranking, and answer grounding later
+  - The current file-system search flow remains in place; Step 11 does not yet implement the full retrieval pipeline
+
+### Important Implementation Details
+
+- Step 11 intentionally removed backward-compatibility work in favor of a cleaner development baseline.
+- The prior migration files:
+  - `0000_step6_audit_logging.sql`
+  - `0001_step6_trace_events.sql`
+  - `0002_step9_auth_and_ownership.sql`
+  - `0003_step10_tenants_and_storage.sql`
+  were replaced by `0000_baseline.sql`.
+- SQLite remains the system of record for:
+  - auth and tenancy
+  - chat/audit records
+  - future document and chunk identity
+  - future retrieval and citation records
+- The future vector store is still expected to live outside SQLite. Step 11 prepares the relational IDs and joins without storing vectors in the app database.
+- `audit_events` was intentionally not added. Final assistant output stays in `assistant_messages`, tool execution stays in `tool_calls`, and retrieval state will live in the dedicated retrieval tables when that work is implemented.
+- The local database was intentionally reset as part of this step, so older development audit data is not preserved across the new baseline.

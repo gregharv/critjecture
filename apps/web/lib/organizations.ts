@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -10,11 +10,8 @@ import {
 } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
 import {
-  chatTurns,
   organizationMemberships,
   organizations,
-  sandboxRuns,
-  users,
 } from "@/lib/app-schema";
 import type { UserRole } from "@/lib/roles";
 
@@ -139,35 +136,6 @@ export async function ensureOrganizationMembership(
       updatedAt: now,
     })
     .where(eq(organizationMemberships.id, existingMembership.id));
-}
-
-export async function backfillLegacyOrganizationScope(defaultOrganizationId: string) {
-  const db = await getAppDatabase();
-  const existingUsers = await db
-    .select({
-      id: users.id,
-      role: users.role,
-    })
-    .from(users)
-    .orderBy(asc(users.createdAt));
-
-  for (const existingUser of existingUsers) {
-    await ensureOrganizationMembership(
-      existingUser.id,
-      defaultOrganizationId,
-      existingUser.role,
-    );
-  }
-
-  await db
-    .update(chatTurns)
-    .set({ organizationId: defaultOrganizationId })
-    .where(isNull(chatTurns.organizationId));
-
-  await db
-    .update(sandboxRuns)
-    .set({ organizationId: defaultOrganizationId })
-    .where(isNull(sandboxRuns.organizationId));
 }
 
 export async function getPrimaryMembershipForUser(userId: string) {

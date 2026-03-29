@@ -24,6 +24,8 @@ type AuditTimelineEvent =
       createdAt: number;
       eventType: "assistant";
       id: string;
+      messageType: ChatTurnLog["assistantMessages"][number]["messageType"];
+      modelName: string;
       title: string;
     }
   | {
@@ -44,6 +46,30 @@ function formatTimestamp(timestamp: number | null) {
   }
 
   return DATE_TIME_FORMATTER.format(timestamp);
+}
+
+function getAssistantMessageLabel(
+  turn: ChatTurnLog,
+  messageId: string,
+  messageType: ChatTurnLog["assistantMessages"][number]["messageType"],
+) {
+  if (messageType === "planner-selection") {
+    return "Planner Selection";
+  }
+
+  const citationCount = turn.responseCitations.filter(
+    (citation) => citation.assistantMessageId === messageId,
+  ).length;
+
+  return citationCount > 0
+    ? `Final Response (${citationCount} citation${citationCount === 1 ? "" : "s"})`
+    : "Final Response";
+}
+
+function getAssistantMessageTypeLabel(
+  messageType: ChatTurnLog["assistantMessages"][number]["messageType"],
+) {
+  return messageType === "planner-selection" ? "Planner Selection" : "Assistant Response";
 }
 
 function parseInputFilesFromToolParameters(toolCall: ToolCallLog) {
@@ -75,6 +101,10 @@ function hasAssistantMessage(turn: ChatTurnLog) {
 }
 
 function turnIsActiveOrIncomplete(turn: ChatTurnLog, now: number) {
+  if (turn.status === "started" || turn.completedAt === null) {
+    return true;
+  }
+
   if (
     turn.toolCalls.some(
       (toolCall) => toolCall.status === "started" || toolCall.completedAt === null,
@@ -104,7 +134,9 @@ function buildAuditTimelineEvents(turn: ChatTurnLog): AuditTimelineEvent[] {
     createdAt: assistantMessage.createdAt,
     eventType: "assistant",
     id: assistantMessage.id,
-    title: assistantMessage.messageTitle || "Assistant Response",
+    messageType: assistantMessage.messageType,
+    modelName: assistantMessage.modelName,
+    title: getAssistantMessageLabel(turn, assistantMessage.id, assistantMessage.messageType),
   }));
 
   const toolEvents = turn.toolCalls.map<AuditTimelineEvent>((toolCall) => ({
@@ -171,6 +203,9 @@ function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
         <div className="audit-card__summary-main">
           <div className="audit-card__meta">
             <span className="audit-badge">{getRoleLabel(turn.userRole)}</span>
+            <span className={`audit-status audit-status--${turn.status}`}>
+              {turn.status}
+            </span>
             <span>{formatTimestamp(turn.createdAt)}</span>
           </div>
           <h2 className="audit-card__title">{turn.userPromptText}</h2>
@@ -179,6 +214,7 @@ function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
         <div className="audit-card__summary-side">
           <div className="audit-card__session">{userLabel}</div>
           <div className="audit-card__session">Chat Session {turn.chatSessionId}</div>
+          <div className="audit-card__session">Completed {formatTimestamp(turn.completedAt)}</div>
           <div className="audit-card__files">
             {turnAccessedFiles.length > 0 ? (
               turnAccessedFiles.map((filePath) => (
@@ -257,6 +293,8 @@ function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
                           <div className="audit-tool__name">{event.title}</div>
                         </div>
                         <div className="audit-tool__meta">
+                          <span>{getAssistantMessageTypeLabel(event.messageType)}</span>
+                          <span>{event.modelName}</span>
                           <span>{formatTimestamp(event.createdAt)}</span>
                         </div>
                       </div>
@@ -427,7 +465,7 @@ export function AdminLogsPageClient() {
           <div className="audit-page__eyebrow">Admin</div>
           <h1 className="audit-page__title">Audit Logs</h1>
           <p className="audit-page__copy">
-            Review the exact chat turns, tool arguments, execution outcomes, and initiating
+            Review exact chat turns, lifecycle state, tool arguments, execution outcomes, and initiating
             user for each authenticated Critjecture session.
           </p>
         </div>

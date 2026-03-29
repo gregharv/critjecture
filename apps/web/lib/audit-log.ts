@@ -4,10 +4,19 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
-import { assistantMessages, chatTurns, toolCalls, users } from "@/lib/app-schema";
+import {
+  assistantMessages,
+  chatTurns,
+  responseCitations,
+  retrievalRuns,
+  toolCalls,
+  users,
+} from "@/lib/app-schema";
 import type {
+  AssistantMessageType,
   ChatTurnLog,
   ToolCallStatus,
+  TurnStatus,
 } from "@/lib/audit-types";
 import type { UserRole } from "@/lib/roles";
 
@@ -31,8 +40,11 @@ export async function createChatTurnLog(input: {
 
   await db.insert(chatTurns).values({
     id: turnId,
+    conversationId: input.chatSessionId,
     organizationId: input.organizationId,
     chatSessionId: input.chatSessionId,
+    completedAt: null,
+    status: "started",
     userId: input.userId,
     userRole: input.userRole,
     userPromptText: input.userPromptText,
@@ -40,6 +52,21 @@ export async function createChatTurnLog(input: {
   });
 
   return { turnId };
+}
+
+export async function finishChatTurnLog(input: {
+  status: Exclude<TurnStatus, "started">;
+  turnId: string;
+}) {
+  const db = await getAppDatabase();
+
+  await db
+    .update(chatTurns)
+    .set({
+      completedAt: Date.now(),
+      status: input.status,
+    })
+    .where(eq(chatTurns.id, input.turnId));
 }
 
 export async function startToolCallLog(input: {
@@ -97,23 +124,27 @@ export async function finishToolCallLog(input: {
 }
 
 export async function createAssistantMessageLog(input: {
+  messageIndex: number;
   messageText: string;
-  messageTitle: string;
+  messageType: AssistantMessageType;
+  modelName: string;
   turnId: string;
 }) {
   const db = await getAppDatabase();
   const messageText = input.messageText.trim();
-  const messageTitle = input.messageTitle.trim();
+  const modelName = input.modelName.trim();
 
-  if (!messageText || !messageTitle) {
+  if (!messageText || !modelName) {
     return;
   }
 
   await db.insert(assistantMessages).values({
     id: randomUUID(),
+    messageIndex: input.messageIndex,
     turnId: input.turnId,
-    messageTitle,
+    messageType: input.messageType,
     messageText,
+    modelName,
     createdAt: Date.now(),
   });
 }
@@ -163,6 +194,19 @@ export async function listRecentChatTurnLogs(
     .from(assistantMessages)
     .where(inArray(assistantMessages.turnId, turnIds))
     .orderBy(desc(assistantMessages.createdAt));
+  const retrievalRunRows = await db
+    .select()
+    .from(retrievalRuns)
+    .where(inArray(retrievalRuns.turnId, turnIds))
+    .orderBy(desc(retrievalRuns.startedAt));
+  const assistantMessageIds = assistantMessageRows.map((row) => row.id);
+  const citationRows =
+    assistantMessageIds.length > 0
+      ? await db
+          .select()
+          .from(responseCitations)
+          .where(inArray(responseCitations.assistantMessageId, assistantMessageIds))
+      : [];
   const userIds = [
     ...new Set(
       turnRows
@@ -189,13 +233,45 @@ export async function listRecentChatTurnLogs(
       .map((assistantMessageRow) => ({
         createdAt: assistantMessageRow.createdAt,
         id: assistantMessageRow.id,
+        messageIndex: assistantMessageRow.messageIndex,
         messageText: assistantMessageRow.messageText,
-        messageTitle: assistantMessageRow.messageTitle,
+        messageType: assistantMessageRow.messageType,
+        modelName: assistantMessageRow.modelName,
         turnId: assistantMessageRow.turnId,
       })),
     chatSessionId: turnRow.chatSessionId,
+    completedAt: turnRow.completedAt,
+    conversationId: turnRow.conversationId,
     createdAt: turnRow.createdAt,
     id: turnRow.id,
+    responseCitations: citationRows
+      .filter((citationRow) =>
+        assistantMessageRows.some(
+          (assistantMessageRow) =>
+            assistantMessageRow.turnId === turnRow.id &&
+            assistantMessageRow.id === citationRow.assistantMessageId,
+        ),
+      )
+      .map((citationRow) => ({
+        assistantMessageId: citationRow.assistantMessageId,
+        citationIndex: citationRow.citationIndex,
+        id: citationRow.id,
+        retrievalCandidateId: citationRow.retrievalCandidateId,
+      })),
+    retrievalRuns: retrievalRunRows
+      .filter((retrievalRunRow) => retrievalRunRow.turnId === turnRow.id)
+      .map((retrievalRunRow) => ({
+        completedAt: retrievalRunRow.completedAt,
+        embeddingModel: retrievalRunRow.embeddingModel,
+        errorMessage: retrievalRunRow.errorMessage,
+        id: retrievalRunRow.id,
+        pipelineVersion: retrievalRunRow.pipelineVersion,
+        rerankModel: retrievalRunRow.rerankModel,
+        startedAt: retrievalRunRow.startedAt,
+        status: retrievalRunRow.status,
+        turnId: retrievalRunRow.turnId,
+      })),
+    status: turnRow.status,
     toolCalls: toolCallRows
       .filter((toolCallRow) => toolCallRow.turnId === turnRow.id)
       .map((toolCallRow) => ({

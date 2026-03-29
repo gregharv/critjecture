@@ -2,7 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 11: Server-Backed Chat History
+## Step 12: Server-Backed Chat History
 
 ### Goal
 
@@ -22,7 +22,7 @@ Persist conversations server-side so users can reload, resume, and review prior 
 - history is available across browsers or devices for the same account
 - audit entries remain associated with the correct stored conversation
 
-## Step 12: File Uploads and Knowledge Ingestion
+## Step 13: File Uploads and Knowledge Ingestion
 
 ### Goal
 
@@ -44,7 +44,7 @@ Let customers bring their own files into Critjecture and use them safely in sear
 - uploaded content can be surfaced by the search flow
 - sandbox tools can use approved uploaded files without bypassing authorization
 
-## Step 13: Sandbox Hardening and Execution Controls
+## Step 14: Sandbox Hardening and Execution Controls
 
 ### Goal
 
@@ -64,7 +64,7 @@ Strengthen the execution model for model-generated code so it is appropriate for
 - failed or abandoned jobs do not leave unsafe residual state
 - execution isolation is materially stronger than the current local child-process model
 
-## Step 14: Observability, Rate Limits, and Cost Controls
+## Step 15: Observability, Rate Limits, and Cost Controls
 
 ### Goal
 
@@ -85,7 +85,7 @@ Add the operational controls needed to run the product safely and supportably.
 - abusive or runaway usage is limited automatically
 - usage and cost data can be reviewed per user or tenant
 
-## Step 15: Test Coverage and Release Readiness
+## Step 16: Test Coverage and Release Readiness
 
 ### Goal
 
@@ -106,7 +106,7 @@ Create enough automated verification to ship changes with confidence.
 - major regressions are catchable before release
 - a repeatable release confidence process exists
 
-## Step 16: Admin Operations and Compliance Controls
+## Step 17: Admin Operations and Compliance Controls
 
 ### Goal
 
