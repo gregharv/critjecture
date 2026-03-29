@@ -14,11 +14,13 @@ Sandbox policy is not static.
 
 This file is the decision record for those choices. It is not meant to replace implementation details in code or milestone notes in the roadmap files.
 
-## Current Step 14 Defaults
+## Current Step 20 Defaults
 
-- isolation runner: Linux namespaces via `bubblewrap`
-- network access: disabled inside the sandbox
-- execution model: synchronous request/response, no background queue
+- execution model: synchronous request/response at the route layer, but supervisor-owned run lifecycle underneath
+- local backend: `local_supervisor` running Linux namespaces via `bubblewrap` + `prlimit`
+- hosted backend: `hosted_supervisor` reached over a dedicated service boundary
+- hosted fallback: none; hosted fails closed if the remote supervisor is unavailable or unconfigured
+- network access: disabled inside the local `bubblewrap` sandbox
 - per-user active sandbox jobs: `1`
 - global active sandbox jobs: `4`
 - wall timeout: `10s`
@@ -28,7 +30,8 @@ This file is the decision record for those choices. It is not meant to replace i
 - stdout/stderr capture limit: `1 MiB`
 - output artifact size limit: `10 MiB`
 - output retention: persisted for `24h`
-- temporary workspace retention: delete `/tmp/workspace/<run-id>` immediately after finalization
+- supervisor lease / heartbeat: tracked durably in `sandbox_runs`
+- temporary workspace retention: delete `/tmp/workspace/<run-id>` after finalization or stale-run reconciliation
 
 Current generated-output rules:
 
@@ -44,19 +47,31 @@ Current generated-file behavior:
 
 ## Decision Rationale
 
-### 1. Linux namespace isolation over plain subprocess hardening
+### 1. Supervisor-owned execution over request-local child process ownership
 
-Critjecture previously executed model-generated Python as a local child process with a stripped environment. That was acceptable for early MVP work, but it was not a strong enough boundary for real customer environments.
+Critjecture previously relied on request-local child process lifetime plus best-effort cleanup. That was acceptable for early MVP work, but it was not restart-safe enough for real customer environments.
 
-`bubblewrap` was chosen because it materially improves isolation while fitting the current deployment model:
+The current policy is:
+
+- local and on-prem `single_org` deployments use a supervisor loop inside the web app process
+- that supervisor, not the request handler, claims, runs, finalizes, and reconciles sandbox work
+- hosted deployments must submit work to a dedicated supervisor service boundary
+
+This keeps the current synchronous product UX while making lifecycle ownership durable and making hosted trust boundaries explicit.
+
+### 2. Linux namespace isolation remains the local execution primitive
+
+For local and customer-managed Linux installs, `bubblewrap` is still the concrete local isolation runner.
+
+It remains a practical fit for:
 
 - local Linux hardware
 - customer-managed Linux hardware
-- Linux-based hosted environments
+- tightly controlled single-service installs
 
-It is a better fit for the current single-service architecture than introducing a separate sandbox worker or VM service in the same step.
+Step 20 does not claim that same-host `bubblewrap` is sufficient for hosted multi-tenant trust. Hosted now requires a dedicated supervisor service boundary instead of pretending both modes are equivalent.
 
-### 2. Immediate workspace cleanup plus short-lived persistent artifacts
+### 3. Immediate workspace cleanup plus short-lived persistent artifacts
 
 Serving generated files directly from `/tmp/workspace/<run-id>` couples file availability to temporary workspace lifetime.
 
@@ -64,16 +79,19 @@ The current policy instead:
 
 - validates outputs first
 - copies only approved outputs into persistent tenant storage
-- deletes the temp workspace immediately afterward
+- deletes the temp workspace afterward
+- retries cleanup during reconciliation if a run dies mid-finalization
 
 This gives better cleanup guarantees without breaking the chart/PDF download experience.
 
-### 3. Reject-on-contention instead of queueing
+### 4. Reject-on-contention instead of queueing
 
 Sandbox-backed tool calls are still synchronous HTTP requests from the chat UI.
 
 Because the product does not yet have async job handling or queue-aware UI states, the current behavior is:
 
+- queue a durable run record first
+- let the supervisor claim work and enforce concurrency ceilings there
 - reject a second active sandbox run for the same user
 - reject new work when the global cap is reached
 
@@ -90,15 +108,21 @@ Possible adjustments:
 - slightly higher memory or timeout limits
 - longer artifact retention if the customer explicitly wants it
 - lower global concurrency if hardware is small
+- continued use of the local in-app supervisor with host `bubblewrap`
 
 ### Multi-Tenant Hosted Deployment
 
-Likely stricter settings:
+Current hosted posture:
+
+- the web app must submit sandbox work to a dedicated supervisor service
+- hosted should not fall back to in-process `bubblewrap` execution
+
+Likely future stricter settings:
 
 - tighter concurrency enforcement
 - stricter artifact retention
 - stronger abuse detection around repeated sandbox use
-- possible move from in-process execution to an external worker or stronger isolation boundary later
+- stronger execution isolation inside the hosted supervisor service later if needed
 
 ### Higher-Risk Organizations
 
@@ -113,15 +137,17 @@ Possible stricter controls:
 
 | Setting | Default | May Vary Per Org | Why It Might Change | Notes / Constraints |
 | --- | --- | --- | --- | --- |
-| Isolation runner | `bubblewrap` | Rarely | Deployment platform or compliance review | Changing this is a platform decision, not a simple per-org toggle |
+| Execution backend | `local_supervisor` or `hosted_supervisor` by deployment mode | Rarely | Deployment platform or compliance review | This is a deployment decision, not a normal per-org toggle |
+| Local isolation runner | `bubblewrap` | Rarely | Platform support or compliance review | Only applies to local/on-prem supervisor execution |
 | Wall timeout | `10s` | Yes | Larger reports or heavier analytics | Raising it increases abuse and denial-of-service risk |
 | CPU limit | `8s` | Yes | Hardware profile or expected workload | Should remain below wall timeout |
 | Memory limit | `512 MiB` | Yes | Larger CSVs or richer document generation | Higher memory increases noisy-neighbor risk |
-| Max processes | `8` | Maybe | Library/runtime needs | Should stay small unless a concrete need is proven |
+| Max processes | `64` | Maybe | Library/runtime needs | Should stay bounded unless a concrete need is proven |
 | Per-user concurrency | `1` | Maybe | Dedicated single-customer installs | Shared deployments should stay strict |
 | Global concurrency | `4` | Yes | Host capacity | This is deployment-level more than org-level |
 | Artifact size limit | `10 MiB` | Yes | Customers generating richer PDFs | Larger artifacts increase storage pressure |
 | Artifact TTL | `24h` | Yes | Customer expectation for download availability | Longer retention should be deliberate |
+| Supervisor lease/heartbeat timings | env-controlled defaults | Rarely | Infrastructure latency or timeout tuning | This is an operator/platform control, not a normal tenant-facing setting |
 | Allowed output types | PNG/PDF only | Rarely | New product capabilities | New types need explicit validation and serving rules |
 | Tool availability | analysis/chart/document | Yes | Customer policy or compliance posture | Restricting tool classes is safer than widening output rules |
 | Audit retention/detail | current app defaults | Yes | Customer review and governance expectations | Sandbox attempts must remain auditable even if retention changes |
@@ -132,10 +158,11 @@ These should not vary without a deeper redesign.
 
 - RBAC is enforced before any company file is staged into the sandbox.
 - Model-generated code does not receive unrestricted host filesystem access.
-- Sandbox execution does not have normal network access.
+- Local sandbox execution does not have normal network access.
 - Only explicitly approved output types and locations are retrievable.
-- Every sandbox attempt, including rejection and timeout, should be auditable.
-- Temporary workspaces should be cleaned after completion or failure.
+- Every sandbox attempt, including rejection, timeout, abandonment, and backend unavailability, should be auditable.
+- Hosted mode must not silently fall back to in-web-process local sandbox execution.
+- Temporary workspaces should be cleaned after completion, failure, or reconciliation.
 - Generated-file access remains scoped to the authenticated user and organization.
 
 ## Future Change Triggers
@@ -144,7 +171,7 @@ Revisit this policy when any of these become true:
 
 - Critjecture adds async sandbox jobs or background processing
 - deployment moves beyond Linux or needs cross-platform sandboxing
-- a hosted deployment needs stronger noisy-neighbor isolation
+- a hosted deployment needs stronger noisy-neighbor isolation inside the dedicated supervisor service
 - customers request longer-lived generated files
 - observed failures show the current limits are too low
 - observed abuse shows the current limits are too generous

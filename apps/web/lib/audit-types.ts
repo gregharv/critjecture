@@ -33,7 +33,16 @@ export type SandboxRunLog = {
   runId: string;
   runner: string;
   startedAt: number;
-  status: "running" | "completed" | "failed" | "timed_out" | "rejected" | "abandoned";
+  status:
+    | "queued"
+    | "starting"
+    | "running"
+    | "finalizing"
+    | "completed"
+    | "failed"
+    | "timed_out"
+    | "rejected"
+    | "abandoned";
   stdoutMaxBytes: number;
   timeoutMs: number;
   toolName: string;

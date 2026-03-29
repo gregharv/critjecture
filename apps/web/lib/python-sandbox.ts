@@ -12,6 +12,7 @@ import {
   realpath,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,29 +21,47 @@ import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
 import type { UserRole } from "@/lib/roles";
 import {
   attachSandboxRunToToolCall,
+  claimNextQueuedSandboxRun,
   cleanupExpiredSandboxArtifacts,
   completeSandboxRun,
   ensureSandboxAssetStorageRoot,
+  getSandboxRunExecutionPayload,
+  getSandboxRunByRunId,
+  heartbeatSandboxRun,
   markSandboxRunCleanup,
+  markSandboxRunFinalizing,
+  markSandboxRunRunning,
+  queueSandboxRun,
+  reconcileStaleSandboxRuns,
   replaceSandboxGeneratedAssets,
-  startSandboxRun,
+  rejectSandboxRun,
+  waitForSandboxRunTerminal,
 } from "@/lib/sandbox-runs";
 import {
+  getSandboxExecutionBackend,
   SANDBOX_ARTIFACT_MAX_BYTES,
   SANDBOX_ARTIFACT_TTL_MS,
   SANDBOX_BWRAP_PATH,
+  SANDBOX_HOSTED_RUNNER,
+  SANDBOX_HOSTED_SUPERVISOR_TIMEOUT_MS,
+  SANDBOX_HOSTED_SUPERVISOR_TOKEN,
+  SANDBOX_HOSTED_SUPERVISOR_URL,
   SANDBOX_MAX_BUFFER,
   SANDBOX_OUTPUTS_DIR,
   SANDBOX_PRLIMIT_PATH,
   SANDBOX_RUNNER,
+  SANDBOX_SUPERVISOR_HEARTBEAT_MS,
   SANDBOX_TIMEOUT_MS,
+  SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS,
   SANDBOX_WORKSPACE_DIR,
+  type SandboxExecutionBackend,
   type SandboxLimitsSnapshot,
 } from "@/lib/sandbox-policy";
 
 const execFileAsync = promisify(execFile);
 const RUN_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LOCAL_SUPERVISOR_ID = `local-supervisor:${process.pid}`;
 
 const GENERATED_ASSET_MIME_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -70,6 +89,29 @@ type OutputFileRecord = {
   relativePath: string;
 };
 
+type BufferedOutputFileRecord = {
+  byteSize: number;
+  buffer: Buffer;
+  mimeType: string;
+  relativePath: string;
+};
+
+type HostedGeneratedAssetPayload = {
+  base64Data: string;
+  relativePath: string;
+};
+
+type HostedSupervisorExecutionResponse = {
+  exitCode?: number | null;
+  failureReason?: string | null;
+  generatedAssets?: HostedGeneratedAssetPayload[];
+  runner?: string | null;
+  stagedFiles?: StagedSandboxFile[];
+  status: "completed" | "failed" | "timed_out" | "rejected";
+  stderr?: string;
+  stdout?: string;
+};
+
 export type StagedSandboxFile = {
   sourcePath: string;
   stagedPath: string;
@@ -95,6 +137,12 @@ export type SandboxedCommandResult = {
   status: "completed" | "failed" | "timed_out" | "rejected" | "abandoned";
   stderr: string;
   stdout: string;
+};
+
+export type SandboxBackendHealth = {
+  available: boolean;
+  backend: SandboxExecutionBackend;
+  detail: string;
 };
 
 export class SandboxAdmissionError extends Error {
@@ -134,6 +182,16 @@ export class SandboxExecutionError extends Error {
   }
 }
 
+export class SandboxUnavailableError extends Error {
+  readonly sandboxRunId: string | null;
+
+  constructor(message: string, sandboxRunId: string | null = null) {
+    super(message);
+    this.name = "SandboxUnavailableError";
+    this.sandboxRunId = sandboxRunId;
+  }
+}
+
 export class SandboxValidationError extends Error {
   readonly sandboxRunId: string | null;
 
@@ -143,6 +201,9 @@ export class SandboxValidationError extends Error {
     this.sandboxRunId = sandboxRunId;
   }
 }
+
+let localSupervisorPromise: Promise<void> | null = null;
+let localSupervisorWakeRequested = false;
 
 async function pathExists(targetPath: string, mode = fsConstants.R_OK) {
   try {
@@ -160,6 +221,47 @@ function buildGeneratedAssetDownloadUrl(runId: string, relativePath: string) {
     .join("/");
 
   return `/api/generated-files/${runId}/${encodedRelativePath}`;
+}
+
+function asErrorMessage(caughtError: unknown, fallback: string) {
+  return caughtError instanceof Error ? caughtError.message : fallback;
+}
+
+function isValidationFailureReason(reason: string | null | undefined) {
+  return reason === "validation-error" || reason === "output-validation-error";
+}
+
+function getRejectionMessage(reason: string | null | undefined) {
+  if (reason === "per-user-concurrency-limit") {
+    return "A sandbox job is already running for this user. Wait for it to finish before starting another.";
+  }
+
+  if (reason === "global-concurrency-limit") {
+    return "The sandbox is at capacity right now. Retry after an active job finishes.";
+  }
+
+  if (reason === "backend-unavailable") {
+    return "The sandbox backend is unavailable right now.";
+  }
+
+  return "Sandbox admission was rejected.";
+}
+
+function decodeHostedGeneratedAsset(payload: HostedGeneratedAssetPayload) {
+  const normalizedRelativePath = normalizeGeneratedAssetRelativePath(payload.relativePath);
+  const buffer = Buffer.from(payload.base64Data, "base64");
+
+  if (buffer.byteLength > SANDBOX_ARTIFACT_MAX_BYTES) {
+    throw new SandboxValidationError(
+      `Generated output exceeded the ${SANDBOX_ARTIFACT_MAX_BYTES} byte limit: ${normalizedRelativePath}`,
+    );
+  }
+
+  return {
+    byteSize: buffer.byteLength,
+    buffer,
+    relativePath: normalizedRelativePath,
+  };
 }
 
 export function normalizeGeneratedAssetRelativePath(relativePath: string) {
@@ -245,8 +347,9 @@ async function resolvePythonExecutable() {
   };
 }
 
-async function validateHostSandboxDependencies() {
+async function validateLocalSandboxDependencies() {
   const missing: string[] = [];
+  const pythonCheck = await resolvePythonExecutable().catch(() => null);
 
   if (!(await pathExists(SANDBOX_BWRAP_PATH, fsConstants.X_OK))) {
     missing.push(SANDBOX_BWRAP_PATH);
@@ -256,10 +359,88 @@ async function validateHostSandboxDependencies() {
     missing.push(SANDBOX_PRLIMIT_PATH);
   }
 
+  if (!pythonCheck) {
+    missing.push("packages/python-sandbox/.venv/bin/python");
+  }
+
   if (missing.length > 0) {
     throw new Error(
       `Sandbox hardening requires executable host dependencies: ${missing.join(", ")}`,
     );
+  }
+}
+
+async function fetchHostedSupervisor(
+  endpoint: string,
+  init: RequestInit,
+  timeoutMs = SANDBOX_HOSTED_SUPERVISOR_TIMEOUT_MS,
+) {
+  if (!SANDBOX_HOSTED_SUPERVISOR_URL) {
+    throw new Error("Hosted sandbox supervisor URL is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(new URL(endpoint, SANDBOX_HOSTED_SUPERVISOR_URL).toString(), {
+      ...init,
+      headers: {
+        ...(init.headers ?? {}),
+        ...(SANDBOX_HOSTED_SUPERVISOR_TOKEN
+          ? { Authorization: `Bearer ${SANDBOX_HOSTED_SUPERVISOR_TOKEN}` }
+          : {}),
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function getSandboxBackendHealth(): Promise<SandboxBackendHealth> {
+  const backend = getSandboxExecutionBackend();
+
+  if (backend === "local_supervisor") {
+    try {
+      await validateLocalSandboxDependencies();
+
+      return {
+        available: true,
+        backend,
+        detail: "Local supervisor dependencies are present.",
+      };
+    } catch (caughtError) {
+      return {
+        available: false,
+        backend,
+        detail: asErrorMessage(caughtError, "Local sandbox supervisor dependencies are unavailable."),
+      };
+    }
+  }
+
+  try {
+    const response = await fetchHostedSupervisor("/health", {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Hosted sandbox supervisor health check failed with HTTP ${response.status}.`);
+    }
+
+    return {
+      available: true,
+      backend,
+      detail: "Hosted sandbox supervisor is reachable.",
+    };
+  } catch (caughtError) {
+    return {
+      available: false,
+      backend,
+      detail: asErrorMessage(caughtError, "Hosted sandbox supervisor is unreachable."),
+    };
   }
 }
 
@@ -466,7 +647,7 @@ async function readMagicHeader(absolutePath: string, length = 8) {
   }
 }
 
-async function detectValidatedMimeType(record: { absolutePath: string; relativePath: string }) {
+function detectValidatedMimeTypeFromBuffer(record: { buffer: Buffer; relativePath: string }) {
   const expectedMimeType = getGeneratedAssetMimeType(record.relativePath);
 
   if (!expectedMimeType) {
@@ -475,23 +656,31 @@ async function detectValidatedMimeType(record: { absolutePath: string; relativeP
     );
   }
 
-  const header = await readMagicHeader(record.absolutePath, expectedMimeType === "image/png" ? 8 : 5);
-
   if (
     expectedMimeType === "image/png" &&
-    !header.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    !record.buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
   ) {
     throw new SandboxValidationError(`Generated PNG has an invalid file signature: ${record.relativePath}`);
   }
 
   if (
     expectedMimeType === "application/pdf" &&
-    header.toString("utf8", 0, 5) !== "%PDF-"
+    record.buffer.subarray(0, 5).toString("utf8") !== "%PDF-"
   ) {
     throw new SandboxValidationError(`Generated PDF has an invalid file signature: ${record.relativePath}`);
   }
 
   return expectedMimeType;
+}
+
+async function detectValidatedMimeType(record: { absolutePath: string; relativePath: string }) {
+  return detectValidatedMimeTypeFromBuffer({
+    buffer: await readMagicHeader(
+      record.absolutePath,
+      getGeneratedAssetMimeType(record.relativePath) === "image/png" ? 8 : 5,
+    ),
+    relativePath: record.relativePath,
+  });
 }
 
 async function collectWorkspaceOutputFiles(workspaceDir: string) {
@@ -551,6 +740,56 @@ async function collectWorkspaceOutputFiles(workspaceDir: string) {
   await walk(outputsDir, SANDBOX_OUTPUTS_DIR);
 
   return collected.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+function validateBufferedGeneratedOutputs(
+  toolName: SandboxToolName,
+  assets: HostedGeneratedAssetPayload[],
+) {
+  const outputPolicy = TOOL_OUTPUT_POLICIES[toolName];
+  const outputFiles = assets.map((asset) => {
+    const decoded = decodeHostedGeneratedAsset(asset);
+
+    return {
+      ...decoded,
+      mimeType: detectValidatedMimeTypeFromBuffer({
+        buffer: decoded.buffer,
+        relativePath: decoded.relativePath,
+      }),
+    };
+  });
+
+  if (!outputPolicy) {
+    if (outputFiles.length > 0) {
+      throw new SandboxValidationError(
+        "run_data_analysis may not persist generated files. Print the final answer to stdout instead.",
+      );
+    }
+
+    return [] as BufferedOutputFileRecord[];
+  }
+
+  if (outputFiles.length !== 1) {
+    throw new SandboxValidationError(
+      `${toolName} must save exactly one file at ${outputPolicy.expectedRelativePath}.`,
+    );
+  }
+
+  const [outputFile] = outputFiles;
+
+  if (outputFile.relativePath !== outputPolicy.expectedRelativePath) {
+    throw new SandboxValidationError(
+      `${toolName} must save the generated file exactly at ${outputPolicy.expectedRelativePath}.`,
+    );
+  }
+
+  if (outputFile.mimeType !== outputPolicy.mimeType) {
+    throw new SandboxValidationError(
+      `${toolName} generated the wrong file type for ${outputPolicy.expectedRelativePath}.`,
+    );
+  }
+
+  return outputFiles;
 }
 
 async function validateGeneratedOutputs(toolName: SandboxToolName, workspaceDir: string) {
@@ -614,6 +853,56 @@ async function persistGeneratedAssets(
 
     await mkdir(path.dirname(absoluteStoragePath), { recursive: true });
     await copyFile(outputFile.absolutePath, absoluteStoragePath);
+
+    persistedAssets.push({
+      byteSize: outputFile.byteSize,
+      downloadUrl: buildGeneratedAssetDownloadUrl(runId, outputFile.relativePath),
+      expiresAt,
+      fileName: path.posix.basename(outputFile.relativePath),
+      mimeType: outputFile.mimeType,
+      relativePath: outputFile.relativePath,
+      runId,
+      storagePath,
+    });
+  }
+
+  await replaceSandboxGeneratedAssets({
+    assets: persistedAssets,
+    runId,
+  });
+
+  return persistedAssets.map((asset) => {
+    const { storagePath, ...publicAsset } = asset;
+    void storagePath;
+
+    return publicAsset;
+  });
+}
+
+async function persistBufferedGeneratedAssets(
+  outputFiles: BufferedOutputFileRecord[],
+  organizationSlug: string,
+  runId: string,
+) {
+  if (outputFiles.length === 0) {
+    await replaceSandboxGeneratedAssets({
+      assets: [],
+      runId,
+    });
+
+    return [] as GeneratedSandboxAsset[];
+  }
+
+  const { runRoot, storagePrefix } = await ensureSandboxAssetStorageRoot(organizationSlug, runId);
+  const expiresAt = Date.now() + SANDBOX_ARTIFACT_TTL_MS;
+  const persistedAssets: Array<GeneratedSandboxAsset & { storagePath: string }> = [];
+
+  for (const outputFile of outputFiles) {
+    const absoluteStoragePath = path.join(runRoot, ...outputFile.relativePath.split("/"));
+    const storagePath = path.posix.join(storagePrefix, outputFile.relativePath);
+
+    await mkdir(path.dirname(absoluteStoragePath), { recursive: true });
+    await writeFile(absoluteStoragePath, outputFile.buffer);
 
     persistedAssets.push({
       byteSize: outputFile.byteSize,
@@ -789,16 +1078,446 @@ async function runSandboxProcess(input: {
   });
 }
 
-function describeAdmissionRejection(reason: string) {
-  if (reason === "per-user-concurrency-limit") {
-    return "A sandbox job is already running for this user. Wait for it to finish before starting another.";
+async function withSandboxHeartbeat<T>(runId: string, operation: () => Promise<T>) {
+  await heartbeatSandboxRun(runId);
+  const intervalId = setInterval(() => {
+    void heartbeatSandboxRun(runId).catch((caughtError) => {
+      console.error("sandbox-supervisor.heartbeat_failed", caughtError);
+    });
+  }, SANDBOX_SUPERVISOR_HEARTBEAT_MS);
+
+  try {
+    return await operation();
+  } finally {
+    clearInterval(intervalId);
+  }
+}
+
+async function runLocalSandboxExecution(input: {
+  code: string;
+  inputFiles: string[];
+  limits: SandboxLimitsSnapshot;
+  organizationId: string;
+  organizationSlug: string;
+  role: UserRole;
+  runId: string;
+  toolName: SandboxToolName;
+}) {
+  const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, input.runId);
+  let cleanupStatus: "completed" | "failed" = "completed";
+  let cleanupError: string | null = null;
+
+  await markSandboxRunRunning({
+    runId: input.runId,
+    runner: SANDBOX_RUNNER,
+    workspacePath: workspaceDir,
+  });
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(workspaceDir, SANDBOX_OUTPUTS_DIR), { recursive: true });
+  await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
+
+  try {
+    return await withSandboxHeartbeat(input.runId, async () => {
+      const stagedFiles = await stageInputFiles(
+        input.inputFiles,
+        input.organizationId,
+        input.organizationSlug,
+        input.role,
+        workspaceDir,
+      );
+      const hasCsvInputs = stagedFiles.some((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
+      const { pythonExecutable, resolvedPythonExecutable, sandboxRoot, sitePackagesPath } =
+        await resolvePythonExecutable();
+
+      try {
+        await validatePythonSyntax(pythonExecutable, input.code);
+
+        if (hasCsvInputs) {
+          await validateCsvAnalysisCode(input.code, stagedFiles, workspaceDir);
+        }
+      } catch (caughtError) {
+        const message = asErrorMessage(
+          caughtError,
+          "Sandbox validation failed before execution.",
+        );
+        await completeSandboxRun({
+          failureReason: "validation-error",
+          generatedAssets: [],
+          runId: input.runId,
+          runner: SANDBOX_RUNNER,
+          status: "failed",
+          stderrText: message,
+          stdoutText: null,
+        });
+        return;
+      }
+
+      try {
+        const { stdout, stderr } = await runSandboxProcess({
+          code: input.code,
+          limits: input.limits,
+          resolvedPythonExecutable,
+          sandboxRoot,
+          sitePackagesPath,
+          workspaceDir,
+        });
+        await markSandboxRunFinalizing(input.runId);
+        const outputFiles = await validateGeneratedOutputs(input.toolName, workspaceDir);
+        const generatedAssets = await persistGeneratedAssets(
+          outputFiles,
+          input.organizationSlug,
+          input.runId,
+        );
+
+        await completeSandboxRun({
+          exitCode: 0,
+          generatedAssets,
+          runId: input.runId,
+          runner: SANDBOX_RUNNER,
+          status: "completed",
+          stderrText: stderr,
+          stdoutText: stdout,
+        });
+      } catch (caughtError) {
+        const stdout =
+          "stdout" in Object(caughtError)
+            ? String((caughtError as { stdout?: unknown }).stdout ?? "")
+            : "";
+        const stderr =
+          "stderr" in Object(caughtError)
+            ? String((caughtError as { stderr?: unknown }).stderr ?? "")
+            : "";
+        const signal =
+          "signal" in Object(caughtError)
+            ? String((caughtError as { signal?: unknown }).signal ?? "")
+            : "";
+        const killed =
+          "killed" in Object(caughtError)
+            ? Boolean((caughtError as { killed?: unknown }).killed)
+            : false;
+        const exitCode =
+          "code" in Object(caughtError) && typeof (caughtError as { code?: unknown }).code === "number"
+            ? ((caughtError as { code?: number }).code ?? -1)
+            : -1;
+        const isTimeout = killed || signal === "SIGTERM";
+        const status = isTimeout ? "timed_out" : "failed";
+        const failureReason =
+          caughtError instanceof SandboxValidationError
+            ? "output-validation-error"
+            : status === "timed_out"
+              ? "timeout"
+              : "execution-error";
+        const message =
+          caughtError instanceof Error
+            ? caughtError.message
+            : stderr.trim() || stdout.trim() || "Python sandbox execution failed.";
+
+        await completeSandboxRun({
+          exitCode,
+          failureReason,
+          generatedAssets: [],
+          runId: input.runId,
+          runner: SANDBOX_RUNNER,
+          status,
+          stderrText: stderr || message,
+          stdoutText: stdout,
+        });
+      }
+    });
+  } finally {
+    try {
+      await rm(workspaceDir, { force: true, recursive: true });
+    } catch (caughtError) {
+      cleanupStatus = "failed";
+      cleanupError = asErrorMessage(caughtError, "workspace-cleanup-failed");
+    }
+
+    await markSandboxRunCleanup({
+      cleanupError,
+      cleanupStatus,
+      incrementAttempt: true,
+      runId: input.runId,
+    });
+  }
+}
+
+async function processClaimedLocalSandboxRun(runId: string) {
+  const sandboxRun = await getSandboxRunByRunId(runId);
+  const executionPayload = await getSandboxRunExecutionPayload(runId);
+
+  if (!sandboxRun || !executionPayload) {
+    await completeSandboxRun({
+      failureReason: "sandbox-run-metadata-missing",
+      generatedAssets: [],
+      runId,
+      runner: SANDBOX_RUNNER,
+      status: "failed",
+      stderrText: "Sandbox run metadata could not be loaded.",
+      stdoutText: null,
+    });
+    return;
   }
 
-  if (reason === "global-concurrency-limit") {
-    return "The sandbox is at capacity right now. Retry after an active job finishes.";
+  await runLocalSandboxExecution({
+    code: executionPayload.code,
+    inputFiles: executionPayload.inputFiles,
+    limits: {
+      artifactMaxBytes: sandboxRun.artifactMaxBytes,
+      artifactTtlMs: sandboxRun.artifactTtlMs,
+      cpuLimitSeconds: sandboxRun.cpuLimitSeconds,
+      maxProcesses: sandboxRun.maxProcesses,
+      memoryLimitBytes: sandboxRun.memoryLimitBytes,
+      stdoutMaxBytes: sandboxRun.stdoutMaxBytes,
+      timeoutMs: sandboxRun.timeoutMs,
+    },
+    organizationId: executionPayload.organizationId,
+    organizationSlug: executionPayload.organizationSlug,
+    role: executionPayload.role,
+    runId: executionPayload.runId,
+    toolName: executionPayload.toolName as SandboxToolName,
+  });
+}
+
+async function runLocalSupervisorLoop() {
+  try {
+    while (true) {
+      localSupervisorWakeRequested = false;
+
+      try {
+        await reconcileStaleSandboxRuns();
+      } catch (caughtError) {
+        console.error("sandbox-supervisor.reconcile_failed", caughtError);
+      }
+
+      let claimedRun = null;
+
+      try {
+        claimedRun = await claimNextQueuedSandboxRun({
+          backend: "local_supervisor",
+          supervisorId: LOCAL_SUPERVISOR_ID,
+        });
+      } catch (caughtError) {
+        console.error("sandbox-supervisor.claim_failed", caughtError);
+      }
+
+      if (!claimedRun) {
+        break;
+      }
+
+      try {
+        await processClaimedLocalSandboxRun(claimedRun.runId);
+      } catch (caughtError) {
+        console.error("sandbox-supervisor.process_failed", caughtError);
+      }
+    }
+  } finally {
+    localSupervisorPromise = null;
+
+    if (localSupervisorWakeRequested) {
+      queueMicrotask(() => {
+        ensureLocalSandboxSupervisorRunning();
+      });
+    }
+  }
+}
+
+function ensureLocalSandboxSupervisorRunning() {
+  localSupervisorWakeRequested = true;
+
+  if (!localSupervisorPromise) {
+    localSupervisorPromise = runLocalSupervisorLoop().catch((caughtError) => {
+      console.error("sandbox-supervisor.worker_failed", caughtError);
+    });
+  }
+}
+
+async function executeHostedSandboxRun(options: {
+  code: string;
+  inputFiles: string[];
+  limits: SandboxLimitsSnapshot;
+  organizationId: string;
+  organizationSlug: string;
+  role: UserRole;
+  runId: string;
+  runtimeToolCallId?: string;
+  toolName: SandboxToolName;
+  turnId?: string;
+  userId: string;
+}) {
+  let response: Response;
+
+  await markSandboxRunRunning({
+    runId: options.runId,
+    runner: SANDBOX_HOSTED_RUNNER,
+    workspacePath: null,
+  });
+
+  try {
+    response = await fetchHostedSupervisor("/runs/execute", {
+      body: JSON.stringify({
+        code: options.code,
+        inputFiles: options.inputFiles,
+        limits: options.limits,
+        organizationId: options.organizationId,
+        organizationSlug: options.organizationSlug,
+        role: options.role,
+        runId: options.runId,
+        runtimeToolCallId: options.runtimeToolCallId ?? null,
+        toolName: options.toolName,
+        turnId: options.turnId ?? null,
+        userId: options.userId,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+  } catch (caughtError) {
+    const message = asErrorMessage(caughtError, "Hosted sandbox supervisor is unavailable.");
+    await rejectSandboxRun({
+      failureReason: "backend-unavailable",
+      runId: options.runId,
+      stderrText: message,
+    });
+    throw new SandboxUnavailableError(message, options.runId);
   }
 
-  return "Sandbox admission was rejected.";
+  if (!response.ok) {
+    const message = `Hosted sandbox supervisor request failed with HTTP ${response.status}.`;
+    await rejectSandboxRun({
+      failureReason: "backend-unavailable",
+      runId: options.runId,
+      stderrText: message,
+    });
+    throw new SandboxUnavailableError(message, options.runId);
+  }
+
+  const payload = (await response.json()) as HostedSupervisorExecutionResponse;
+
+  if (payload.status === "rejected") {
+    await rejectSandboxRun({
+      failureReason: payload.failureReason ?? "global-concurrency-limit",
+      runId: options.runId,
+      stderrText: payload.stderr ?? null,
+      stdoutText: payload.stdout ?? null,
+    });
+    return;
+  }
+
+  if (payload.status === "completed") {
+    try {
+      const generatedAssets = await persistBufferedGeneratedAssets(
+        validateBufferedGeneratedOutputs(options.toolName, payload.generatedAssets ?? []),
+        options.organizationSlug,
+        options.runId,
+      );
+
+      await completeSandboxRun({
+        exitCode: payload.exitCode ?? 0,
+        generatedAssets,
+        runId: options.runId,
+        runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+        status: "completed",
+        stderrText: payload.stderr ?? "",
+        stdoutText: payload.stdout ?? "",
+      });
+      return;
+    } catch (caughtError) {
+      const message = asErrorMessage(caughtError, "Hosted sandbox output validation failed.");
+      await completeSandboxRun({
+        exitCode: payload.exitCode ?? -1,
+        failureReason: "output-validation-error",
+        generatedAssets: [],
+        runId: options.runId,
+        runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+        status: "failed",
+        stderrText: message,
+        stdoutText: payload.stdout ?? "",
+      });
+      return;
+    }
+  }
+
+  await completeSandboxRun({
+    exitCode: payload.exitCode ?? -1,
+    failureReason:
+      payload.failureReason ??
+      (payload.status === "timed_out" ? "timeout" : "execution-error"),
+    generatedAssets: [],
+    runId: options.runId,
+    runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+    status: payload.status,
+    stderrText: payload.stderr ?? "",
+    stdoutText: payload.stdout ?? "",
+  });
+}
+
+function buildDerivedStagedFiles(inputFiles: string[]) {
+  return inputFiles.map((sourcePath) => ({
+    sourcePath,
+    stagedPath: path.posix.join("inputs", sourcePath),
+  }));
+}
+
+async function finalizeSandboxRunResult(
+  sandboxRunId: string,
+  limits: SandboxLimitsSnapshot,
+): Promise<SandboxedCommandResult> {
+  const sandboxRun = await waitForSandboxRunTerminal(sandboxRunId, SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS);
+  const stderr = sandboxRun.stderrText ?? "";
+  const stdout = sandboxRun.stdoutText ?? "";
+
+  if (sandboxRun.status === "completed") {
+    return {
+      exitCode: sandboxRun.exitCode ?? 0,
+      generatedAssets: sandboxRun.generatedAssets.map((asset) => ({
+        byteSize: asset.byteSize,
+        downloadUrl: buildGeneratedAssetDownloadUrl(sandboxRunId, asset.relativePath),
+        expiresAt: asset.expiresAt,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        relativePath: asset.relativePath,
+        runId: sandboxRunId,
+      })),
+      limits,
+      runner: sandboxRun.runner,
+      sandboxRunId,
+      stagedFiles: buildDerivedStagedFiles(sandboxRun.inputFiles),
+      status: "completed",
+      stderr,
+      stdout,
+    };
+  }
+
+  if (sandboxRun.status === "rejected") {
+    if (sandboxRun.failureReason === "backend-unavailable") {
+      throw new SandboxUnavailableError(stderr || getRejectionMessage(sandboxRun.failureReason), sandboxRunId);
+    }
+
+    throw new SandboxAdmissionError(getRejectionMessage(sandboxRun.failureReason), sandboxRunId);
+  }
+
+  if (sandboxRun.status === "abandoned") {
+    throw new SandboxUnavailableError(
+      stderr || "Sandbox run was abandoned during supervisor reconciliation.",
+      sandboxRunId,
+    );
+  }
+
+  const failureMessage =
+    stderr.trim() || stdout.trim() || sandboxRun.failureReason || "Python sandbox execution failed.";
+
+  if (isValidationFailureReason(sandboxRun.failureReason)) {
+    throw new SandboxValidationError(failureMessage, sandboxRunId);
+  }
+
+  throw new SandboxExecutionError(failureMessage, {
+    exitCode: sandboxRun.exitCode ?? -1,
+    sandboxRunId,
+    status: sandboxRun.status === "timed_out" ? "timed_out" : "failed",
+    stderr,
+    stdout,
+  });
 }
 
 export async function executeSandboxedCommand(options: {
@@ -818,13 +1537,15 @@ export async function executeSandboxedCommand(options: {
     throw new Error("Sandbox code must not be empty.");
   }
 
-  await validateHostSandboxDependencies();
+  await reconcileStaleSandboxRuns();
   await cleanupExpiredSandboxArtifacts({
     organizationId: options.organizationId,
     organizationSlug: options.organizationSlug,
   });
 
-  const admission = await startSandboxRun({
+  const queuedRun = await queueSandboxRun({
+    code: normalizedCode,
+    inputFiles: options.inputFiles ?? [],
     organizationId: options.organizationId,
     runtimeToolCallId: options.runtimeToolCallId,
     toolName: options.toolName,
@@ -832,158 +1553,44 @@ export async function executeSandboxedCommand(options: {
     userId: options.userId,
   });
 
-  if (admission.rejected) {
-    if (options.runtimeToolCallId && options.turnId) {
-      await attachSandboxRunToToolCall({
-        runtimeToolCallId: options.runtimeToolCallId,
-        sandboxRunId: admission.runId,
-        turnId: options.turnId,
-      });
-    }
-
-    throw new SandboxAdmissionError(describeAdmissionRejection(admission.reason), admission.runId);
-  }
-
-  const sandboxRunId = admission.runId;
-  const limits = admission.limits;
-  const workspaceDir = path.join(SANDBOX_WORKSPACE_DIR, sandboxRunId);
-  let cleanupStatus: "completed" | "failed" = "completed";
-  let cleanupError: string | null = null;
-
   if (options.runtimeToolCallId && options.turnId) {
     await attachSandboxRunToToolCall({
       runtimeToolCallId: options.runtimeToolCallId,
-      sandboxRunId,
+      sandboxRunId: queuedRun.runId,
       turnId: options.turnId,
     });
   }
 
-  await mkdir(workspaceDir, { recursive: true });
-  await mkdir(path.join(workspaceDir, SANDBOX_OUTPUTS_DIR), { recursive: true });
-  await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
+  if (queuedRun.backend === "local_supervisor") {
+    const health = await getSandboxBackendHealth();
 
-  try {
-    const stagedFiles = await stageInputFiles(
-      options.inputFiles ?? [],
-      options.organizationId,
-      options.organizationSlug,
-      options.role,
-      workspaceDir,
-    );
-    const hasCsvInputs = stagedFiles.some((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
-    const { pythonExecutable, resolvedPythonExecutable, sandboxRoot, sitePackagesPath } =
-      await resolvePythonExecutable();
-
-    try {
-      await validatePythonSyntax(pythonExecutable, normalizedCode);
-
-      if (hasCsvInputs) {
-        await validateCsvAnalysisCode(normalizedCode, stagedFiles, workspaceDir);
-      }
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Sandbox validation failed before execution.";
-      await completeSandboxRun({
-        failureReason: "validation-error",
-        generatedAssets: [],
-        runId: sandboxRunId,
-        status: "failed",
+    if (!health.available) {
+      await rejectSandboxRun({
+        failureReason: "backend-unavailable",
+        runId: queuedRun.runId,
+        stderrText: health.detail,
       });
-      throw new SandboxValidationError(message, sandboxRunId);
+      throw new SandboxUnavailableError(health.detail, queuedRun.runId);
     }
 
-    try {
-      const { stdout, stderr } = await runSandboxProcess({
-        code: normalizedCode,
-        limits,
-        resolvedPythonExecutable,
-        sandboxRoot,
-        sitePackagesPath,
-        workspaceDir,
-      });
-      const outputFiles = await validateGeneratedOutputs(options.toolName, workspaceDir);
-      const generatedAssets = await persistGeneratedAssets(
-        outputFiles,
-        options.organizationSlug,
-        sandboxRunId,
-      );
-
-      await completeSandboxRun({
-        exitCode: 0,
-        generatedAssets,
-        runId: sandboxRunId,
-        status: "completed",
-      });
-
-      return {
-        exitCode: 0,
-        generatedAssets,
-        limits,
-        runner: SANDBOX_RUNNER,
-        sandboxRunId,
-        stagedFiles,
-        status: "completed",
-        stderr,
-        stdout,
-      };
-    } catch (caughtError) {
-      const stdout = "stdout" in Object(caughtError) ? String((caughtError as { stdout?: unknown }).stdout ?? "") : "";
-      const stderr = "stderr" in Object(caughtError) ? String((caughtError as { stderr?: unknown }).stderr ?? "") : "";
-      const signal = "signal" in Object(caughtError) ? String((caughtError as { signal?: unknown }).signal ?? "") : "";
-      const killed = "killed" in Object(caughtError) ? Boolean((caughtError as { killed?: unknown }).killed) : false;
-      const exitCode =
-        "code" in Object(caughtError) && typeof (caughtError as { code?: unknown }).code === "number"
-          ? ((caughtError as { code?: number }).code ?? -1)
-          : -1;
-      const isTimeout = killed || signal === "SIGTERM";
-      const status = isTimeout ? "timed_out" : "failed";
-      const failureReason =
-        caughtError instanceof SandboxValidationError
-          ? "output-validation-error"
-          : status === "timed_out"
-            ? "timeout"
-            : "execution-error";
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : stderr.trim() || stdout.trim() || "Python sandbox execution failed.";
-
-      await completeSandboxRun({
-        exitCode,
-        failureReason,
-        generatedAssets: [],
-        runId: sandboxRunId,
-        status,
-      });
-
-      if (caughtError instanceof SandboxValidationError) {
-        throw new SandboxValidationError(message, sandboxRunId);
-      }
-
-      throw new SandboxExecutionError(message, {
-        exitCode,
-        sandboxRunId,
-        status,
-        stderr,
-        stdout,
-      });
-    }
-  } finally {
-    try {
-      await rm(workspaceDir, { force: true, recursive: true });
-    } catch (caughtError) {
-      cleanupStatus = "failed";
-      cleanupError = caughtError instanceof Error ? caughtError.message : String(caughtError);
-    }
-
-    await markSandboxRunCleanup({
-      cleanupError,
-      cleanupStatus,
-      runId: sandboxRunId,
+    ensureLocalSandboxSupervisorRunning();
+  } else {
+    await executeHostedSandboxRun({
+      code: normalizedCode,
+      inputFiles: options.inputFiles ?? [],
+      limits: queuedRun.limits,
+      organizationId: options.organizationId,
+      organizationSlug: options.organizationSlug,
+      role: options.role,
+      runId: queuedRun.runId,
+      runtimeToolCallId: options.runtimeToolCallId,
+      toolName: options.toolName,
+      turnId: options.turnId,
+      userId: options.userId,
     });
   }
+
+  return finalizeSandboxRunResult(queuedRun.runId, queuedRun.limits);
 }
 
 export function assertValidSandboxRunId(runId: string) {

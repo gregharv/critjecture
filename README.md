@@ -136,7 +136,8 @@ The Python execution environment is isolated under `packages/python-sandbox`.
 Key properties:
 
 - interpreter is fixed to the project sandbox `.venv`
-- execution runs through a Linux `bubblewrap` sandbox with no normal network access
+- `single_org` runs through a local supervisor that launches Linux `bubblewrap`
+- `hosted` must use a dedicated remote sandbox supervisor service
 - execution uses a fresh workspace under `/tmp/workspace/<run-id>` with immediate cleanup after finalization
 - inherited environment variables are stripped before Python runs
 - approved company files are staged into `inputs/`
@@ -165,7 +166,8 @@ storage/                  Default local runtime storage root (gitignored)
 - Node.js 20.9 or newer
 - `pnpm` 10.x
 - `uv` 0.11 or newer
-- Linux host with `bubblewrap` and `prlimit`
+- `single_org`: Linux host with `bubblewrap` and `prlimit`
+- `hosted`: `CRITJECTURE_SANDBOX_SUPERVISOR_URL` pointing at the dedicated sandbox supervisor
 - `pdftotext` available on the host for uploaded PDF ingestion
 - `OPENAI_API_KEY` for live chat
 
@@ -213,6 +215,12 @@ CRITJECTURE_DAILY_MODEL_COST_CAP_USD_USER=3
 CRITJECTURE_DAILY_MODEL_COST_CAP_USD_ORGANIZATION=20
 CRITJECTURE_DAILY_SANDBOX_RUN_CAP_USER=25
 CRITJECTURE_DAILY_SANDBOX_RUN_CAP_ORGANIZATION=100
+CRITJECTURE_SANDBOX_SUPERVISOR_HEARTBEAT_MS=1000
+CRITJECTURE_SANDBOX_SUPERVISOR_LEASE_MS=25000
+CRITJECTURE_SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS=30000
+CRITJECTURE_SANDBOX_SUPERVISOR_URL=
+CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN=
+CRITJECTURE_SANDBOX_SUPERVISOR_TIMEOUT_MS=15000
 CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
 CRITJECTURE_ALERT_WEBHOOK_URL=
 ```

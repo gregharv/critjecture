@@ -53,9 +53,19 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockSandboxUnavailableError extends Error {
+    sandboxRunId: string | null;
+
+    constructor(message: string, sandboxRunId: string | null = null) {
+      super(message);
+      this.sandboxRunId = sandboxRunId;
+    }
+  }
+
   return {
     SandboxAdmissionError: MockSandboxAdmissionError,
     SandboxExecutionError: MockSandboxExecutionError,
+    SandboxUnavailableError: MockSandboxUnavailableError,
     SandboxValidationError: MockSandboxValidationError,
     beginObservedRequest: vi.fn(() => ({ requestId: "obs-1" })),
     buildCsvSchemas: vi.fn(),
@@ -87,6 +97,7 @@ vi.mock("@/lib/python-sandbox", async () => {
     ...actual,
     SandboxAdmissionError: mocks.SandboxAdmissionError,
     SandboxExecutionError: mocks.SandboxExecutionError,
+    SandboxUnavailableError: mocks.SandboxUnavailableError,
     SandboxValidationError: mocks.SandboxValidationError,
     executeSandboxedCommand: mocks.executeSandboxedCommand,
   };
@@ -206,6 +217,24 @@ describe("POST /api/data-analysis/run", () => {
       error: "Unknown CSV column.",
       sandboxRunId: "run-2",
       status: "failed",
+    });
+  });
+
+  it("returns sandbox unavailable failures as 503", async () => {
+    mocks.executeSandboxedCommand.mockRejectedValue(
+      new mocks.SandboxUnavailableError("Sandbox backend is unavailable.", "run-unavailable"),
+    );
+
+    const response = await POST(createJsonRequest("http://localhost/api/data-analysis/run", {
+      code: "print('ok')",
+    }));
+    const body = await readJson<{ error: string; sandboxRunId?: string; status?: string }>(response);
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: "Sandbox backend is unavailable.",
+      sandboxRunId: "run-unavailable",
+      status: "rejected",
     });
   });
 

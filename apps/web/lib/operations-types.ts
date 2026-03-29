@@ -2,6 +2,7 @@ import type {
   OperationsPoliciesSnapshot,
   OperationsRouteGroup,
 } from "@/lib/operations-policy";
+import type { SandboxExecutionBackend } from "@/lib/sandbox-policy";
 
 export type OperationalAlertSeverity = "warning" | "critical";
 export type OperationalAlertStatus = "open" | "resolved";
@@ -16,6 +17,18 @@ export type HealthCheckResult = {
 
 export type HealthSummary = {
   checks: HealthCheckResult[];
+  sandbox: {
+    abandonedRuns: number;
+    activeRuns: number;
+    available: boolean;
+    backend: SandboxExecutionBackend;
+    detail: string;
+    lastHeartbeatAt: number | null;
+    lastReconciledAt: number | null;
+    queuedRuns: number;
+    rejectedRuns: number;
+    staleRuns: number;
+  };
   status: HealthCheckStatus;
   timestamp: string;
 };

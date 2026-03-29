@@ -3,7 +3,6 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
-import path from "node:path";
 
 import {
   and,
@@ -20,7 +19,7 @@ import {
 import { NextResponse } from "next/server";
 
 import type { SessionUser } from "@/lib/auth-state";
-import { ensureStorageRoot, resolveRepositoryRoot } from "@/lib/app-paths";
+import { ensureStorageRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
 import {
   operationalAlerts,
@@ -55,7 +54,8 @@ import type {
   OperationsSummaryResponse,
   UsageActorSummary,
 } from "@/lib/operations-types";
-import { SANDBOX_BWRAP_PATH, SANDBOX_PRLIMIT_PATH } from "@/lib/sandbox-policy";
+import { getSandboxBackendHealth } from "@/lib/python-sandbox";
+import { getSandboxHealthSnapshot } from "@/lib/sandbox-runs";
 
 type RequestOutcome = "blocked" | "error" | "ok" | "rate_limited";
 
@@ -148,21 +148,6 @@ function getWindowMs(window: "24h" | "7d") {
 
 function getBucketStartAt(timestamp: number, bucketWidthMs = ONE_MINUTE_MS) {
   return Math.floor(timestamp / bucketWidthMs) * bucketWidthMs;
-}
-
-async function pathExists(targetPath: string, mode = fsConstants.F_OK) {
-  try {
-    await access(targetPath, mode);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolvePythonSandboxExecutablePath() {
-  const repositoryRoot = await resolveRepositoryRoot();
-
-  return path.join(repositoryRoot, "packages/python-sandbox/.venv/bin/python");
 }
 
 async function sendAlertWebhook(payload: Record<string, unknown>) {
@@ -684,6 +669,49 @@ async function evaluateDynamicAlerts(input: {
   }
 }
 
+async function evaluateSandboxOperationalAlerts() {
+  const [backendHealth, sandboxHealth] = await Promise.all([
+    getSandboxBackendHealth(),
+    getSandboxHealthSnapshot(),
+  ]);
+
+  if (!backendHealth.available) {
+    await upsertOperationalAlert({
+      alertType: "sandbox-unavailable",
+      dedupeKey: "sandbox:backend:unavailable",
+      message: backendHealth.detail,
+      severity: "critical",
+      title: "Sandbox Backend Unavailable",
+    });
+  } else {
+    await resolveOperationalAlert("sandbox:backend:unavailable");
+  }
+
+  if (sandboxHealth.staleRuns > 0 || sandboxHealth.abandonedRuns > 0) {
+    await upsertOperationalAlert({
+      alertType: "sandbox-reconciliation",
+      dedupeKey: "sandbox:reconciliation:stale",
+      message: `${sandboxHealth.staleRuns} stale sandbox runs and ${sandboxHealth.abandonedRuns} abandoned runs are currently recorded.`,
+      severity: "critical",
+      title: "Sandbox Reconciliation Needed",
+    });
+  } else {
+    await resolveOperationalAlert("sandbox:reconciliation:stale");
+  }
+
+  if (sandboxHealth.rejectedRuns >= 3) {
+    await upsertOperationalAlert({
+      alertType: "sandbox-capacity",
+      dedupeKey: "sandbox:capacity:rejections",
+      message: `${sandboxHealth.rejectedRuns} sandbox runs were rejected in the current retained window.`,
+      severity: "warning",
+      title: "Sandbox Capacity Pressure",
+    });
+  } else {
+    await resolveOperationalAlert("sandbox:capacity:rejections");
+  }
+}
+
 export async function runOperationsMaintenance() {
   const now = Date.now();
 
@@ -769,6 +797,11 @@ export async function runOperationsMaintenance() {
     db.delete(operationalAlerts).where(alertsCleanupWhere),
   ]);
 
+  await evaluateSandboxOperationalAlerts().catch((caughtError) => {
+    logStructured("operations.sandbox_alert_evaluation_failed", {
+      error: caughtError instanceof Error ? caughtError.message : "sandbox-alert-evaluation-failed",
+    });
+  });
   await runGovernanceMaintenance();
 }
 
@@ -1082,6 +1115,10 @@ export function clampChatMaxTokens(value: number | undefined) {
 export async function getHealthSummary(): Promise<HealthSummary> {
   const checks: HealthCheckResult[] = [];
   const now = Date.now();
+  const [sandboxBackendHealth, sandboxSnapshot] = await Promise.all([
+    getSandboxBackendHealth(),
+    getSandboxHealthSnapshot(),
+  ]);
 
   try {
     const db = await getAppDatabase();
@@ -1117,29 +1154,27 @@ export async function getHealthSummary(): Promise<HealthSummary> {
     });
   }
 
-  const pythonExecutable = await resolvePythonSandboxExecutablePath();
-  const sandboxDeps = [
-    SANDBOX_BWRAP_PATH,
-    SANDBOX_PRLIMIT_PATH,
-    pythonExecutable,
-  ];
-  const missingSandboxDeps: string[] = [];
-
-  for (const dependencyPath of sandboxDeps) {
-    if (!(await pathExists(dependencyPath, fsConstants.X_OK))) {
-      missingSandboxDeps.push(dependencyPath);
-    }
-  }
-
-  if (missingSandboxDeps.length > 0) {
+  if (!sandboxBackendHealth.available) {
     checks.push({
-      detail: `Sandbox dependencies missing: ${missingSandboxDeps.join(", ")}.`,
+      detail: sandboxBackendHealth.detail,
+      name: "sandbox",
+      status: "fail",
+    });
+  } else if (sandboxSnapshot.staleRuns > 0 || sandboxSnapshot.abandonedRuns > 0) {
+    checks.push({
+      detail: `${sandboxSnapshot.staleRuns} stale runs and ${sandboxSnapshot.abandonedRuns} abandoned runs are currently recorded.`,
+      name: "sandbox",
+      status: "degraded",
+    });
+  } else if (sandboxSnapshot.queuedRuns > 0) {
+    checks.push({
+      detail: `${sandboxSnapshot.queuedRuns} sandbox runs are waiting for supervisor capacity.`,
       name: "sandbox",
       status: "degraded",
     });
   } else {
     checks.push({
-      detail: "Sandbox host dependencies are present.",
+      detail: sandboxBackendHealth.detail,
       name: "sandbox",
       status: "ok",
     });
@@ -1202,6 +1237,11 @@ export async function getHealthSummary(): Promise<HealthSummary> {
 
   return {
     checks,
+    sandbox: {
+      ...sandboxSnapshot,
+      available: sandboxBackendHealth.available,
+      detail: sandboxBackendHealth.detail,
+    },
     status: hasFail ? "fail" : hasDegraded ? "degraded" : "ok",
     timestamp: new Date().toISOString(),
   };

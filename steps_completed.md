@@ -1413,3 +1413,87 @@ Step 19 was implemented as an owner-managed admin and governance layer on top of
   - `pnpm --filter web build`
   - `pnpm db:migrate`
   - hosted provisioning smoke test against a temporary SQLite database in `/tmp`
+
+## Step 20: Production Sandbox Hardening
+
+### What Was Implemented
+
+Step 20 was implemented as a supervisor-backed sandbox execution layer that separates request handling from sandbox lifecycle ownership, makes hosted deployments fail closed unless a dedicated supervisor service is configured, and expands operator visibility into sandbox capacity and recovery state.
+
+- Reworked sandbox persistence and migrations:
+  - `apps/web/drizzle/0007_step20_sandbox_supervisor.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds:
+    - queued/starting/running/finalizing sandbox statuses
+    - backend selection for `local_supervisor` vs `hosted_supervisor`
+    - persisted sandbox code and input-file metadata
+    - supervisor lease, heartbeat, workspace, and reconciliation fields
+    - richer cleanup attempt tracking
+- Rebuilt sandbox run orchestration:
+  - `apps/web/lib/sandbox-runs.ts`
+  - now:
+    - queues runs durably before execution
+    - claims work through a supervisor-owned lifecycle instead of request-local child ownership
+    - enforces per-user and global active-run ceilings at supervisor claim time
+    - reconciles stale leased runs and cleans orphaned workspaces
+    - lets requests wait for durable terminal run state instead of assuming in-process continuity
+- Reworked sandbox execution backends:
+  - `apps/web/lib/python-sandbox.ts`
+  - `apps/web/lib/sandbox-policy.ts`
+  - now:
+    - runs `single_org` sandbox work through a local in-app supervisor loop that launches `bubblewrap` + `prlimit`
+    - requires `hosted` deployments to use a dedicated remote sandbox supervisor service
+    - fails closed with `SandboxUnavailableError` when the selected backend is unhealthy or unconfigured
+    - preserves the existing synchronous route contract by queueing, waking the backend, and waiting for terminal completion
+- Updated sandbox-backed routes:
+  - `apps/web/app/api/data-analysis/run/route.ts`
+  - `apps/web/app/api/visual-graph/run/route.ts`
+  - `apps/web/app/api/document/generate/route.ts`
+  - adds:
+    - explicit `503` handling for sandbox backend unavailability
+    - preserved rejection/error correlation through `sandboxRunId`
+- Expanded operations and health visibility:
+  - `apps/web/lib/operations.ts`
+  - `apps/web/lib/operations-types.ts`
+  - `apps/web/components/operations-page-client.tsx`
+  - now:
+    - reports sandbox backend mode, availability, active/queued/rejected/stale/abandoned counts, and reconciliation timing
+    - opens alerts for sandbox backend unavailability, reconciliation pressure, and capacity pressure
+- Updated deployment and environment docs:
+  - `README.md`
+  - `deployment.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/.env.local.example`
+  - `sandbox.md`
+
+### Current Step 20 Behavior
+
+- `single_org`
+  - sandbox requests enqueue a durable run row, then wake the local supervisor loop
+  - the local supervisor claims queued runs, enforces concurrency at claim time, runs `bubblewrap` + `prlimit`, and owns cleanup/finalization
+- `hosted`
+  - sandbox requests still enqueue a durable run row
+  - the web app must submit the run to a dedicated remote sandbox supervisor service
+  - hosted mode does not fall back to in-web-process `bubblewrap` execution
+- Sandbox lifecycle
+  - runs move through `queued`, `starting`, `running`, `finalizing`, and terminal states
+  - stale leased runs are reconciled as `abandoned`
+  - orphaned `/tmp/workspace/<run-id>` directories are cleaned during reconciliation
+- Operator visibility
+  - `/api/health` and `/admin/operations` now show sandbox backend availability plus capacity and recovery metrics
+  - sandbox backend failures and repeated rejection/reconciliation pressure now open operational alerts
+
+### Important Implementation Details
+
+- Step 20 intentionally keeps the user-facing sandbox routes synchronous:
+  - it does not add async job UX or polling-based sandbox interactions
+- Hosted isolation is now explicit:
+  - the app expects a remote supervisor contract instead of pretending hosted can share the same trust model as local `bubblewrap`
+  - the hosted web app side is implemented, but an actual supervisor service still has to be deployed
+- Local execution still uses Linux namespaces and host binaries:
+  - stronger container or VM-backed hosted execution remains future platform work if needed
+- Verification completed for this implementation:
+  - `pnpm --filter web test`
+  - `pnpm --filter web exec tsc --noEmit`
+  - `pnpm --filter web build`
+  - `pnpm db:migrate`

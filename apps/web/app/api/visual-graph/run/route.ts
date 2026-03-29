@@ -16,6 +16,7 @@ import {
   SandboxAdmissionError,
   executeSandboxedCommand,
   SandboxExecutionError,
+  SandboxUnavailableError,
   SandboxValidationError,
   type GeneratedSandboxAsset,
 } from "@/lib/python-sandbox";
@@ -324,6 +325,23 @@ export async function POST(request: Request) {
       ],
     });
   } catch (caughtError) {
+    if (caughtError instanceof SandboxUnavailableError) {
+      return finalizeObservedRequest(observed, {
+        errorCode: "sandbox_unavailable",
+        metadata: {
+          sandboxRunId: caughtError.sandboxRunId ?? null,
+          status: "rejected",
+        },
+        outcome: "error",
+        response: buildObservedErrorResponse(caughtError.message, 503, {
+          sandboxRunId: caughtError.sandboxRunId ?? undefined,
+          status: "rejected",
+        }),
+        sandboxRunId: caughtError.sandboxRunId ?? null,
+        toolName: "generate_visual_graph",
+      });
+    }
+
     if (caughtError instanceof SandboxAdmissionError) {
       return finalizeObservedRequest(observed, {
         errorCode: "sandbox_admission_rejected",

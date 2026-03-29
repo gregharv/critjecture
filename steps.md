@@ -2,31 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 19 already shipped rate limits, operations dashboards, tests, uploads, chat history, and admin/governance controls. The remaining gaps are narrower and more operational.
-
-## Step 20: Production Sandbox Hardening
-
-### Goal
-
-Raise the current `bubblewrap` + `prlimit` Python sandbox from a careful local execution model to a production-grade isolation boundary.
-
-### What Should Be Implemented
-
-- introduce a dedicated sandbox-run supervisor instead of relying only on request-local child process lifecycle
-- enforce explicit global and per-user concurrency ceilings for active sandbox runs
-- add stale-run reconciliation and cleanup recovery on process restart
-- make sandbox dependency checks fail closed and visible in operations alerts
-- tighten artifact and workspace lifecycle handling so abandoned runs cannot leave orphaned state behind
-- define the hosted deployment isolation strategy more concretely:
-  - either a dedicated worker/service boundary
-  - or a stronger container/VM-backed runner model
-
-### Acceptance Criteria
-
-- sandbox execution has bounded concurrency and restart-safe cleanup behavior
-- stale or abandoned runs are reconciled automatically
-- operations surfaces clearly show sandbox capacity and failure states
-- hosted deployment no longer depends on the same trust model as a local subprocess sandbox
+Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 20 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, and supervisor-backed sandbox hardening. The remaining gaps are narrower and more operational.
 
 ## Step 21: Backup Verification and Disaster Recovery
 
@@ -115,7 +91,7 @@ Package Critjecture for real customer security review and repeatable deployment 
   - tenant-isolation boundaries in hosted mode
   - privacy posture for uploaded customer data and audit records
 - add a concise security review pack for customer or internal review
-- reconcile `production_readiness.md`, `README.md`, deployment docs, and admin/compliance docs so they reflect the post-Step-19 system accurately
+- reconcile `production_readiness.md`, `README.md`, deployment docs, and admin/compliance docs so they reflect the post-Step-20 system accurately
 - define the supported production envelope clearly:
   - on-prem single-org
   - hosted Railway multi-org
@@ -139,6 +115,10 @@ Package Critjecture for real customer security review and repeatable deployment 
   - compliance settings and governance jobs
   - export-gated purge flows
   - hosted multi-org support for Railway
+- Step 20 is complete:
+  - supervisor-backed sandbox lifecycle and reconciliation
+  - fail-closed hosted sandbox backend expectations
+  - sandbox capacity and recovery metrics in health/operations surfaces
 - The main remaining blockers are now operational hardening, not core product surface area.
 - A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
-- Hosted production has a higher bar than on-prem because sandbox isolation, recovery, and observability requirements are stricter there.
+- Hosted production still has a higher bar than on-prem because the web app now expects a dedicated sandbox supervisor service and broader incident/runbook work remains.

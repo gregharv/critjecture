@@ -241,6 +241,65 @@ export function OperationsPageClient() {
           <section className="operations-panel">
             <div className="operations-panel__header">
               <div>
+                <div className="operations-panel__eyebrow">Sandbox Supervisor</div>
+                <h2>Capacity and Recovery</h2>
+              </div>
+              <span
+                className={`operations-status operations-status--${summary.health.sandbox.available ? "ok" : "critical"}`}
+              >
+                {summary.health.sandbox.backend}
+              </span>
+            </div>
+            <div className="operations-metrics">
+              <article className="operations-metric">
+                <span className="operations-metric__label">Active</span>
+                <strong>{formatInteger(summary.health.sandbox.activeRuns)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Queued</span>
+                <strong>{formatInteger(summary.health.sandbox.queuedRuns)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Rejected</span>
+                <strong>{formatInteger(summary.health.sandbox.rejectedRuns)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Abandoned</span>
+                <strong>{formatInteger(summary.health.sandbox.abandonedRuns)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Stale</span>
+                <strong>{formatInteger(summary.health.sandbox.staleRuns)}</strong>
+              </article>
+            </div>
+            <p>{summary.health.sandbox.detail}</p>
+            <div className="operations-health-list">
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Last reconciliation</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.sandbox.lastReconciledAt
+                      ? formatTimestamp(summary.health.sandbox.lastReconciledAt)
+                      : "Never"}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Last heartbeat</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.sandbox.lastHeartbeatAt
+                      ? formatTimestamp(summary.health.sandbox.lastHeartbeatAt)
+                      : "Never"}
+                  </span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section className="operations-panel">
+            <div className="operations-panel__header">
+              <div>
                 <div className="operations-panel__eyebrow">Open Alerts</div>
                 <h2>Warnings and Incidents</h2>
               </div>

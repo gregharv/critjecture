@@ -201,12 +201,25 @@ export const sandboxRuns = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     runtimeToolCallId: text("runtime_tool_call_id"),
     toolName: text("tool_name").notNull(),
+    backend: text("backend", { enum: ["local_supervisor", "hosted_supervisor"] })
+      .notNull()
+      .default("local_supervisor"),
     runner: text("runner").notNull().default("bubblewrap"),
     status: text("status", {
-      enum: ["running", "completed", "failed", "timed_out", "rejected", "abandoned"],
+      enum: [
+        "queued",
+        "starting",
+        "running",
+        "finalizing",
+        "completed",
+        "failed",
+        "timed_out",
+        "rejected",
+        "abandoned",
+      ],
     })
       .notNull()
-      .default("running"),
+      .default("queued"),
     failureReason: text("failure_reason"),
     exitCode: integer("exit_code"),
     timeoutMs: integer("timeout_ms").notNull().default(0),
@@ -216,6 +229,14 @@ export const sandboxRuns = sqliteTable(
     stdoutMaxBytes: integer("stdout_max_bytes").notNull().default(0),
     artifactMaxBytes: integer("artifact_max_bytes").notNull().default(0),
     artifactTtlMs: integer("artifact_ttl_ms").notNull().default(0),
+    codeText: text("code_text").notNull().default(""),
+    inputFilesJson: text("input_files_json").notNull().default("[]"),
+    stdoutText: text("stdout_text"),
+    stderrText: text("stderr_text"),
+    supervisorId: text("supervisor_id"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    workspacePath: text("workspace_path"),
     cleanupStatus: text("cleanup_status", {
       enum: ["pending", "completed", "failed", "skipped"],
     })
@@ -223,6 +244,8 @@ export const sandboxRuns = sqliteTable(
       .default("pending"),
     cleanupCompletedAt: integer("cleanup_completed_at"),
     cleanupError: text("cleanup_error"),
+    cleanupAttemptCount: integer("cleanup_attempt_count").notNull().default(0),
+    reconciliationCount: integer("reconciliation_count").notNull().default(0),
     generatedAssetsJson: text("generated_assets_json").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
     startedAt: integer("started_at").notNull().default(0),
@@ -230,8 +253,12 @@ export const sandboxRuns = sqliteTable(
   },
   (table) => [
     check(
+      "sandbox_runs_backend_check",
+      sql`${table.backend} in ('local_supervisor', 'hosted_supervisor')`,
+    ),
+    check(
       "sandbox_runs_status_check",
-      sql`${table.status} in ('running', 'completed', 'failed', 'timed_out', 'rejected', 'abandoned')`,
+      sql`${table.status} in ('queued', 'starting', 'running', 'finalizing', 'completed', 'failed', 'timed_out', 'rejected', 'abandoned')`,
     ),
     check(
       "sandbox_runs_cleanup_status_check",
@@ -241,6 +268,15 @@ export const sandboxRuns = sqliteTable(
     index("sandbox_runs_organization_id_created_at_idx").on(
       table.organizationId,
       table.createdAt,
+    ),
+    index("sandbox_runs_backend_status_created_at_idx").on(
+      table.backend,
+      table.status,
+      table.createdAt,
+    ),
+    index("sandbox_runs_status_lease_expires_at_idx").on(
+      table.status,
+      table.leaseExpiresAt,
     ),
     index("sandbox_runs_status_started_at_idx").on(table.status, table.startedAt),
     index("sandbox_runs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
