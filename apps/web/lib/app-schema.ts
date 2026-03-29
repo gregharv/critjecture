@@ -16,11 +16,16 @@ export const users = sqliteTable(
     email: text("email").notNull().unique(),
     name: text("name"),
     role: text("role", { enum: ["intern", "owner"] }).notNull(),
+    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
     passwordHash: text("password_hash").notNull(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (table) => [check("users_role_check", sql`${table.role} in ('intern', 'owner')`)],
+  (table) => [
+    check("users_role_check", sql`${table.role} in ('intern', 'owner')`),
+    check("users_status_check", sql`${table.status} in ('active', 'suspended')`),
+    index("users_status_idx").on(table.status),
+  ],
 );
 
 export const organizations = sqliteTable(
@@ -655,5 +660,93 @@ export const operationalAlerts = sqliteTable(
       table.organizationId,
       table.lastSeenAt,
     ),
+  ],
+);
+
+export const organizationComplianceSettings = sqliteTable(
+  "organization_compliance_settings",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requestLogRetentionDays: integer("request_log_retention_days"),
+    usageRetentionDays: integer("usage_retention_days"),
+    alertRetentionDays: integer("alert_retention_days"),
+    chatHistoryRetentionDays: integer("chat_history_retention_days"),
+    knowledgeImportRetentionDays: integer("knowledge_import_retention_days"),
+    exportArtifactRetentionDays: integer("export_artifact_retention_days")
+      .notNull()
+      .default(7),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("organization_compliance_settings_org_idx").on(table.organizationId),
+    index("organization_compliance_settings_updated_by_user_id_idx").on(table.updatedByUserId),
+  ],
+);
+
+export const governanceJobs = sqliteTable(
+  "governance_jobs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    jobType: text("job_type", {
+      enum: [
+        "organization_export",
+        "knowledge_delete",
+        "history_purge",
+        "import_metadata_purge",
+      ],
+    }).notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "failed"],
+    }).notNull(),
+    triggerKind: text("trigger_kind", { enum: ["manual", "automatic"] })
+      .notNull()
+      .default("manual"),
+    targetLabel: text("target_label").notNull(),
+    cutoffTimestamp: integer("cutoff_timestamp"),
+    artifactStoragePath: text("artifact_storage_path"),
+    artifactFileName: text("artifact_file_name"),
+    artifactByteSize: integer("artifact_byte_size"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    resultJson: text("result_json").notNull().default("{}"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "governance_jobs_type_check",
+      sql`${table.jobType} in ('organization_export', 'knowledge_delete', 'history_purge', 'import_metadata_purge')`,
+    ),
+    check(
+      "governance_jobs_status_check",
+      sql`${table.status} in ('queued', 'running', 'completed', 'failed')`,
+    ),
+    check(
+      "governance_jobs_trigger_kind_check",
+      sql`${table.triggerKind} in ('manual', 'automatic')`,
+    ),
+    index("governance_jobs_org_created_at_idx").on(table.organizationId, table.createdAt),
+    index("governance_jobs_org_status_updated_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("governance_jobs_requested_by_user_id_idx").on(table.requestedByUserId),
+    index("governance_jobs_type_completed_at_idx").on(table.jobType, table.completedAt),
   ],
 );

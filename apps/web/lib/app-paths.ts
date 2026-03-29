@@ -185,3 +185,12 @@ export async function ensureOrganizationKnowledgeStagingRoot(organizationSlug: s
 
   return knowledgeStagingRoot;
 }
+
+export async function ensureOrganizationGovernanceRoot(organizationSlug: string) {
+  const organizationRoot = await resolveOrganizationStorageRoot(organizationSlug);
+  const governanceRoot = path.join(organizationRoot, "governance");
+
+  await mkdir(governanceRoot, { recursive: true });
+
+  return governanceRoot;
+}

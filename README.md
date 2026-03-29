@@ -4,6 +4,8 @@ Critjecture is a local-first AI workspace for property-management operations. It
 
 The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` and a separate `uv`-managed Python environment in `packages/python-sandbox`.
 
+Step 19 adds owner-managed admin settings, retention controls, organization export bundles, and a hosted multi-organization mode for centrally operated Railway deployments.
+
 ## What It Does
 
 - Answers questions against tenant-owned company knowledge with role-based access control.
@@ -47,6 +49,11 @@ Protected routes require sign-in. Critjecture currently ships with:
 
 Sessions are cookie-based. Backend routes derive permissions and tenant scope from the authenticated session, and generated files are only retrievable by the authenticated user who created them inside the same organization.
 
+Deployment modes:
+
+- `single_org`: local development and on-prem, with env-seeded default org and pilot users
+- `hosted`: Railway-style centrally managed multi-org deployment, where tenant provisioning is handled by the operator script
+
 ### Audit Logs
 
 The owner audit dashboard lives at `http://localhost:3000/admin/logs`.
@@ -70,6 +77,19 @@ It adds:
 - per-user and per-organization usage and cost summaries
 
 There is also a public `GET /api/health` endpoint for liveness/readiness checks.
+
+### Settings
+
+The owner settings dashboard lives at `http://localhost:3000/admin/settings`.
+
+It adds:
+
+- member creation, role changes, suspension/reactivation, and password resets
+- organization display-name updates
+- retention settings for logs, usage, alerts, chat history, and import metadata
+- full-organization export jobs
+- export-gated purge jobs for chat history, import metadata, and managed knowledge files
+- customer-review links for deployment and compliance docs
 
 ### Knowledge Library
 
@@ -104,6 +124,7 @@ The runtime storage model is:
 
 - SQLite database: `DATABASE_URL` or `<CRITJECTURE_STORAGE_ROOT>/critjecture.sqlite`
 - persistent tenant data: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/company_data`
+- governance/export artifacts: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/governance`
 - ephemeral sandbox workspaces: `/tmp/workspace/<run-id>`
 
 The repo-root `sample_company_data/` directory is bundled sample data. On first boot, Critjecture copies that sample data into the active organization's storage directory if needed.
@@ -165,6 +186,7 @@ Open:
 - `http://localhost:3000/knowledge`
 - `http://localhost:3000/admin/operations`
 - `http://localhost:3000/admin/logs`
+- `http://localhost:3000/admin/settings`
 
 ## Environment
 
@@ -176,6 +198,7 @@ OPENAI_API_KEY=your-key-here
 OPENAI_MODEL=gpt-4o-mini
 DATABASE_URL=./storage/critjecture.sqlite
 CRITJECTURE_STORAGE_ROOT=./storage
+CRITJECTURE_DEPLOYMENT_MODE=single_org
 CRITJECTURE_ORGANIZATION_NAME=Critjecture Demo
 CRITJECTURE_ORGANIZATION_SLUG=critjecture-demo
 CRITJECTURE_OWNER_EMAIL=owner@example.com
@@ -195,7 +218,8 @@ CRITJECTURE_ALERT_WEBHOOK_URL=
 ```
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
-If the seeded user env vars are missing, login will not succeed because no pilot accounts will be available.
+If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, missing seeded user env vars mean login will not succeed because no pilot accounts will be available.
+If `CRITJECTURE_DEPLOYMENT_MODE=hosted`, tenant orgs and users should be created with `pnpm --filter web provision:hosted-org`.
 
 ## Deployment
 
@@ -212,6 +236,7 @@ Start with:
 - `pnpm start`
 
 Read [deployment.md](/home/hard2vary/projects/critjecture/deployment.md) for the exact storage, backup, restore, and Railway guidance.
+Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/hosted_provisioning.md) for the hosted multi-org provisioning flow.
 
 ## Demo Data
 
@@ -236,6 +261,12 @@ Useful upload checks:
 - Upload an admin `.pdf` as Owner, then search for a phrase from the PDF.
 - Confirm that Intern cannot see or use admin-scope uploads.
 
+Useful Step 19 checks:
+
+- Open `/admin/settings` as Owner and create a second member.
+- Queue a full export, then download the resulting archive.
+- Confirm purge buttons stay disabled until a recent export exists and a cutoff date is selected.
+
 ## Development Notes
 
 ### `pi-web-ui` CSS
@@ -254,6 +285,14 @@ Keep Critjecture-specific styling in:
 
 - `apps/web/app/pi-web-ui.css`
 - `apps/web/app/globals.css`
+
+### Tests
+
+Run the targeted Step 19 checks with:
+
+```bash
+pnpm test
+```
 
 ### Native SQLite Dependency
 

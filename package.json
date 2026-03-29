@@ -10,6 +10,9 @@
     "build": "pnpm --filter web build",
     "start": "pnpm --filter web start",
     "lint": "pnpm --filter web lint",
+    "test": "pnpm --filter web test",
+    "test:e2e": "pnpm --filter web test:e2e",
+    "test:all": "pnpm --filter web test:all",
     "db:migrate": "pnpm --filter web db:migrate"
   }
 }

@@ -8,7 +8,7 @@ import type { SessionUser } from "@/lib/auth-state";
 import { getRoleLabel } from "@/lib/roles";
 
 type WorkspaceShellProps = {
-  activePage: "chat" | "knowledge" | "logs" | "operations";
+  activePage: "chat" | "knowledge" | "logs" | "operations" | "settings";
   children: ReactNode;
   user: SessionUser;
 };
@@ -65,6 +65,12 @@ export function WorkspaceShell({
                     href="/admin/logs"
                   >
                     Audit Logs
+                  </Link>
+                  <Link
+                    className={`shell-nav__link ${activePage === "settings" ? "is-active" : ""}`}
+                    href="/admin/settings"
+                  >
+                    Settings
                   </Link>
                 </>
               ) : null}

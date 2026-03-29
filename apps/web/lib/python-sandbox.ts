@@ -351,7 +351,7 @@ async function getAvailableCsvColumns(stagedFiles: StagedSandboxFile[], workspac
   return availableColumnsByFile;
 }
 
-async function validateCsvAnalysisCode(
+export async function validateCsvAnalysisCode(
   code: string,
   stagedFiles: StagedSandboxFile[],
   workspaceDir: string,

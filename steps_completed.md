@@ -1225,3 +1225,194 @@ Step 17 was implemented as a durable async knowledge-import pipeline on top of t
   - `pnpm --filter web lint`
   - `pnpm --filter web build`
 - The remaining roadmap in `steps.md` now starts at Step 18.
+
+## Step 18: Test Coverage and Release Readiness
+
+### What Was Implemented
+
+Step 18 was implemented as a real release-confidence layer across the existing app, using both route/integration tests and mocked browser coverage.
+
+- Added reusable test-state reset seams:
+  - `apps/web/lib/app-db.ts`
+  - `apps/web/lib/users.ts`
+  - test helpers under `apps/web/tests/helpers/`
+  - allows temp SQLite files, temp storage roots, and seed/bootstrap state to be reset cleanly between tests
+- Expanded Vitest coverage across critical server flows:
+  - `apps/web/tests/company-knowledge-search-route.test.ts`
+  - `apps/web/tests/data-analysis-route.test.ts`
+  - `apps/web/tests/generated-files-route.test.ts`
+  - `apps/web/tests/admin-logs-route.test.ts`
+  - `apps/web/tests/audit-routes.test.ts`
+  - `apps/web/tests/sandbox-route.test.ts`
+  - `apps/web/tests/python-sandbox-validation.test.ts`
+  - `apps/web/tests/audit-log.integration.test.ts`
+  - covers:
+    - auth and RBAC checks
+    - search and sandbox route validation
+    - generated-file ownership rules
+    - audit route ownership checks
+    - CSV/Polars validation guardrails
+    - audit timeline persistence and correlation
+- Exposed only the minimum extra test seam in sandbox validation:
+  - `apps/web/lib/python-sandbox.ts`
+  - exports `validateCsvAnalysisCode(...)` so tests exercise the real CSV validation path directly
+- Added mocked Playwright browser coverage:
+  - `apps/web/playwright.config.ts`
+  - `apps/web/e2e/app-shell.spec.ts`
+  - verifies:
+    - real credential login for owner and intern users
+    - conversation history loading and restore flow with mocked conversation APIs
+    - owner access to `/admin/logs`, `/admin/operations`, and `/admin/settings`
+    - intern redirect behavior away from owner-only admin pages
+- Added release-readiness scripts and docs:
+  - `apps/web/package.json`
+  - `package.json`
+  - `release_checklist.md`
+  - adds:
+    - `pnpm test:e2e`
+    - `pnpm test:all`
+    - a concrete release checklist for env validation, automated checks, smoke tests, and release notes
+- Added supporting repo ignores for browser-test artifacts:
+  - `.gitignore`
+
+### Current Step 18 Behavior
+
+- Developers can now run:
+  - `pnpm test`
+  - `pnpm test:e2e`
+  - `pnpm test:all`
+- Critical regressions in auth, RBAC, sandbox validation, generated-file access, and audit-log flows are now caught automatically.
+- Browser coverage stays deterministic by mocking network-dependent conversation/admin payloads while still exercising the real login and page-routing flow.
+
+### Important Implementation Details
+
+- Step 18 keeps end-to-end browser tests mocked at the API boundary:
+  - no live OpenAI calls are required
+  - no real sandbox execution is required in Playwright
+- The new test helpers intentionally reset app singletons instead of relying on brittle module reloading.
+- Browser tests run against the real Next.js app with seeded credentials and a dedicated local SQLite/storage setup.
+- Release procedure documentation is now separate from the broader strategic readiness notes.
+- Verification completed for this implementation:
+  - `pnpm --filter web test`
+  - `pnpm --filter web test:e2e`
+  - `pnpm --filter web lint`
+  - `pnpm --filter web build`
+
+## Step 19: Admin Operations and Compliance Controls
+
+### What Was Implemented
+
+Step 19 was implemented as an owner-managed admin and governance layer on top of the existing auth, tenant, audit, operations, and knowledge foundations, while also adding a hosted multi-organization deployment mode for centrally operated Railway environments.
+
+- Added deployment-mode support:
+  - `apps/web/lib/deployment-mode.ts`
+  - `apps/web/lib/organizations.ts`
+  - `apps/web/lib/users.ts`
+  - introduces:
+    - `single_org` mode for local and on-prem
+    - `hosted` mode for Railway-style centralized deployments
+  - preserves the existing env-seeded single-org bootstrap path for on-prem installs
+  - removes the old hard single-org assumption from hosted membership resolution
+- Expanded the persistence model and migration stack:
+  - `apps/web/drizzle/0006_step19_admin_and_governance.sql`
+  - `apps/web/lib/app-schema.ts`
+  - adds:
+    - `users.status`
+    - `organization_compliance_settings`
+    - `governance_jobs`
+- Added shared admin and governance modules:
+  - `apps/web/lib/admin-types.ts`
+  - `apps/web/lib/admin-users.ts`
+  - `apps/web/lib/governance.ts`
+  - implements:
+    - org-scoped member management
+    - last-owner protection
+    - password resets
+    - retention settings
+    - export-gated destructive jobs
+    - governance job persistence and worker processing
+- Added new owner-only admin APIs:
+  - `apps/web/app/api/admin/organization/route.ts`
+  - `apps/web/app/api/admin/members/route.ts`
+  - `apps/web/app/api/admin/members/[memberId]/route.ts`
+  - `apps/web/app/api/admin/members/[memberId]/reset-password/route.ts`
+  - `apps/web/app/api/admin/compliance-settings/route.ts`
+  - `apps/web/app/api/admin/governance-jobs/route.ts`
+  - `apps/web/app/api/admin/governance-jobs/[jobId]/route.ts`
+  - `apps/web/app/api/admin/governance-jobs/[jobId]/download/route.ts`
+  - `apps/web/app/api/admin/customer-review/[doc]/route.ts`
+- Added the new owner settings UI:
+  - `apps/web/app/admin/settings/page.tsx`
+  - `apps/web/components/admin-settings-page-client.tsx`
+  - `apps/web/components/workspace-shell.tsx`
+  - `apps/web/app/globals.css`
+  - adds:
+    - organization display-name editing
+    - member creation and role/status management
+    - password reset actions
+    - retention controls
+    - governance job controls
+    - customer-review document links
+- Added hosted operator provisioning support:
+  - `apps/web/scripts/provision-hosted-org.mjs`
+  - `apps/web/package.json`
+  - allows hosted operators to create an organization, first owner, optional intern, and storage roots without tenant-facing self-service
+- Added customer-review and deployment docs:
+  - `README.md`
+  - `deployment.md`
+  - `apps/web/.env.local.example`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/compliance_controls.md`
+  - `apps/web/docs/hosted_provisioning.md`
+
+### Current Step 19 Behavior
+
+- `Owner`
+  - can open `/admin/settings`
+  - can manage members within the current organization
+  - can suspend/reactivate users and reset passwords
+  - cannot demote or suspend the last active owner
+  - can update the organization display name
+  - can configure retention windows for:
+    - request logs
+    - usage events
+    - operational alerts
+    - chat history
+    - knowledge import metadata
+    - export artifacts
+  - can queue a full-organization export
+  - can queue destructive purge jobs only after a completed export from the last 24 hours exists
+- `Intern`
+  - still cannot access owner-only admin routes or settings APIs
+- Deployment modes
+  - `single_org`
+    - keeps the existing seeded-org/seeded-user behavior for local and on-prem environments
+  - `hosted`
+    - supports multiple organizations in one deployment
+    - still keeps tenant UX scoped to one primary organization membership
+    - expects org creation to happen through the hosted provisioning script rather than through tenant UI
+- Governance jobs
+  - export jobs produce downloadable org-scoped archives
+  - purge jobs now support:
+    - chat-history cleanup by cutoff
+    - import-metadata cleanup by cutoff
+    - managed knowledge-file deletion by cutoff
+  - automatic retention cleanup also records completed governance jobs
+
+### Important Implementation Details
+
+- Step 19 intentionally did not add:
+  - a tenant-facing organization switcher
+  - a cross-org platform-admin web UI
+  - full organization deletion
+- Hosted multi-org support is deployment-scoped, not customer self-service:
+  - Railway and other centrally managed installs can host multiple orgs
+  - on-prem and local installs still use the simpler single-org bootstrap path
+- Destructive data lifecycle actions now require a recent export first, so deletion remains deliberate and traceable.
+- Governance jobs intentionally reuse the existing in-process async-worker pattern established by knowledge imports instead of introducing a separate worker service.
+- Verification completed for this implementation:
+  - `pnpm --filter web lint`
+  - `pnpm --filter web test`
+  - `pnpm --filter web build`
+  - `pnpm db:migrate`
+  - hosted provisioning smoke test against a temporary SQLite database in `/tmp`

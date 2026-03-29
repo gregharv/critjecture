@@ -11,3 +11,7 @@ apps/web/data/*.sqlite
 apps/web/data/*.sqlite-shm
 apps/web/data/*.sqlite-wal
 storage
+.playwright-storage
+apps/web/.playwright-storage
+apps/web/playwright-report
+apps/web/test-results

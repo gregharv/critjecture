@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
 import { users } from "@/lib/app-schema";
+import { isSingleOrgDeployment } from "@/lib/deployment-mode";
 import {
   ensureDefaultOrganization,
   ensureOrganizationMembership,
@@ -13,12 +14,17 @@ import {
 import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { type UserRole } from "@/lib/roles";
 
+export const USER_STATUSES = ["active", "suspended"] as const;
+
+export type UserStatus = (typeof USER_STATUSES)[number];
+
 export type AppUser = {
   email: string;
   id: string;
   name: string | null;
   passwordHash: string;
   role: UserRole;
+  status: UserStatus;
 };
 
 export type AuthenticatedAppUser = {
@@ -82,6 +88,7 @@ async function upsertSeedUser(input: SeedUserInput) {
       name: input.name,
       passwordHash,
       role: input.role,
+      status: "active",
       createdAt: now,
       updatedAt: now,
     });
@@ -100,6 +107,7 @@ async function upsertSeedUser(input: SeedUserInput) {
       name: input.name,
       passwordHash,
       role: input.role,
+      status: "active",
       updatedAt: now,
     })
     .where(eq(users.id, existingUser.id));
@@ -110,6 +118,10 @@ async function upsertSeedUser(input: SeedUserInput) {
 }
 
 async function ensureSeedUsers() {
+  if (!isSingleOrgDeployment()) {
+    return;
+  }
+
   const seedUsers = [
     getSeedUserInput("CRITJECTURE_OWNER", "owner"),
     getSeedUserInput("CRITJECTURE_INTERN", "intern"),
@@ -123,8 +135,10 @@ async function ensureSeedUsers() {
 export async function ensureSeedState() {
   if (!seedStatePromise) {
     seedStatePromise = (async () => {
-      await ensureSeedUsers();
-      await ensureDefaultOrganization();
+      if (isSingleOrgDeployment()) {
+        await ensureSeedUsers();
+        await ensureDefaultOrganization();
+      }
     })().catch((error) => {
       seedStatePromise = null;
       throw error;
@@ -134,6 +148,10 @@ export async function ensureSeedState() {
   await seedStatePromise;
 }
 
+export function resetUserSeedStateForTests() {
+  seedStatePromise = null;
+}
+
 function mapUserRecord(record: typeof users.$inferSelect): AppUser {
   return {
     email: record.email,
@@ -141,6 +159,7 @@ function mapUserRecord(record: typeof users.$inferSelect): AppUser {
     name: record.name,
     passwordHash: record.passwordHash,
     role: record.role,
+    status: record.status,
   };
 }
 
@@ -167,6 +186,10 @@ export async function getUserById(id: string) {
 }
 
 async function getAuthenticatedUserForRecord(user: AppUser): Promise<AuthenticatedAppUser | null> {
+  if (user.status !== "active") {
+    return null;
+  }
+
   const membership = await getPrimaryMembershipForUser(user.id);
 
   if (!membership) {
@@ -207,7 +230,7 @@ export async function getAuthenticatedUserByEmail(email: string) {
 export async function authenticateUser(email: string, password: string) {
   const user = await getUserByEmail(email);
 
-  if (!user) {
+  if (!user || user.status !== "active") {
     return null;
   }
 

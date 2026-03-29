@@ -13,6 +13,7 @@ import {
   inArray,
   isNull,
   lt,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -24,11 +25,17 @@ import { getAppDatabase } from "@/lib/app-db";
 import {
   operationalAlerts,
   knowledgeImportJobFiles,
+  organizations,
   rateLimitBuckets,
   requestLogs,
   usageEvents,
   users,
 } from "@/lib/app-schema";
+import {
+  getFallbackOperationsRetentionDefaults,
+  getOrganizationRetentionOverrides,
+  runGovernanceMaintenance,
+} from "@/lib/governance";
 import {
   BUDGET_WARNING_RATIO,
   CHAT_MAX_TOKENS_HARD_CAP,
@@ -40,9 +47,6 @@ import {
   getOperationsPoliciesSnapshot,
   getRetentionWindowMs,
   getRouteGroupPolicy,
-  OPERATIONS_ALERT_RETENTION_DAYS,
-  OPERATIONS_REQUEST_LOG_RETENTION_DAYS,
-  OPERATIONS_USAGE_RETENTION_DAYS,
   type OperationsRouteGroup,
 } from "@/lib/operations-policy";
 import type {
@@ -689,24 +693,83 @@ export async function runOperationsMaintenance() {
 
   lastMaintenanceAt = now;
   const db = await getAppDatabase();
-  const requestLogCutoff = now - getRetentionWindowMs(OPERATIONS_REQUEST_LOG_RETENTION_DAYS);
-  const usageCutoff = now - getRetentionWindowMs(OPERATIONS_USAGE_RETENTION_DAYS);
+  const retentionDefaults = getFallbackOperationsRetentionDefaults();
+  const requestLogCutoff = now - getRetentionWindowMs(retentionDefaults.requestLogRetentionDays);
+  const usageCutoff = now - getRetentionWindowMs(retentionDefaults.usageRetentionDays);
   const bucketCutoff = now - 2 * TWENTY_FOUR_HOURS_MS;
-  const alertCutoff = now - getRetentionWindowMs(OPERATIONS_ALERT_RETENTION_DAYS);
+  const alertCutoff = now - getRetentionWindowMs(retentionDefaults.alertRetentionDays);
+  const organizationIdsWithOverrides = await db
+    .select({
+      id: organizations.id,
+    })
+    .from(organizations);
+  const requestLogOverrideOrgIds: string[] = [];
+  const usageOverrideOrgIds: string[] = [];
+  const alertOverrideOrgIds: string[] = [];
 
-  await Promise.all([
-    db.delete(requestLogs).where(lt(requestLogs.completedAt, requestLogCutoff)),
-    db.delete(usageEvents).where(lt(usageEvents.createdAt, usageCutoff)),
-    db.delete(rateLimitBuckets).where(lt(rateLimitBuckets.updatedAt, bucketCutoff)),
-    db
-      .delete(operationalAlerts)
-      .where(
-        and(
+  for (const row of organizationIdsWithOverrides) {
+    const overrides = await getOrganizationRetentionOverrides({
+      organizationId: row.id,
+    });
+
+    if (overrides.requestLogRetentionDays !== null) {
+      requestLogOverrideOrgIds.push(row.id);
+    }
+
+    if (overrides.usageRetentionDays !== null) {
+      usageOverrideOrgIds.push(row.id);
+    }
+
+    if (overrides.alertRetentionDays !== null) {
+      alertOverrideOrgIds.push(row.id);
+    }
+  }
+
+  const requestLogsCleanupWhere =
+    requestLogOverrideOrgIds.length > 0
+      ? and(
+          lt(requestLogs.completedAt, requestLogCutoff),
+          or(
+            isNull(requestLogs.organizationId),
+            notInArray(requestLogs.organizationId, requestLogOverrideOrgIds),
+          ),
+        )
+      : lt(requestLogs.completedAt, requestLogCutoff);
+
+  const usageEventsCleanupWhere =
+    usageOverrideOrgIds.length > 0
+      ? and(
+          lt(usageEvents.createdAt, usageCutoff),
+          or(
+            isNull(usageEvents.organizationId),
+            notInArray(usageEvents.organizationId, usageOverrideOrgIds),
+          ),
+        )
+      : lt(usageEvents.createdAt, usageCutoff);
+
+  const alertsCleanupWhere =
+    alertOverrideOrgIds.length > 0
+      ? and(
           eq(operationalAlerts.status, "resolved"),
           lt(operationalAlerts.lastSeenAt, alertCutoff),
-        ),
-      ),
+          or(
+            isNull(operationalAlerts.organizationId),
+            notInArray(operationalAlerts.organizationId, alertOverrideOrgIds),
+          ),
+        )
+      : and(
+          eq(operationalAlerts.status, "resolved"),
+          lt(operationalAlerts.lastSeenAt, alertCutoff),
+        );
+
+  await Promise.all([
+    db.delete(requestLogs).where(requestLogsCleanupWhere),
+    db.delete(usageEvents).where(usageEventsCleanupWhere),
+    db.delete(rateLimitBuckets).where(lt(rateLimitBuckets.updatedAt, bucketCutoff)),
+    db.delete(operationalAlerts).where(alertsCleanupWhere),
   ]);
+
+  await runGovernanceMaintenance();
 }
 
 export function beginObservedRequest(input: {

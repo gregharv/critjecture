@@ -7,8 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:all": "pnpm lint && pnpm test && pnpm build && pnpm test:e2e",
     "db:migrate": "node ./scripts/run-db-migrations.mjs",
-    "sync:pi-web-ui-css": "node ./scripts/sync-pi-web-ui-css.mjs"
+    "sync:pi-web-ui-css": "node ./scripts/sync-pi-web-ui-css.mjs",
+    "provision:hosted-org": "node ./scripts/provision-hosted-org.mjs"
   },
   "dependencies": {
     "@mariozechner/mini-lit": "^0.2.0",
@@ -25,11 +29,14 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@playwright/test": "^1.56.1",
     "eslint": "^9.39.1",
     "eslint-config-next": "16.2.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
   }
 }

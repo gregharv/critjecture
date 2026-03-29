@@ -1690,3 +1690,191 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.settings-page {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+
+.settings-hero,
+.settings-panel {
+  border: 1px solid color-mix(in oklab, var(--border) 56%, transparent 44%);
+  border-radius: 24px;
+  background: color-mix(in oklab, var(--card) 94%, transparent 6%);
+  box-shadow: 0 24px 60px color-mix(in oklab, black 18%, transparent 82%);
+}
+
+.settings-hero {
+  padding: 24px;
+}
+
+.settings-hero__eyebrow,
+.settings-panel__eyebrow {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-hero__title,
+.settings-panel h2 {
+  margin: 6px 0 8px;
+}
+
+.settings-hero__copy,
+.settings-table__meta,
+.settings-panel__meta {
+  color: var(--muted-foreground);
+}
+
+.settings-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-panel {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.settings-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-form--inline {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.settings-form--grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-field span {
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+}
+
+.settings-field input,
+.settings-form input,
+.settings-form select,
+.settings-table select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 60%, transparent 40%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--background) 78%, white 22%);
+  color: var(--foreground);
+}
+
+.settings-button {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in oklab, var(--primary) 55%, transparent 45%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--primary) 22%, transparent 78%);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.settings-button--ghost {
+  border-color: color-mix(in oklab, var(--border) 64%, transparent 36%);
+  background: transparent;
+}
+
+.settings-table,
+.settings-jobs,
+.settings-docs {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-table__row,
+.settings-job {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid color-mix(in oklab, var(--border) 54%, transparent 46%);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--background) 82%, transparent 18%);
+}
+
+.settings-table__row {
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 0.9fr));
+}
+
+.settings-job__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-job-controls {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.settings-status--completed {
+  background: color-mix(in oklab, #1f8f5f 24%, transparent 76%);
+}
+
+.settings-status--running,
+.settings-status--queued {
+  background: color-mix(in oklab, #a16a11 24%, transparent 76%);
+}
+
+.settings-status--failed {
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
+}
+
+.settings-link {
+  color: color-mix(in oklab, var(--primary) 72%, white 28%);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.settings-error {
+  color: #f2a3a3;
+}
+
+@media (max-width: 1080px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-form--inline,
+  .settings-form--grid,
+  .settings-job-controls,
+  .settings-table__row {
+    grid-template-columns: 1fr;
+  }
+}

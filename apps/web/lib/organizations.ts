@@ -9,6 +9,7 @@ import {
   getDefaultOrganizationSlug,
 } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
+import { isSingleOrgDeployment } from "@/lib/deployment-mode";
 import {
   organizationMemberships,
   organizations,
@@ -25,7 +26,7 @@ export type OrganizationMembershipContext = {
 const SINGLE_ORGANIZATION_MODE_ERROR =
   "Step 10 runs in single-organization mode. Resolve the extra organization rows before continuing.";
 
-async function getExistingOrganizations() {
+export async function getExistingOrganizations() {
   const db = await getAppDatabase();
 
   return db
@@ -35,6 +36,10 @@ async function getExistingOrganizations() {
 }
 
 async function getSingleConfiguredOrganization() {
+  if (!isSingleOrgDeployment()) {
+    throw new Error("Default single-organization resolution is unavailable in hosted mode.");
+  }
+
   const slug = getDefaultOrganizationSlug();
   const organizationsList = await getExistingOrganizations();
 
@@ -64,6 +69,10 @@ async function getSingleConfiguredOrganization() {
 }
 
 export async function ensureDefaultOrganization() {
+  if (!isSingleOrgDeployment()) {
+    throw new Error("Default organization seeding is disabled in hosted mode.");
+  }
+
   const db = await getAppDatabase();
   const name = getDefaultOrganizationName();
   const now = Date.now();
@@ -100,6 +109,61 @@ export async function ensureDefaultOrganization() {
     name,
     updatedAt: now,
   };
+}
+
+export async function getOrganizationById(organizationId: string) {
+  const db = await getAppDatabase();
+
+  return db.query.organizations.findFirst({
+    where: eq(organizations.id, organizationId),
+  });
+}
+
+export async function getOrganizationBySlug(organizationSlug: string) {
+  const db = await getAppDatabase();
+
+  return db.query.organizations.findFirst({
+    where: eq(organizations.slug, organizationSlug),
+  });
+}
+
+export async function createOrganization(input: {
+  name: string;
+  slug: string;
+}) {
+  const db = await getAppDatabase();
+  const now = Date.now();
+  const createdOrganization = {
+    createdAt: now,
+    id: randomUUID(),
+    name: input.name.trim(),
+    slug: input.slug.trim(),
+    updatedAt: now,
+  } satisfies typeof organizations.$inferInsert;
+
+  await db.insert(organizations).values(createdOrganization);
+  await ensureOrganizationCompanyDataRoot(createdOrganization.slug);
+
+  return createdOrganization;
+}
+
+export async function updateOrganizationDisplayName(input: {
+  name: string;
+  organizationId: string;
+}) {
+  const db = await getAppDatabase();
+  const now = Date.now();
+  const nextName = input.name.trim();
+
+  await db
+    .update(organizations)
+    .set({
+      name: nextName,
+      updatedAt: now,
+    })
+    .where(eq(organizations.id, input.organizationId));
+
+  return getOrganizationById(input.organizationId);
 }
 
 export async function ensureOrganizationMembership(
@@ -140,10 +204,33 @@ export async function ensureOrganizationMembership(
 
 export async function getPrimaryMembershipForUser(userId: string) {
   const db = await getAppDatabase();
-  const { organization } = await getSingleConfiguredOrganization();
 
-  if (!organization) {
-    return null;
+  if (isSingleOrgDeployment()) {
+    const { organization } = await getSingleConfiguredOrganization();
+
+    if (!organization) {
+      return null;
+    }
+
+    const rows = await db
+      .select({
+        organizationId: organizations.id,
+        organizationName: organizations.name,
+        organizationSlug: organizations.slug,
+        role: organizationMemberships.role,
+      })
+      .from(organizationMemberships)
+      .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.organizationId, organization.id),
+        ),
+      )
+      .orderBy(asc(organizationMemberships.createdAt))
+      .limit(1);
+
+    return rows[0] ?? null;
   }
 
   const rows = await db
@@ -155,12 +242,7 @@ export async function getPrimaryMembershipForUser(userId: string) {
     })
     .from(organizationMemberships)
     .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))
-    .where(
-      and(
-        eq(organizationMemberships.userId, userId),
-        eq(organizationMemberships.organizationId, organization.id),
-      ),
-    )
+    .where(eq(organizationMemberships.userId, userId))
     .orderBy(asc(organizationMemberships.createdAt))
     .limit(1);
 

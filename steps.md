@@ -2,60 +2,143 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-## Step 18: Test Coverage and Release Readiness
+Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 19 already shipped rate limits, operations dashboards, tests, uploads, chat history, and admin/governance controls. The remaining gaps are narrower and more operational.
+
+## Step 20: Production Sandbox Hardening
 
 ### Goal
 
-Create enough automated verification to ship changes with confidence.
+Raise the current `bubblewrap` + `prlimit` Python sandbox from a careful local execution model to a production-grade isolation boundary.
 
 ### What Should Be Implemented
 
-- route-level tests for search, sandbox, generated files, and audit APIs
-- RBAC regression tests
-- sandbox validation tests
-- integration tests for the planner and audit correlation flows
-- end-to-end tests for core chat journeys
-- a release checklist for production deployments
+- introduce a dedicated sandbox-run supervisor instead of relying only on request-local child process lifecycle
+- enforce explicit global and per-user concurrency ceilings for active sandbox runs
+- add stale-run reconciliation and cleanup recovery on process restart
+- make sandbox dependency checks fail closed and visible in operations alerts
+- tighten artifact and workspace lifecycle handling so abandoned runs cannot leave orphaned state behind
+- define the hosted deployment isolation strategy more concretely:
+  - either a dedicated worker/service boundary
+  - or a stronger container/VM-backed runner model
 
 ### Acceptance Criteria
 
-- critical auth, RBAC, sandbox, and audit flows are covered automatically
-- major regressions are catchable before release
-- a repeatable release confidence process exists
+- sandbox execution has bounded concurrency and restart-safe cleanup behavior
+- stale or abandoned runs are reconciled automatically
+- operations surfaces clearly show sandbox capacity and failure states
+- hosted deployment no longer depends on the same trust model as a local subprocess sandbox
 
-## Step 19: Admin Operations and Compliance Controls
+## Step 21: Backup Verification and Disaster Recovery
 
 ### Goal
 
-Add the operational and governance capabilities expected by real customer deployments.
+Turn the documented SQLite/storage backup model into a tested recovery process.
 
 ### What Should Be Implemented
 
-- user and organization administration
-- role assignment and membership management
-- retention and deletion controls
-- export capabilities for audits and customer data
-- deployment, security, and operations documentation for customer review
+- add scripted backup flows for:
+  - SQLite database state
+  - organization storage roots
+  - governance/export artifacts as needed
+- add restore procedures that can rebuild a clean environment from backup artifacts
+- run and document repeatable recovery drills for:
+  - single-org on-prem deployments
+  - hosted Railway-style deployments
+- define retention expectations for backups separately from in-app data retention controls
+- add release or ops checks that verify backup/restore paths still work after schema/storage changes
 
 ### Acceptance Criteria
 
-- admins can manage users and permissions without code changes
-- data lifecycle actions are deliberate and traceable
-- customers can review the operational posture of the product
+- a backup can be taken and restored into a clean environment without manual improvisation
+- recovery procedures are written down and rehearsed
+- schema migrations and storage layout changes are covered by recovery validation
+
+## Step 22: Production Observability and Incident Response
+
+### Goal
+
+Close the gap between product auditability and real production operations.
+
+### What Should Be Implemented
+
+- add structured application logs that correlate:
+  - chat requests
+  - tool routes
+  - sandbox runs
+  - governance jobs
+- add error tracking and operator alert delivery beyond the in-app owner dashboard
+- propagate stable request/run identifiers through logs and operational views
+- document incident response expectations for:
+  - sandbox failures
+  - storage failures
+  - migration failures
+  - backup/restore failures
+- add a small operator runbook set for hosted and on-prem environments
+
+### Acceptance Criteria
+
+- production failures can be traced across the main request and job flows
+- critical failures surface outside the app UI
+- operators have written runbooks for the most important incident classes
+
+## Step 23: Durable Analysis Results and Chart Pipeline Scaling
+
+### Goal
+
+Remove the current same-process, in-memory limitation from `analysisResultId` and make chart generation safer for larger workloads.
+
+### What Should Be Implemented
+
+- persist analysis-result payloads outside in-memory process state
+- bind persisted analysis results to user, org, turn, TTL, and cleanup policy
+- let chart generation read structured stored payloads directly instead of embedding larger JSON blobs back into Python source
+- add explicit payload-size or point-count limits for chart-ready data
+- define when large chart/document work should stay synchronous vs move to async jobs
+
+### Acceptance Criteria
+
+- `analysisResultId` survives normal app restarts within its intended TTL
+- chart rendering no longer depends on same-process memory continuity
+- oversized chart payloads are rejected or reduced predictably before rendering
+
+## Step 24: Security and Deployment Review Package
+
+### Goal
+
+Package Critjecture for real customer security review and repeatable deployment approval.
+
+### What Should Be Implemented
+
+- document:
+  - secrets management expectations
+  - encryption assumptions for storage and backups
+  - tenant-isolation boundaries in hosted mode
+  - privacy posture for uploaded customer data and audit records
+- add a concise security review pack for customer or internal review
+- reconcile `production_readiness.md`, `README.md`, deployment docs, and admin/compliance docs so they reflect the post-Step-19 system accurately
+- define the supported production envelope clearly:
+  - on-prem single-org
+  - hosted Railway multi-org
+  - non-goals beyond that envelope
+
+### Acceptance Criteria
+
+- deployment/security documentation matches the real shipped system
+- customer review of data handling and deployment boundaries no longer depends on tribal knowledge
+- the supported production modes and their limits are explicit
 
 ## Roadmap Notes
 
-- Chat history and file uploads are important future capabilities, but they should follow authentication and persistence foundations.
-- Step 17 now provides the first durable async knowledge-import layer:
-  - job-backed bulk uploads
-  - background ingestion
-  - readiness-gated search and sandbox access
-  - partial-failure and retry handling
-- Embedding and vectorization should be treated as a later stage on top of durable bulk ingestion rather than bundled into the first bulk-import release.
-- Step 16 now provides the first local-first operational layer:
-  - structured request logging
-  - health checks
-  - owner-facing operations summaries
-  - rate limits and rolling budget controls
-- The order above reflects dependency order and production risk, not just feature desirability.
-- A small on-prem pilot may be able to adopt parts of this roadmap more gradually than a multi-tenant cloud rollout.
+- Step 18 is complete:
+  - reusable test reset hooks
+  - route/integration coverage for critical server flows
+  - mocked Playwright coverage for login, history, and owner-admin access
+  - release checklist and full test scripts
+- Step 19 is complete:
+  - owner-managed member administration
+  - compliance settings and governance jobs
+  - export-gated purge flows
+  - hosted multi-org support for Railway
+- The main remaining blockers are now operational hardening, not core product surface area.
+- A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
+- Hosted production has a higher bar than on-prem because sandbox isolation, recovery, and observability requirements are stricter there.

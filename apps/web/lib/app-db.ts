@@ -14,6 +14,7 @@ type AppDatabase = ReturnType<typeof drizzle<typeof schema>>;
 
 let databaseInstance: AppDatabase | null = null;
 let migrationPromise: Promise<void> | null = null;
+let sqliteInstance: Database.Database | null = null;
 
 async function getMigrationFileNames(migrationsDir: string) {
   const entries = await readdir(migrationsDir, { withFileTypes: true }).catch(() => []);
@@ -73,6 +74,7 @@ async function createDatabase() {
   const sqlite = new Database(dbFilePath);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
+  sqliteInstance = sqlite;
 
   databaseInstance = drizzle(sqlite, { schema });
 
@@ -98,3 +100,15 @@ export async function ensureDatabaseReady() {
 }
 
 export const getAppDatabase = ensureDatabaseReady;
+
+export async function resetAppDatabaseForTests() {
+  migrationPromise = null;
+  databaseInstance = null;
+
+  if (!sqliteInstance) {
+    return;
+  }
+
+  sqliteInstance.close();
+  sqliteInstance = null;
+}
