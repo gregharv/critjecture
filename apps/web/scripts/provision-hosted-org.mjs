@@ -80,6 +80,9 @@ async function main() {
   const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
   const organizationName = (args["organization-name"] ?? "").trim();
   const organizationSlug = normalizeSlug(args["organization-slug"] ?? organizationName);
+  const hostedOrganizationSlug = normalizeSlug(
+    args["hosted-organization-slug"] ?? process.env.CRITJECTURE_HOSTED_ORGANIZATION_SLUG ?? organizationSlug,
+  );
   const ownerEmail = (args["owner-email"] ?? "").trim().toLowerCase();
   const ownerPassword = (args["owner-password"] ?? "").trim();
   const ownerName = (args["owner-name"] ?? "Owner").trim() || "Owner";
@@ -89,7 +92,19 @@ async function main() {
 
   if (!organizationName || !ownerEmail || !ownerPassword) {
     throw new Error(
-      "Usage: node ./scripts/provision-hosted-org.mjs --organization-name <name> --owner-email <email> --owner-password <password> [--organization-slug <slug>] [--owner-name <name>] [--intern-email <email> --intern-password <password> --intern-name <name>]",
+      "Usage: node ./scripts/provision-hosted-org.mjs --organization-name <name> --owner-email <email> --owner-password <password> [--organization-slug <slug>] [--hosted-organization-slug <slug>] [--owner-name <name>] [--intern-email <email> --intern-password <password> --intern-name <name>]",
+    );
+  }
+
+  if (!hostedOrganizationSlug) {
+    throw new Error(
+      "Hosted provisioning requires CRITJECTURE_HOSTED_ORGANIZATION_SLUG or --hosted-organization-slug.",
+    );
+  }
+
+  if (organizationSlug !== hostedOrganizationSlug) {
+    throw new Error(
+      `Hosted provisioning is bound to organization "${hostedOrganizationSlug}". Refusing to provision "${organizationSlug}".`,
     );
   }
 
@@ -105,6 +120,17 @@ async function main() {
 
   const sqlite = new Database(dbPath);
   sqlite.pragma("foreign_keys = ON");
+
+  const organizationCountRow = sqlite
+    .prepare("SELECT COUNT(*) AS count FROM organizations")
+    .get();
+  const organizationCount = Number(organizationCountRow?.count ?? 0);
+
+  if (organizationCount > 0) {
+    throw new Error(
+      `Hosted mode permits exactly one organization per deployment cell. This deployment already contains ${organizationCount} organization${organizationCount === 1 ? "" : "s"}.`,
+    );
+  }
 
   const organizationExists = sqlite
     .prepare("SELECT id FROM organizations WHERE slug = ? LIMIT 1")
@@ -170,6 +196,7 @@ async function main() {
   console.log(
     JSON.stringify({
       ok: true,
+      hostedOrganizationSlug,
       organizationId,
       organizationName,
       organizationSlug,

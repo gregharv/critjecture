@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { resetOperationsMaintenanceStateForTests } from "@/lib/operations";
 import { resetAppDatabaseForTests } from "@/lib/app-db";
 import { resetUserSeedStateForTests } from "@/lib/users";
 
@@ -44,6 +45,7 @@ const ENV_KEYS = [
   "CRITJECTURE_INTERN_EMAIL",
   "CRITJECTURE_INTERN_NAME",
   "CRITJECTURE_INTERN_PASSWORD",
+  "CRITJECTURE_HOSTED_ORGANIZATION_SLUG",
   "CRITJECTURE_ORGANIZATION_NAME",
   "CRITJECTURE_ORGANIZATION_SLUG",
   "CRITJECTURE_OWNER_EMAIL",
@@ -51,6 +53,8 @@ const ENV_KEYS = [
   "CRITJECTURE_OWNER_PASSWORD",
   "CRITJECTURE_SANDBOX_CONTAINER_IMAGE",
   "CRITJECTURE_SANDBOX_EXECUTION_BACKEND",
+  "CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET",
+  "CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID",
   "CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN",
   "CRITJECTURE_SANDBOX_SUPERVISOR_URL",
   "CRITJECTURE_STORAGE_ROOT",
@@ -59,6 +63,7 @@ const ENV_KEYS = [
 ] as const;
 
 export async function resetTestAppState() {
+  resetOperationsMaintenanceStateForTests();
   resetUserSeedStateForTests();
   await resetAppDatabaseForTests();
 }
@@ -87,6 +92,10 @@ export async function createTestAppEnvironment(
   setEnvValue("CRITJECTURE_DEPLOYMENT_MODE", options.deploymentMode ?? "single_org");
   setEnvValue("CRITJECTURE_ORGANIZATION_NAME", options.organizationName ?? "Critjecture Test Org");
   setEnvValue("CRITJECTURE_ORGANIZATION_SLUG", options.organizationSlug ?? "critjecture-test-org");
+  setEnvValue(
+    "CRITJECTURE_HOSTED_ORGANIZATION_SLUG",
+    options.deploymentMode === "hosted" ? options.organizationSlug ?? "critjecture-test-org" : undefined,
+  );
   setEnvValue("CRITJECTURE_OWNER_EMAIL", owner.email);
   setEnvValue("CRITJECTURE_OWNER_NAME", owner.name);
   setEnvValue("CRITJECTURE_OWNER_PASSWORD", owner.password);

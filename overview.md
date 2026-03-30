@@ -12,7 +12,7 @@ Critjecture is designed to give organizations:
 * **Helpful outputs** such as concise answers, summaries, charts, and generated documents when needed.
 * **Visible execution traces** that show which tools ran, which files were accessed, and what the system did to produce the result.
 * **Role-aware controls** over what data can be searched, what analysis can run, and what outputs can be retrieved.
-* **Deployment flexibility** for cloud-hosted, customer-managed, and stricter private environments.
+* **Deployment flexibility** for hosted dedicated customer cells, customer-managed installs, and stricter private environments.
 
 This is the core distinction in the product: Critjecture is not just a chat workspace with company knowledge. It is a governed system for producing business-data answers under explicit policy, execution, and audit constraints.
 
@@ -25,7 +25,7 @@ This is the core distinction in the product: Critjecture is not just a chat work
 * **Execution Sandbox:** Python runs through a dedicated sandbox supervisor. In production `single_org`, each run executes inside a fresh OCI container built from the repo-owned sandbox image; `local_supervisor` remains available only as a deliberate `bubblewrap` dev/test fallback. Environment variables are stripped, network access is disabled, outputs are validated, and temporary workspaces are cleaned up.
 * **Auditability:** Chat turns, tool calls, accessed files, generated assets, and assistant responses are persisted for privileged review.
 * **Recovery Tooling:** The SQLite-first runtime has scripted backup creation, clean-environment restore tooling, and repeatable recovery drills for both `single_org` and hosted deployments.
-* **Deployment Flexibility:** The system is designed for `single_org` customer-managed operation as well as centrally hosted multi-organization deployments.
+* **Deployment Flexibility:** The system is designed for `single_org` customer-managed operation as well as centrally hosted dedicated customer cells.
 
 ## 3. Tooled Answer Workflow
 

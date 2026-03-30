@@ -4,31 +4,43 @@ Hosted deployments are intended for Railway or another centrally operated enviro
 
 ## Model
 
-- one deployment can contain multiple organizations
-- each tenant user still operates inside one primary organization
+- one hosted deployment cell contains exactly one customer organization
+- each tenant user operates only inside that bound organization
 - tenant-facing UI stays organization-scoped
 - organization creation is operator-managed, not self-service
 - hosted execution depends on a dedicated sandbox supervisor service configured outside the tenant UI
+- the hosted app and hosted supervisor must both be bound to the same `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
 
 Hosted-mode trust boundary:
 
-- organizations share one operator-managed deployment footprint
-- tenant isolation is enforced through authenticated organization membership, role checks, and organization-scoped storage paths
-- this document does not claim hard infrastructure isolation between tenants beyond those application and storage boundaries
+- each customer gets a dedicated operator-managed app, SQLite, storage, and sandbox-supervisor footprint
+- tenant isolation is enforced both by dedicated deployment placement and by authenticated organization membership, role checks, and organization-scoped storage paths
+- this document does not describe a shared multi-tenant cell; adding a denser shared-cell model would be future work and would require a separate review
 
 ## Provisioning Flow
 
 1. Set `CRITJECTURE_DEPLOYMENT_MODE=hosted`.
-2. Run the hosted provisioning script to create:
+2. Set `CRITJECTURE_HOSTED_ORGANIZATION_SLUG` for the one organization this hosted cell will serve.
+3. Run the hosted provisioning script to create:
    - the organization row
    - organization storage roots
    - the first owner account and membership
-3. Hand the owner credentials to the customer administrator.
+4. Confirm `/api/health` reports the hosted deployment binding and sandbox supervisor as healthy.
+5. Hand the owner credentials to the customer administrator.
+
+Provisioning guardrails:
+
+- the provisioning script refuses to create a second organization in `hosted`
+- the provisioning script refuses organization slugs that do not match `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
+- hosted supervisor credentials should use signed requests with:
+  - `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID`
+  - `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 
 ## Operational Notes
 
 - on-prem and local environments should continue using `single_org`
 - hosted operators should back up both SQLite and the storage root
 - hosted operators should manage `AUTH_SECRET`, model credentials, and sandbox supervisor credentials through platform secret storage
+- hosted operators should record named ownership for the hosted app cell, the hosted supervisor deployment, credential rotation, alerts, and incident response
 - destructive customer data purges should be preceded by a recent full export
 - customer review for hosted mode should include `security_review.md`, `deployment.md`, and the hosted/on-prem runbooks that match the operating model

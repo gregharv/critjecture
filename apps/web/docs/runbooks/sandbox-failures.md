@@ -17,15 +17,16 @@
 - if the backend is unavailable, restore the dedicated supervisor service first
 - if capacity is exhausted, pause new high-volume sandbox usage and let active runs drain
 - if stale or abandoned runs are accumulating, review supervisor worker logs before restarting the web process
+- if hosted supervisor auth is failing, verify the key id, HMAC secret, request timestamp skew, and bound organization slug on both the app and supervisor
 
 ## Recovery
 
 - `single_org`: confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, Docker Engine, and the configured sandbox image, then retry a single request
-- `hosted`: confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL` and `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, then restore the supervisor service and retry a single request
+- `hosted`: confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`, `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID`, and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`, then restore the supervisor service and retry a single request
 - verify `/api/health` returns sandbox availability and that queued runs clear
 
 ## Escalate When
 
 - the sandbox remains unavailable after one controlled restart
 - stale or abandoned runs continue to grow after reconciliation
-- multiple organizations are failing sandbox requests at the same time
+- multiple users in the same hosted customer cell are failing sandbox requests at the same time

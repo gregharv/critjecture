@@ -22,13 +22,17 @@ export type HealthSummary = {
   sandbox: {
     abandonedRuns: number;
     activeRuns: number;
+    authMode: "bearer" | "signed" | "unknown";
     available: boolean;
     backend: SandboxExecutionBackend;
+    boundOrganizationSlug: string | null;
     detail: string;
+    errorCode?: string | null;
     lastHeartbeatAt: number | null;
     lastReconciledAt: number | null;
     queuedRuns: number;
     rejectedRuns: number;
+    runner: string | null;
     staleRuns: number;
   };
   status: HealthCheckStatus;

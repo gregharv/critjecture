@@ -70,15 +70,17 @@ For later production-changing releases, use `apps/web/docs/runbooks/single-org-r
 
 ## `hosted`
 
-Use `hosted` for centrally operated multi-organization deployments.
+Use `hosted` for centrally operated dedicated customer cells.
 
 Current characteristics:
 
-- one deployment can contain multiple organizations
+- one hosted deployment cell contains exactly one organization/customer
+- `CRITJECTURE_HOSTED_ORGANIZATION_SLUG` binds the app and the supervisor to that one organization
 - tenant creation is operator-managed through the provisioning script, not tenant self-service
 - the web app must be configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
+- hosted supervisor traffic must use signed requests with `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID` and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 - the sandbox path depends on a dedicated remote supervisor service and should be treated as a required production dependency
-- tenant separation is enforced by authenticated organization scoping and storage-path boundaries inside shared operator-managed infrastructure
+- customer isolation is enforced by dedicated app/SQLite/storage/supervisor placement plus authenticated organization scoping inside that dedicated cell
 
 ## Shared Runtime Requirements
 
@@ -166,8 +168,7 @@ Runbooks:
 
 The remaining blockers to a broader production claim are `hosted` concerns, not `single_org` blockers:
 
-- stronger tenant isolation than the current shared-infrastructure boundary
-- a stronger hosted supervisor operating model, including failure drills and monitoring ownership
+- further hosted density or cell-sharing work beyond the current dedicated-customer-cell boundary
 - a clearer persistence and scale answer for growing hosted concurrency and tenant count
 
 ## Retention

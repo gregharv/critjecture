@@ -25,8 +25,8 @@ The current deployment answer is intentionally split:
   - controlled on-prem or single-customer deployments
   - the only mode currently described as production-ready, and only inside the documented support envelope
 - `hosted`
-  - centrally operated multi-organization deployments
-  - multiple organizations in one deployment
+  - centrally operated dedicated customer cells
+  - one organization/customer per deployment cell
   - supported only with a higher review bar and not yet broadly production-ready
 
 Explicit non-goals for the current envelope:
@@ -92,10 +92,10 @@ Current tenant boundaries:
 
 Hosted-mode boundary notes:
 
-- multiple organizations share one web deployment and one logical runtime stack
-- hosted mode depends on a dedicated sandbox supervisor service and operator-managed provisioning
-- the app enforces org scoping and role checks, but hosted mode is not documented as a hard infrastructure-isolation boundary between tenants
-- production review for hosted mode should treat the web app, SQLite runtime, storage root, logs, and supervisor operations as shared operator-managed infrastructure with application-level tenant separation
+- hosted mode uses a dedicated app, SQLite runtime, storage root, logs, and sandbox supervisor per customer organization
+- hosted mode depends on operator-managed provisioning plus a dedicated sandbox supervisor service bound to the same organization slug
+- the app still enforces org scoping and role checks, but hosted no longer claims a shared multi-org deployment model
+- production review for hosted mode should treat the hosted app cell and the hosted supervisor as customer-dedicated operator-managed infrastructure with one bound organization
 
 ## Privacy Posture
 
@@ -127,7 +127,7 @@ Current controls and expectations:
 - execution is bounded by timeout, memory, process, output, and retention rules
 - `single_org` production uses a dedicated container supervisor service and per-run OCI containers
 - `local_supervisor` keeps `bubblewrap` + `prlimit` only as an explicit dev/test fallback
-- `hosted` requires a dedicated remote sandbox supervisor and should be reviewed as a separate operational dependency
+- `hosted` requires a dedicated remote sandbox supervisor, signed app-to-supervisor requests, and matching organization binding on both sides
 - `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover
 - operators should capture `x-critjecture-request-id` together with sandbox, governance, and import identifiers during incident response
 
@@ -152,5 +152,5 @@ The main remaining hardening gap is now primarily a `hosted` bar, not missing `s
 Important caveats:
 
 - `single_org` is the lower-risk first deployment path because it is customer-managed and narrower in scope
-- `hosted` still has a higher review bar because it introduces shared operator-managed infrastructure and the dedicated sandbox supervisor dependency
+- `hosted` still has a higher review bar because it adds centrally operated infrastructure ownership and the dedicated sandbox supervisor dependency
 - future work such as stronger hosted isolation, stronger hosted supervisor operations, or a different hosted persistence path would be new hardening steps, not claims of the current production package

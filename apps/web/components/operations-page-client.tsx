@@ -321,6 +321,28 @@ export function OperationsPageClient() {
             <div className="operations-health-list">
               <article className="operations-health-item">
                 <div className="operations-health-item__header">
+                  <strong>Auth mode</strong>
+                  <span className="operations-panel__meta">{summary.health.sandbox.authMode}</span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Bound organization</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.sandbox.boundOrganizationSlug ?? "n/a"}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Runner</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.sandbox.runner ?? "unknown"}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
                   <strong>Last reconciliation</strong>
                   <span className="operations-panel__meta">
                     {summary.health.sandbox.lastReconciledAt

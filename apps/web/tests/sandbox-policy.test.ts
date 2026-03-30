@@ -8,8 +8,11 @@ import { getSandboxBackendHealth } from "@/lib/python-sandbox";
 
 const ENV_KEYS = [
   "CRITJECTURE_DEPLOYMENT_MODE",
+  "CRITJECTURE_HOSTED_ORGANIZATION_SLUG",
   "CRITJECTURE_SANDBOX_CONTAINER_IMAGE",
   "CRITJECTURE_SANDBOX_EXECUTION_BACKEND",
+  "CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET",
+  "CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID",
   "CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN",
   "CRITJECTURE_SANDBOX_SUPERVISOR_URL",
 ] as const;
@@ -68,9 +71,13 @@ describe("sandbox backend health", () => {
 
     await expect(getSandboxBackendHealth()).resolves.toEqual({
       available: false,
+      authMode: "bearer",
       backend: "container_supervisor",
+      boundOrganizationSlug: null,
       detail:
         "Container sandbox supervisor configuration is incomplete: CRITJECTURE_SANDBOX_CONTAINER_IMAGE, CRITJECTURE_SANDBOX_SUPERVISOR_URL, CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN.",
+      errorCode: null,
+      runner: null,
     });
   });
 
@@ -98,8 +105,12 @@ describe("sandbox backend health", () => {
 
     await expect(getSandboxBackendHealth()).resolves.toEqual({
       available: true,
+      authMode: "bearer",
       backend: "container_supervisor",
+      boundOrganizationSlug: null,
       detail: "Container supervisor is ready with image critjecture/sandbox-runner:latest.",
+      errorCode: null,
+      runner: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:4100/health",
@@ -110,5 +121,58 @@ describe("sandbox backend health", () => {
         method: "GET",
       }),
     );
+  });
+
+  it("signs hosted supervisor health checks and surfaces binding metadata", async () => {
+    process.env.CRITJECTURE_DEPLOYMENT_MODE = "hosted";
+    process.env.CRITJECTURE_SANDBOX_EXECUTION_BACKEND = "hosted_supervisor";
+    process.env.CRITJECTURE_HOSTED_ORGANIZATION_SLUG = "acme";
+    process.env.CRITJECTURE_SANDBOX_SUPERVISOR_URL = "http://127.0.0.1:4100";
+    process.env.CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID = "hosted-app";
+    process.env.CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET = "super-secret";
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          authMode: "signed",
+          available: true,
+          boundOrganizationSlug: "acme",
+          detail: "Hosted supervisor is reachable.",
+          runner: "oci-container",
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getSandboxBackendHealth()).resolves.toEqual({
+      available: true,
+      authMode: "signed",
+      backend: "hosted_supervisor",
+      boundOrganizationSlug: "acme",
+      detail: "Hosted supervisor is reachable.",
+      errorCode: null,
+      runner: "oci-container",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:4100/health",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Critjecture-Hosted-Organization-Slug": "acme",
+          "X-Critjecture-Supervisor-Key-Id": "hosted-app",
+          "X-Critjecture-Supervisor-Nonce": expect.any(String),
+          "X-Critjecture-Supervisor-Signature": expect.any(String),
+          "X-Critjecture-Supervisor-Timestamp": expect.any(String),
+        }),
+        method: "GET",
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Authorization");
   });
 });

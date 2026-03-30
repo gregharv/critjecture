@@ -5,6 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  DEFAULT_MAX_CLOCK_SKEW_MS,
+  getSupervisorAuthMode,
+  verifyHostedSupervisorRequest,
+} from "./auth.mjs";
+
 const execFileAsync = promisify(execFile);
 const OUTPUTS_DIR = "outputs";
 const RUN_ID_PATTERN =
@@ -12,18 +18,27 @@ const RUN_ID_PATTERN =
 
 const PORT = Number.parseInt(process.env.PORT ?? "4100", 10) || 4100;
 const SUPERVISOR_TOKEN = process.env.CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN?.trim() || "";
+const SUPERVISOR_KEY_ID = process.env.CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID?.trim() || "";
+const SUPERVISOR_HMAC_SECRET = process.env.CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET?.trim() || "";
+const BOUND_ORGANIZATION_SLUG =
+  process.env.CRITJECTURE_HOSTED_ORGANIZATION_SLUG?.trim().toLowerCase() || "";
 const CONTAINER_IMAGE = process.env.CRITJECTURE_SANDBOX_CONTAINER_IMAGE?.trim() || "";
 const DOCKER_BIN = process.env.CRITJECTURE_SANDBOX_DOCKER_BIN?.trim() || "docker";
 const WORKSPACE_ROOT =
   process.env.CRITJECTURE_SANDBOX_WORKSPACE_ROOT?.trim() ||
   path.join(os.tmpdir(), "critjecture-sandbox-supervisor");
+const AUTH_MODE = getSupervisorAuthMode(process.env);
+const MAX_CLOCK_SKEW_MS =
+  Number.parseInt(process.env.CRITJECTURE_SANDBOX_SUPERVISOR_MAX_CLOCK_SKEW_MS ?? "", 10) ||
+  DEFAULT_MAX_CLOCK_SKEW_MS;
+const seenSignedNonces = new Map();
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
 }
 
-async function readJsonBody(request) {
+async function readRequestBody(request) {
   const chunks = [];
 
   for await (const chunk of request) {
@@ -31,18 +46,78 @@ async function readJsonBody(request) {
   }
 
   if (chunks.length === 0) {
+    return "";
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function parseJsonBody(bodyText) {
+  if (!bodyText) {
     return {};
   }
 
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return JSON.parse(bodyText);
 }
 
-function isAuthorized(request) {
-  if (!SUPERVISOR_TOKEN) {
-    return true;
+function getSupervisorHealthPayload(input = {}) {
+  return {
+    authMode: AUTH_MODE === "none" ? "unknown" : AUTH_MODE,
+    boundOrganizationSlug: BOUND_ORGANIZATION_SLUG || null,
+    runner: "oci-container",
+    ...input,
+  };
+}
+
+function authorizeRequest(request, input = {}) {
+  if (AUTH_MODE === "none") {
+    return {
+      detail:
+        "Sandbox supervisor auth is not configured. Set CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN for bearer mode or CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID, CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET, and CRITJECTURE_HOSTED_ORGANIZATION_SLUG for signed hosted mode.",
+      error: "auth_not_configured",
+      ok: false,
+      statusCode: 503,
+    };
   }
 
-  return request.headers.authorization === `Bearer ${SUPERVISOR_TOKEN}`;
+  if (AUTH_MODE === "bearer") {
+    if (request.headers.authorization === `Bearer ${SUPERVISOR_TOKEN}`) {
+      return {
+        detail: "Bearer supervisor request verified.",
+        ok: true,
+      };
+    }
+
+    return {
+      detail: "Sandbox supervisor authorization failed.",
+      error: "unauthorized",
+      ok: false,
+      statusCode: 401,
+    };
+  }
+
+  const verification = verifyHostedSupervisorRequest({
+    body: input.body ?? "",
+    endpoint: input.endpoint ?? request.url ?? "",
+    expectedKeyId: SUPERVISOR_KEY_ID,
+    expectedOrganizationSlug: BOUND_ORGANIZATION_SLUG,
+    headers: request.headers,
+    maxClockSkewMs: MAX_CLOCK_SKEW_MS,
+    method: request.method ?? "GET",
+    secret: SUPERVISOR_HMAC_SECRET,
+    seenNonces: seenSignedNonces,
+  });
+
+  if (verification.ok) {
+    return verification;
+  }
+
+  return {
+    detail: verification.detail,
+    error: verification.code ?? "unauthorized",
+    ok: false,
+    statusCode: verification.code === "organization_mismatch" ? 403 : 401,
+  };
 }
 
 function normalizeRelativePath(relativePath, errorPrefix) {
@@ -438,32 +513,64 @@ async function executeRun(payload) {
 
 const server = http.createServer(async (request, response) => {
   try {
-    if (!isAuthorized(request)) {
-      jsonResponse(response, 401, {
-        detail: "Sandbox supervisor authorization failed.",
-        error: "unauthorized",
-      });
-      return;
-    }
-
     if (request.method === "GET" && request.url === "/health") {
+      const authorization = authorizeRequest(request, {
+        body: "",
+        endpoint: "/health",
+      });
+
+      if (!authorization.ok) {
+        jsonResponse(response, authorization.statusCode, getSupervisorHealthPayload({
+          available: false,
+          detail: authorization.detail,
+          error: authorization.error,
+        }));
+        return;
+      }
+
       try {
         await ensureDockerAvailable();
-        jsonResponse(response, 200, {
+        jsonResponse(response, 200, getSupervisorHealthPayload({
           available: true,
           detail: `Container supervisor is ready with image ${CONTAINER_IMAGE}.`,
-        });
+        }));
       } catch (error) {
-        jsonResponse(response, 503, {
+        jsonResponse(response, 503, getSupervisorHealthPayload({
           available: false,
           detail: error instanceof Error ? error.message : String(error),
-        });
+        }));
       }
       return;
     }
 
     if (request.method === "POST" && request.url === "/runs/execute") {
-      const payload = await readJsonBody(request);
+      const bodyText = await readRequestBody(request);
+      const authorization = authorizeRequest(request, {
+        body: bodyText,
+        endpoint: "/runs/execute",
+      });
+
+      if (!authorization.ok) {
+        jsonResponse(response, authorization.statusCode, {
+          detail: authorization.detail,
+          error: authorization.error,
+        });
+        return;
+      }
+
+      const payload = parseJsonBody(bodyText);
+
+      if (
+        AUTH_MODE === "signed" &&
+        String(payload.organizationSlug ?? "").trim().toLowerCase() !== BOUND_ORGANIZATION_SLUG
+      ) {
+        jsonResponse(response, 403, {
+          detail: `Sandbox supervisor is bound to organization "${BOUND_ORGANIZATION_SLUG}", but the request payload targeted "${String(payload.organizationSlug ?? "").trim().toLowerCase()}".`,
+          error: "organization_mismatch",
+        });
+        return;
+      }
+
       const result = await executeRun(payload);
       jsonResponse(response, 200, result);
       return;

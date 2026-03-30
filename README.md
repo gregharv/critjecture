@@ -66,7 +66,7 @@ Sessions are cookie-based. Backend routes derive permissions and tenant scope fr
 Deployment modes:
 
 - `single_org`: local development and on-prem, with env-seeded bootstrap org and bootstrap users
-- `hosted`: Railway-style centrally managed multi-org deployment, where tenant provisioning is handled by the operator script
+- `hosted`: Railway-style centrally managed dedicated customer cell, where one bound organization is provisioned by the operator script
 
 ### Audit Logs
 
@@ -193,6 +193,7 @@ storage/                  Default local runtime storage root (gitignored)
 - `single_org`: Docker Engine plus the dedicated sandbox supervisor service
 - `single_org` local-dev/test fallback: Linux host with `bubblewrap` and `prlimit`
 - `hosted`: `CRITJECTURE_SANDBOX_SUPERVISOR_URL` pointing at the dedicated sandbox supervisor
+- `hosted`: `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`, `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID`, and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 - `pdftotext` available on the host for uploaded PDF ingestion
 - `OPENAI_API_KEY` for live chat
 
@@ -284,6 +285,7 @@ The supported current deployment envelope is SQLite-backed in both current modes
 - `single_org` for local development, customer-managed hardware, and controlled on-prem deployments
 - `single_org` production should point at the repo-owned supervisor in `packages/sandbox-supervisor`
 - `hosted` for Railway-style centrally operated deployments with a dedicated sandbox supervisor service
+  - one organization/customer per hosted deployment cell
 
 `single_org` is now production-ready for controlled customer-managed deployments inside one clear support envelope:
 
@@ -293,7 +295,7 @@ The supported current deployment envelope is SQLite-backed in both current modes
 - explicit backups plus restore-drill and release-proof records
 - current sandbox envelope of `1` active run per user, `4` globally, `10s` wall time, `8s` CPU, `512 MiB` memory, `64` processes, `1 MiB` stdio capture, `10 MiB` artifact cap, and `24h` artifact retention
 
-`hosted` remains supported, but it is not yet broadly production-ready because tenant isolation, hosted supervisor operations, and hosted persistence/scale work still carry a higher bar.
+`hosted` remains supported, but it is not yet broadly production-ready because hosted supervisor operations and hosted persistence/scale work still carry a higher bar even after the dedicated-customer-cell boundary.
 
 Start with:
 

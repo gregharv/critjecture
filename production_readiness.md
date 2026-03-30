@@ -15,7 +15,7 @@ Current call by deployment target:
   - intended for customer-managed hardware where the operator follows the documented cutover, backup, restore-drill, and release-proof flows
 - `hosted`
   - not yet broadly production-ready
-  - still suitable only for carefully reviewed centrally operated deployments willing to accept the current shared-infrastructure boundary
+  - still suitable only for carefully reviewed centrally operated dedicated-customer cells
 
 The important distinction is simple: Step 29 closes the minimum production package for `single_org`, not for `hosted`.
 
@@ -72,7 +72,7 @@ These items are not blockers for the current `single_org` claim, but they are st
 
 The remaining production blockers are now primarily `hosted` concerns:
 
-- stronger tenant isolation inside shared operator-managed infrastructure
+- stronger hosted operating evidence and recovery discipline around the dedicated-customer-cell boundary
 - production hardening of the hosted sandbox supervisor as a first-class dependency
 - a clearer hosted persistence and scale answer as concurrency and tenant count grow
 

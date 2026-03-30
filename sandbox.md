@@ -112,6 +112,9 @@ Possible adjustments:
 Current hosted posture:
 
 - the web app must submit sandbox work to a dedicated supervisor service
+- hosted now assumes one customer organization per deployment cell
+- the hosted app and hosted supervisor must agree on `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
+- hosted supervisor requests should use signed headers rather than bearer-only auth
 - hosted should not fall back to in-process `bubblewrap` execution
 
 Likely future stricter settings:

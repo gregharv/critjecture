@@ -9,7 +9,8 @@ import {
   getDefaultOrganizationSlug,
 } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
-import { isSingleOrgDeployment } from "@/lib/deployment-mode";
+import { isHostedDeployment, isSingleOrgDeployment } from "@/lib/deployment-mode";
+import { getHostedDeploymentValidation } from "@/lib/hosted-deployment";
 import {
   organizationMemberships,
   organizations,
@@ -143,6 +144,24 @@ export async function createOrganization(input: {
   name: string;
   slug: string;
 }) {
+  if (isHostedDeployment()) {
+    const validation = await getHostedDeploymentValidation();
+    const nextSlug = input.slug.trim();
+
+    if (validation.organizationCount > 0) {
+      throw new Error("Hosted mode permits exactly one organization per deployment cell.");
+    }
+
+    if (
+      validation.boundOrganizationSlug &&
+      validation.boundOrganizationSlug !== nextSlug
+    ) {
+      throw new Error(
+        `Hosted deployment is bound to organization "${validation.boundOrganizationSlug}". Refusing to create "${nextSlug}".`,
+      );
+    }
+  }
+
   const db = await getAppDatabase();
   const now = Date.now();
   const createdOrganization = {
@@ -264,8 +283,14 @@ export async function getPrimaryMembershipForUser(userId: string) {
     return rows[0] ?? null;
   }
 
+  const hostedValidation = await getHostedDeploymentValidation();
+
+  if (!hostedValidation.valid || !hostedValidation.boundOrganizationId) {
+    return null;
+  }
+
   const rows = await db
-      .select({
+    .select({
       monthlyCreditCap: organizationMemberships.monthlyCreditCap,
       organizationId: organizations.id,
       organizationName: organizations.name,
@@ -275,7 +300,12 @@ export async function getPrimaryMembershipForUser(userId: string) {
     })
     .from(organizationMemberships)
     .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))
-    .where(eq(organizationMemberships.userId, userId))
+    .where(
+      and(
+        eq(organizationMemberships.userId, userId),
+        eq(organizationMemberships.organizationId, hostedValidation.boundOrganizationId),
+      ),
+    )
     .orderBy(asc(organizationMemberships.createdAt))
     .limit(1);
 

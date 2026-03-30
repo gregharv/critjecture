@@ -18,6 +18,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
+import { getHostedOrganizationSlug } from "@/lib/hosted-deployment";
 import type { UserRole } from "@/lib/roles";
 import {
   attachSandboxRunToToolCall,
@@ -42,6 +43,11 @@ import {
   logStructuredError,
   logStructuredEvent,
 } from "@/lib/observability";
+import {
+  buildHostedSupervisorSignatureHeaders,
+  getSandboxSupervisorHmacSecret,
+  getSandboxSupervisorKeyId,
+} from "@/lib/sandbox-supervisor-auth";
 import {
   getSandboxContainerImage,
   getSandboxExecutionBackend,
@@ -156,13 +162,21 @@ export type SandboxedCommandResult = {
 
 export type SandboxBackendHealth = {
   available: boolean;
+  authMode: "bearer" | "signed" | "unknown";
   backend: SandboxExecutionBackend;
+  boundOrganizationSlug: string | null;
   detail: string;
+  errorCode?: string | null;
+  runner: string | null;
 };
 
 type RemoteSupervisorHealthPayload = {
   available?: boolean;
+  authMode?: "bearer" | "signed" | "unknown";
+  boundOrganizationSlug?: string | null;
   detail?: string;
+  error?: string;
+  runner?: string | null;
 };
 
 export class SandboxAdmissionError extends Error {
@@ -439,13 +453,61 @@ function buildMissingRemoteSupervisorConfigMessage(backend: SandboxExecutionBack
     missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_URL");
   }
 
-  if (!getSandboxSupervisorToken()) {
+  if (backend === "hosted_supervisor") {
+    if (!getHostedOrganizationSlug()) {
+      missing.push("CRITJECTURE_HOSTED_ORGANIZATION_SLUG");
+    }
+
+    if (!getSandboxSupervisorKeyId()) {
+      missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID");
+    }
+
+    if (!getSandboxSupervisorHmacSecret()) {
+      missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET");
+    }
+  } else if (!getSandboxSupervisorToken()) {
     missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN");
   }
 
   return missing.length > 0
     ? `${label} configuration is incomplete: ${missing.join(", ")}.`
     : `${label} configuration is incomplete.`;
+}
+
+function buildRemoteSupervisorHeaders(
+  backend: SandboxExecutionBackend,
+  endpoint: string,
+  method: string,
+  body: string,
+) {
+  if (backend === "hosted_supervisor") {
+    const organizationSlug = getHostedOrganizationSlug();
+    const keyId = getSandboxSupervisorKeyId();
+    const secret = getSandboxSupervisorHmacSecret();
+
+    if (!organizationSlug || !keyId || !secret) {
+      throw new Error(buildMissingRemoteSupervisorConfigMessage(backend));
+    }
+
+    return buildHostedSupervisorSignatureHeaders({
+      body,
+      endpoint,
+      keyId,
+      method,
+      organizationSlug,
+      secret,
+    });
+  }
+
+  const token = getSandboxSupervisorToken();
+
+  if (!token) {
+    throw new Error(buildMissingRemoteSupervisorConfigMessage(backend));
+  }
+
+  return {
+    Authorization: `Bearer ${token}`,
+  };
 }
 
 async function fetchRemoteSupervisor(
@@ -457,6 +519,12 @@ async function fetchRemoteSupervisor(
   const supervisorUrl = getSandboxSupervisorUrl();
 
   if (!supervisorUrl || !getSandboxSupervisorToken()) {
+    if (backend !== "hosted_supervisor") {
+      throw new Error(buildMissingRemoteSupervisorConfigMessage(backend));
+    }
+  }
+
+  if (!supervisorUrl) {
     throw new Error(buildMissingRemoteSupervisorConfigMessage(backend));
   }
 
@@ -464,13 +532,19 @@ async function fetchRemoteSupervisor(
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
+  const body =
+    typeof init.body === "string"
+      ? init.body
+      : init.body
+        ? String(init.body)
+        : "";
 
   try {
     return await fetch(new URL(endpoint, supervisorUrl).toString(), {
       ...init,
       headers: {
         ...(init.headers ?? {}),
-        Authorization: `Bearer ${getSandboxSupervisorToken()}`,
+        ...buildRemoteSupervisorHeaders(backend, endpoint, init.method ?? "GET", body),
       },
       signal: controller.signal,
     });
@@ -488,14 +562,22 @@ export async function getSandboxBackendHealth(): Promise<SandboxBackendHealth> {
 
       return {
         available: true,
+        authMode: "unknown",
         backend,
+        boundOrganizationSlug: null,
         detail: "Local supervisor dependencies are present.",
+        errorCode: null,
+        runner: SANDBOX_LOCAL_RUNNER,
       };
     } catch (caughtError) {
       return {
         available: false,
+        authMode: "unknown",
         backend,
+        boundOrganizationSlug: null,
         detail: asErrorMessage(caughtError, "Local sandbox supervisor dependencies are unavailable."),
+        errorCode: null,
+        runner: SANDBOX_LOCAL_RUNNER,
       };
     }
   }
@@ -515,23 +597,35 @@ export async function getSandboxBackendHealth(): Promise<SandboxBackendHealth> {
 
     return {
       available: true,
+      authMode: payload?.authMode ?? (backend === "hosted_supervisor" ? "signed" : "bearer"),
       backend,
+      boundOrganizationSlug: payload?.boundOrganizationSlug ?? null,
       detail:
         payload?.detail ||
         (backend === "container_supervisor"
           ? "Container sandbox supervisor is reachable."
           : "Hosted sandbox supervisor is reachable."),
+      errorCode: null,
+      runner: payload?.runner ?? null,
     };
   } catch (caughtError) {
+    const detail = asErrorMessage(
+      caughtError,
+      backend === "container_supervisor"
+        ? "Container sandbox supervisor is unreachable."
+        : "Hosted sandbox supervisor is unreachable.",
+    );
+    const authError =
+      detail.includes("HTTP 401") || detail.toLowerCase().includes("authorization failed");
+
     return {
       available: false,
+      authMode: backend === "hosted_supervisor" ? "signed" : "bearer",
       backend,
-      detail: asErrorMessage(
-        caughtError,
-        backend === "container_supervisor"
-          ? "Container sandbox supervisor is unreachable."
-          : "Hosted sandbox supervisor is unreachable.",
-      ),
+      boundOrganizationSlug: backend === "hosted_supervisor" ? getHostedOrganizationSlug() || null : null,
+      detail,
+      errorCode: authError ? "auth-failed" : null,
+      runner: null,
     };
   }
 }

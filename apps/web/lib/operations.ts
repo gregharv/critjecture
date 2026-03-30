@@ -38,6 +38,7 @@ import {
   getOrganizationRetentionOverrides,
   runGovernanceMaintenance,
 } from "@/lib/governance";
+import { getHostedDeploymentValidation } from "@/lib/hosted-deployment";
 import {
   CHAT_MAX_TOKENS_HARD_CAP,
   getOperationsPoliciesSnapshot,
@@ -712,8 +713,9 @@ async function evaluateDynamicAlerts(input: {
 }
 
 async function evaluateSandboxOperationalAlerts() {
-  const [backendHealth, sandboxHealth] = await Promise.all([
+  const [backendHealth, hostedValidation, sandboxHealth] = await Promise.all([
     getSandboxBackendHealth(),
+    getHostedDeploymentValidation(),
     getSandboxHealthSnapshot(),
   ]);
 
@@ -727,6 +729,30 @@ async function evaluateSandboxOperationalAlerts() {
     });
   } else {
     await resolveOperationalAlert("sandbox:backend:unavailable");
+  }
+
+  if (backendHealth.errorCode === "auth-failed") {
+    await upsertOperationalAlert({
+      alertType: "sandbox-auth-failed",
+      dedupeKey: "sandbox:backend:auth-failed",
+      message: backendHealth.detail,
+      severity: "critical",
+      title: "Sandbox Supervisor Auth Failed",
+    });
+  } else {
+    await resolveOperationalAlert("sandbox:backend:auth-failed");
+  }
+
+  if (!hostedValidation.valid && hostedValidation.code !== "disabled") {
+    await upsertOperationalAlert({
+      alertType: "hosted-organization-binding-mismatch",
+      dedupeKey: "hosted:organization:binding",
+      message: hostedValidation.detail,
+      severity: "critical",
+      title: "Hosted Organization Binding Invalid",
+    });
+  } else {
+    await resolveOperationalAlert("hosted:organization:binding");
   }
 
   if (sandboxHealth.staleRuns > 0 || sandboxHealth.abandonedRuns > 0) {
@@ -1251,10 +1277,19 @@ export function clampChatMaxTokens(value: number | undefined) {
 export async function getHealthSummary(): Promise<HealthSummary> {
   const checks: HealthCheckResult[] = [];
   const now = Date.now();
-  const [sandboxBackendHealth, sandboxSnapshot] = await Promise.all([
+  const [hostedValidation, sandboxBackendHealth, sandboxSnapshot] = await Promise.all([
+    getHostedDeploymentValidation(),
     getSandboxBackendHealth(),
     getSandboxHealthSnapshot(),
   ]);
+
+  if (hostedValidation.code !== "disabled") {
+    checks.push({
+      detail: hostedValidation.detail,
+      name: "hosted-deployment",
+      status: hostedValidation.valid ? "ok" : "fail",
+    });
+  }
 
   try {
     const db = await getAppDatabase();
@@ -1375,8 +1410,13 @@ export async function getHealthSummary(): Promise<HealthSummary> {
     checks,
     sandbox: {
       ...sandboxSnapshot,
+      authMode: sandboxBackendHealth.authMode,
       available: sandboxBackendHealth.available,
+      backend: sandboxBackendHealth.backend,
+      boundOrganizationSlug: sandboxBackendHealth.boundOrganizationSlug,
       detail: sandboxBackendHealth.detail,
+      errorCode: sandboxBackendHealth.errorCode ?? null,
+      runner: sandboxBackendHealth.runner,
     },
     status: hasFail ? "fail" : hasDegraded ? "degraded" : "ok",
     timestamp: new Date().toISOString(),
@@ -1676,4 +1716,8 @@ export function buildRateLimitedResponse(decision: RateLimitDecision) {
     status: "rate_limited",
     windowMs: decision.windowMs,
   });
+}
+
+export function resetOperationsMaintenanceStateForTests() {
+  lastMaintenanceAt = 0;
 }
