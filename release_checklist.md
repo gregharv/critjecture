@@ -21,6 +21,7 @@ pnpm test
 pnpm build
 pnpm test:e2e
 pnpm db:migrate
+pnpm backup:verify
 ```
 
 ## Deployment Smoke Checks
@@ -30,6 +31,7 @@ pnpm db:migrate
 - Hit `/api/health` and confirm a healthy response.
 - Log in as an owner and load `/admin/logs`, `/admin/operations`, and `/admin/settings`.
 - Create an organization export job and confirm it appears in Governance jobs.
+- Run `pnpm backup:create -- --output-dir <temp-dir>` and confirm the backup directory contains `manifest.json`, `database.sqlite`, and `storage.tar.gz`.
 
 ## Release Notes
 

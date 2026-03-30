@@ -4,8 +4,6 @@ Critjecture is a local-first AI workspace for property-management operations. It
 
 The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` and a separate `uv`-managed Python environment in `packages/python-sandbox`.
 
-Step 19 adds owner-managed admin settings, retention controls, organization export bundles, and a hosted multi-organization mode for centrally operated Railway deployments.
-
 ## What It Does
 
 - Answers questions against tenant-owned company knowledge with role-based access control.
@@ -14,6 +12,7 @@ Step 19 adds owner-managed admin settings, retention controls, organization expo
 - Generates PNG charts and PDF documents from approved company data.
 - Lets authenticated users upload approved tenant files into organization-owned knowledge storage.
 - Records chat turns, tool calls, accessed files, and assistant responses in an audit dashboard.
+- Provides scripted backup creation, clean restore tooling, and repeatable recovery drills for the persisted runtime state.
 
 ## Core Experience
 
@@ -102,19 +101,17 @@ Authenticated users can upload `.csv`, `.txt`, `.md`, and text-extractable `.pdf
 
 Uploaded files are indexed on upload, tracked in SQLite metadata, visible in the knowledge library UI, and searchable through the existing `search_company_knowledge` flow. Uploaded files that pass authorization can also be staged into the Python sandbox through the existing `inputFiles` mechanism.
 
-## Architecture
+## Platform
 
-### Web App
+### Application
 
-- Framework: Next.js App Router
-- Frontend: React plus `@mariozechner/pi-web-ui`
-- Backend: Next.js route handlers
-- Primary persistence: SQLite via `better-sqlite3` and Drizzle helpers
-- Tenant model: organizations plus organization memberships
+- Web experience: Next.js App Router with React plus `@mariozechner/pi-web-ui`
+- Persistent app data: SQLite via `better-sqlite3` and Drizzle helpers
+- Organization model: organizations plus organization memberships
 
-### Storage Model
+### Storage
 
-Critjecture is now SQLite-first for:
+Critjecture uses a SQLite-first runtime for:
 
 - local development
 - customer-managed hardware / on-prem
@@ -124,12 +121,14 @@ The runtime storage model is:
 
 - SQLite database: `DATABASE_URL` or `<CRITJECTURE_STORAGE_ROOT>/critjecture.sqlite`
 - persistent tenant data: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/company_data`
+- persistent generated assets: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/generated_assets`
+- persistent knowledge import staging: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/knowledge_staging`
 - governance/export artifacts: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/governance`
 - ephemeral sandbox workspaces: `/tmp/workspace/<run-id>`
 
 The repo-root `sample_company_data/` directory is bundled sample data. On first boot, Critjecture copies that sample data into the active organization's storage directory if needed.
 
-### Python Sandbox
+### Sandbox
 
 The Python execution environment is isolated under `packages/python-sandbox`.
 
@@ -242,6 +241,12 @@ Start with:
 - `pnpm db:migrate`
 - `pnpm build`
 - `pnpm start`
+
+Recovery tooling is available from the repo root:
+
+- `pnpm backup:create -- --output-dir ./backups`
+- `pnpm backup:restore -- --backup ./backups/<timestamped-backup-dir> --database-path ./restore/storage/critjecture.sqlite --storage-root ./restore/storage`
+- `pnpm backup:verify -- --deployment-mode both`
 
 Read [deployment.md](/home/hard2vary/projects/critjecture/deployment.md) for the exact storage, backup, restore, and Railway guidance.
 Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/hosted_provisioning.md) for the hosted multi-org provisioning flow.

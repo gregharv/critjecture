@@ -1497,3 +1497,81 @@ Step 20 was implemented as a supervisor-backed sandbox execution layer that sepa
   - `pnpm --filter web exec tsc --noEmit`
   - `pnpm --filter web build`
   - `pnpm db:migrate`
+
+## Step 21: Backup Verification and Disaster Recovery
+
+### What Was Implemented
+
+Step 21 was implemented as a tested recovery layer for the SQLite-first deployment model, covering both artifact creation and repeatable clean-environment restore drills for `single_org` and `hosted` deployments.
+
+- Added shared backup and recovery tooling:
+  - `apps/web/scripts/lib/recovery.mjs`
+  - implements:
+    - resolved runtime path discovery for SQLite and storage roots
+    - SQLite snapshot creation through `better-sqlite3`'s backup API
+    - full storage-root archive creation with explicit exclusion of the live DB file when it already sits inside the storage root
+    - backup manifest generation with deployment mode, migration ids, organization slugs, artifact sizes, and SHA-256 checksums
+    - checksum validation and clean-target restore enforcement
+    - migration validation on restored databases
+- Added operator-facing recovery scripts:
+  - `apps/web/scripts/create-backup.mjs`
+  - `apps/web/scripts/restore-backup.mjs`
+  - `apps/web/scripts/verify-backups.mjs`
+  - `package.json`
+  - `apps/web/package.json`
+  - adds:
+    - `pnpm backup:create`
+    - `pnpm backup:restore`
+    - `pnpm backup:verify`
+- Added automated recovery drill coverage:
+  - `apps/web/tests/backup-recovery.test.ts`
+  - covers:
+    - successful backup and clean restore
+    - rejection of backup output paths inside the active storage root
+    - rejection of restore attempts into non-empty target storage
+    - checksum mismatch detection before restore
+    - end-to-end `single_org` and `hosted` recovery drills
+- Updated deployment and release documentation:
+  - `README.md`
+  - `deployment.md`
+  - `apps/web/docs/deployment.md`
+  - `release_checklist.md`
+  - now documents:
+    - backup artifact layout
+    - restore expectations
+    - release-gated recovery verification
+    - backup retention expectations as an operator policy separate from in-app retention controls
+
+### Current Step 21 Behavior
+
+- `pnpm backup:create -- --output-dir <dir>`
+  - writes a timestamped backup directory containing:
+    - `manifest.json`
+    - `database.sqlite`
+    - `storage.tar.gz`
+- `pnpm backup:restore -- --backup <dir> --database-path <path> --storage-root <path>`
+  - restores into a clean target database path and clean target storage root only
+  - verifies artifact checksums before restore
+  - reruns migration validation against the restored SQLite database
+- `pnpm backup:verify -- --deployment-mode <single_org|hosted|both>`
+  - performs scripted recovery drills in temporary directories
+  - seeds representative persistent state
+  - verifies restored row counts, organization slugs, migration ids, and file contents
+
+### Important Implementation Details
+
+- Step 21 backs up the full resolved storage root rather than only selected feature directories:
+  - `company_data`
+  - `generated_assets`
+  - `knowledge_staging`
+  - `governance`
+- `/tmp/workspace` remains explicitly outside backup scope because it is ephemeral sandbox state.
+- Restore remains intentionally conservative:
+  - it does not overwrite existing targets
+  - it expects clean target paths so recovery is reproducible and free of manual improvisation
+- Backup retention is now documented separately from in-app retention controls:
+  - recommended default is `7` daily backups plus `4` weekly backups
+- Verification completed for this implementation:
+  - `pnpm --filter web test -- tests/backup-recovery.test.ts`
+  - `pnpm --filter web lint`
+  - `pnpm --filter web backup:verify -- --deployment-mode both`

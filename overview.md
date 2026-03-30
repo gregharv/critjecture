@@ -10,6 +10,7 @@ Here is the consolidated strategy for the current MVP. By splitting the agent's 
 * **Dual Deployment Strategy:** Architected to be deployed either as a Cloud SaaS hosted seamlessly on Railway, or as a secure On-Premise "Mini-Server" (e.g., a Beelink Mini-PC) physically installed in a client's office for absolute data privacy.
 * **Role-Based Access Control (RBAC):** Security is enforced strictly at the file-system level. An "Intern" role triggers searches only in public directories, while an "Owner" role searches the entire system.
 * **The Execution Sandbox:** Python scripts now run in a hardened Linux namespace sandbox using `bubblewrap` and `prlimit` on top of the local **`uv` virtual environment**. Environment variables are stripped, network access is disabled, generated files are validated, and temporary workspaces are cleaned after each run.
+* **Recovery Tooling:** The SQLite-first runtime now has scripted backup creation, clean-environment restore tooling, and repeatable recovery drills for both `single_org` and hosted Railway-style deployments.
 
 ### 2. The Specialized Toolbelt
 
@@ -26,7 +27,7 @@ Instead of one unpredictable coding agent, the AI orchestrates four strictly def
 
 When a business owner asks a complex question (e.g., *"Draft a late notice for the tenant who owes the most rent"*), the AI autonomously chains these tools together. It first calls the Librarian tool to find the highest balance in the ledger and grab the tenant's name. It then calls the Administrator tool, passing those exact parameters into the Python script to generate the final PDF without human intervention.
 
-### 4. What The Project Is For Right Now
+### 4. What The System Supports Right Now
 
 The current product is for:
 
@@ -41,8 +42,9 @@ The current product is for:
   * a short JSON object
   * a summarized chart payload
 * **Tenant-scoped knowledge management** with uploaded files, saved chat history, and owner-visible audit logs.
+* **SQLite-first operations** with scripted backup creation, clean restore tooling, and repeatable recovery drills for persisted runtime state.
 
-### 5. What The Project Is Not For Yet
+### 5. What The System Is Not For Yet
 
 The current MVP is not for:
 
@@ -84,9 +86,9 @@ Near-term scaling ideas:
 * **Let the graph renderer read stored structured data directly** instead of embedding large JSON blobs into Python source.
 * **Introduce async job handling** once charts or analysis need to exceed the current request-time sandbox budget.
 
-### 7. Summary of What Has Been Built So Far
+### 7. Current System Summary
 
-So far, the project has moved from a simple chat shell to a constrained operational assistant with:
+The current system is a constrained operational assistant with:
 
 * server-routed OpenAI chat
 * authenticated users and RBAC
@@ -95,3 +97,4 @@ So far, the project has moved from a simple chat shell to a constrained operatio
 * a hardened Python sandbox for analysis, charts, and documents
 * persisted short-lived generated assets
 * an analysis-first chart flow that reduces column-guessing failures by separating schema discovery from rendering
+* scripted backup creation, restore validation, and repeatable recovery drills for SQLite plus tenant storage

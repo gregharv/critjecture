@@ -2,32 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 20 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, and supervisor-backed sandbox hardening. The remaining gaps are narrower and more operational.
-
-## Step 21: Backup Verification and Disaster Recovery
-
-### Goal
-
-Turn the documented SQLite/storage backup model into a tested recovery process.
-
-### What Should Be Implemented
-
-- add scripted backup flows for:
-  - SQLite database state
-  - organization storage roots
-  - governance/export artifacts as needed
-- add restore procedures that can rebuild a clean environment from backup artifacts
-- run and document repeatable recovery drills for:
-  - single-org on-prem deployments
-  - hosted Railway-style deployments
-- define retention expectations for backups separately from in-app data retention controls
-- add release or ops checks that verify backup/restore paths still work after schema/storage changes
-
-### Acceptance Criteria
-
-- a backup can be taken and restored into a clean environment without manual improvisation
-- recovery procedures are written down and rehearsed
-- schema migrations and storage layout changes are covered by recovery validation
+Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 21 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, and tested recovery tooling. The remaining gaps are narrower and more operational.
 
 ## Step 22: Production Observability and Incident Response
 
@@ -119,6 +94,11 @@ Package Critjecture for real customer security review and repeatable deployment 
   - supervisor-backed sandbox lifecycle and reconciliation
   - fail-closed hosted sandbox backend expectations
   - sandbox capacity and recovery metrics in health/operations surfaces
+- Step 21 is complete:
+  - scripted SQLite and storage-root backup flows
+  - checksum-verified clean-environment restore tooling
+  - repeatable `single_org` and `hosted` recovery drills
+  - release-gated backup verification guidance and retention expectations
 - The main remaining blockers are now operational hardening, not core product surface area.
 - A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
 - Hosted production still has a higher bar than on-prem because the web app now expects a dedicated sandbox supervisor service and broader incident/runbook work remains.
