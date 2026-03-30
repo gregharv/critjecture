@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 
+import { isMembershipStatus } from "@/lib/access-control";
 import { authenticateUser, getAuthenticatedUserByEmail } from "@/lib/users";
 import { isUserRole } from "@/lib/roles";
 
@@ -43,6 +44,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         return {
           email: user.email,
           id: user.id,
+          membershipStatus: user.membershipStatus,
           name: user.name,
           organizationId: user.organizationId,
           organizationName: user.organizationName,
@@ -72,6 +74,10 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         token.organizationSlug =
           "organizationSlug" in user && typeof user.organizationSlug === "string"
             ? user.organizationSlug
+            : undefined;
+        token.membershipStatus =
+          "membershipStatus" in user && isMembershipStatus(user.membershipStatus)
+            ? user.membershipStatus
             : undefined;
         token.sub = user.id;
 
@@ -107,7 +113,10 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         session.user.organizationSlug = refreshedUser?.organizationSlug ?? (
           typeof token.organizationSlug === "string" ? token.organizationSlug : ""
         );
-        session.user.role = refreshedUser?.role ?? (isUserRole(token.role) ? token.role : "intern");
+        session.user.membershipStatus = refreshedUser?.membershipStatus ?? (
+          isMembershipStatus(token.membershipStatus) ? token.membershipStatus : "active"
+        );
+        session.user.role = refreshedUser?.role ?? (isUserRole(token.role) ? token.role : "member");
       }
 
       return session;

@@ -8,6 +8,7 @@ import readline from "node:readline";
 import { promisify } from "node:util";
 import { and, eq, inArray } from "drizzle-orm";
 
+import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import { getAppDatabase } from "@/lib/app-db";
 import { documentChunks, documents } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
@@ -48,7 +49,7 @@ type CandidateAccumulator = {
 };
 
 function getScopeDescription(role: UserRole) {
-  return role === "owner"
+  return canRoleAccessKnowledgeScope(role, "admin")
     ? "all company_data files"
     : "public company_data files only";
 }
@@ -355,7 +356,7 @@ async function searchIndexedPdfCandidates(
     eq(documents.ingestionStatus, "ready"),
   ];
 
-  if (role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(role, "admin")) {
     whereClauses.push(eq(documents.accessScope, "public"));
   }
 
@@ -602,7 +603,7 @@ export async function searchCompanyKnowledge(
 
   const companyDataRoot = await resolveCompanyDataRoot(organizationSlug);
   const searchedDirectory =
-    role === "owner"
+    canRoleAccessKnowledgeScope(role, "admin")
       ? companyDataRoot
       : path.join(companyDataRoot, "public");
   const exactMatches = await runRipgrepSearch(

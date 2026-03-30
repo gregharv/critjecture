@@ -9,7 +9,7 @@ describe("wouldRemoveLastActiveOwner", () => {
         activeOwnerCount: 1,
         currentRole: "owner",
         currentStatus: "active",
-        nextRole: "intern",
+        nextRole: "member",
         nextStatus: "active",
       }),
     ).toBe(true);

@@ -20,10 +20,6 @@ async function requireOwnerUser() {
     return { error: jsonError("Authentication required.", 401), user: null };
   }
 
-  if (user.role !== "owner") {
-    return { error: jsonError("Only Owner can manage compliance settings.", 403), user: null };
-  }
-
   return { error: null, user };
 }
 
@@ -32,6 +28,10 @@ export async function GET() {
 
   if (error || !user) {
     return error;
+  }
+
+  if (!user.access.canAccessAdminSettings) {
+    return jsonError("This membership cannot view compliance settings.", 403);
   }
 
   const organization = await getOrganizationById(user.organizationId);
@@ -55,6 +55,10 @@ export async function PUT(request: Request) {
 
   if (error || !user) {
     return error;
+  }
+
+  if (!user.access.canManageOrganizationSettings) {
+    return jsonError("Only Owner can change compliance settings.", 403);
   }
 
   let body: Record<string, number | null | undefined>;

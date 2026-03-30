@@ -53,8 +53,14 @@ export async function GET(_request: Request, context: RouteContext) {
 
     if (
       !sandboxRun ||
-      sandboxRun.userId !== user.id ||
       sandboxRun.organizationId !== user.organizationId
+    ) {
+      return jsonError("Generated asset not found.", 404);
+    }
+
+    if (
+      sandboxRun.userId !== user.id &&
+      !user.access.canDownloadGeneratedAssetsCreatedByOthers
     ) {
       return jsonError("Generated asset not found.", 404);
     }

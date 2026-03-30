@@ -16,8 +16,11 @@ export async function GET(
     return Response.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  if (user.role !== "owner") {
-    return Response.json({ error: "Only Owner can view review documents." }, { status: 403 });
+  if (!user.access.canViewCustomerReviewDocs) {
+    return Response.json(
+      { error: "This membership cannot view review documents." },
+      { status: 403 },
+    );
   }
 
   const { doc } = await context.params;

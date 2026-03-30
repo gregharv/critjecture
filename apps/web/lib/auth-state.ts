@@ -4,12 +4,22 @@ import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
 
 import { auth } from "@/auth";
+import {
+  buildAccessSnapshot,
+  hasAccessCapability,
+  isMembershipStatus,
+  type AccessCapability,
+  type AccessSnapshot,
+  type MembershipStatus,
+} from "@/lib/access-control";
 import { isUserRole, type UserRole } from "@/lib/roles";
 import { getAuthenticatedUserByEmail, getAuthenticatedUserById } from "@/lib/users";
 
 export type SessionUser = {
+  access: AccessSnapshot;
   email: string;
   id: string;
+  membershipStatus: MembershipStatus;
   name: string | null;
   organizationId: string;
   organizationName: string;
@@ -31,13 +41,15 @@ function getSafeSessionUser(session: Session | null): SessionUser | null {
     return null;
   }
 
-  if (!isUserRole(user.role)) {
+  if (!isUserRole(user.role) || !isMembershipStatus(user.membershipStatus)) {
     return null;
   }
 
   return {
+    access: buildAccessSnapshot(user.role, user.membershipStatus),
     email: user.email,
     id: user.id,
+    membershipStatus: user.membershipStatus,
     name: typeof user.name === "string" ? user.name : null,
     organizationId: user.organizationId,
     organizationName: user.organizationName,
@@ -74,6 +86,16 @@ export async function requireOwnerPageUser() {
   const user = await requirePageUser();
 
   if (user.role !== "owner") {
+    redirect("/chat");
+  }
+
+  return user;
+}
+
+export async function requirePageUserCapability(capability: AccessCapability) {
+  const user = await requirePageUser();
+
+  if (!hasAccessCapability(user.access, capability)) {
     redirect("/chat");
   }
 

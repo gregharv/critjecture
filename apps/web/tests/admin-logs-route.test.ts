@@ -63,8 +63,8 @@ describe("GET /api/admin/logs", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns 403 for intern users", async () => {
-    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "intern" }));
+  it("returns 403 for member users", async () => {
+    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "member" }));
 
     const response = await GET(new Request("http://localhost/api/admin/logs"));
 
@@ -80,3 +80,10 @@ describe("GET /api/admin/logs", () => {
     expect(body.turns[0]?.id).toBe("turn-1");
   });
 });
+  it("returns 200 for admin users", async () => {
+    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "admin" }));
+
+    const response = await GET(new Request("http://localhost/api/admin/logs?limit=10"));
+
+    expect(response.status).toBe(200);
+  });

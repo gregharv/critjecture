@@ -624,7 +624,7 @@ async function createSingleOrgScenario(rootDir) {
       id: randomUUID(),
       now,
       organizationId,
-      role: "intern",
+      role: "member",
       userId: internId,
     });
     insertDocument(sqlite, {

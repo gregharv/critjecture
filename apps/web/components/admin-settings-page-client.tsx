@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import type { AccessSnapshot } from "@/lib/access-control";
 import type {
   AdminMemberRecord,
   GetOrganizationAdminResponse,
@@ -11,6 +12,12 @@ import type {
   OrganizationWorkspacePlanSummary,
 } from "@/lib/admin-types";
 import { CUSTOMER_REVIEW_DOCS } from "@/lib/customer-review-docs";
+import type { UserRole } from "@/lib/roles";
+
+type AdminSettingsPageClientProps = {
+  access: AccessSnapshot;
+  role: UserRole;
+};
 
 type AdminSettingsState = {
   error: string | null;
@@ -69,7 +76,7 @@ async function parseJson(response: Response) {
   return (await response.json()) as Record<string, unknown>;
 }
 
-export function AdminSettingsPageClient() {
+export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClientProps) {
   const [state, setState] = useState<AdminSettingsState>({
     error: null,
     jobs: [],
@@ -85,7 +92,7 @@ export function AdminSettingsPageClient() {
     email: "",
     name: "",
     password: "",
-    role: "intern",
+    role: "member",
   });
   const [retentionFields, setRetentionFields] = useState<Record<string, string>>({
     alertRetentionDays: "",
@@ -314,7 +321,7 @@ export function AdminSettingsPageClient() {
         email: "",
         name: "",
         password: "",
-        role: "intern",
+        role: "member",
       });
       await refresh();
     } catch (caughtError) {
@@ -448,15 +455,41 @@ export function AdminSettingsPageClient() {
               <label className="settings-field">
                 <span>Display name</span>
                 <input
+                  disabled={!access.canManageOrganizationSettings}
                   onChange={(event) => setOrganizationName(event.target.value)}
                   type="text"
                   value={organizationName}
                 />
               </label>
-              <button className="settings-button" disabled={state.saving} type="submit">
+              <button
+                className="settings-button"
+                disabled={state.saving || !access.canManageOrganizationSettings}
+                type="submit"
+              >
                 Save organization
               </button>
             </form>
+          </section>
+
+          <section className="settings-panel">
+            <div className="settings-panel__header">
+              <div>
+                <div className="settings-panel__eyebrow">Access Control</div>
+                <h2>{role === "owner" ? "Owner policy view" : "Admin policy view"}</h2>
+              </div>
+            </div>
+            <div className="settings-table">
+              {[
+                "member: public-scope chat, search, analysis, chart, and document access",
+                "admin: member access plus member management, policy visibility, audit logs, operations, and review docs",
+                "owner: admin access plus organization settings, export downloads, and destructive governance",
+                "restricted: sign-in allowed, but search, chat, imports, and sandbox tools are blocked",
+              ].map((line) => (
+                <article className="settings-table__row" key={line}>
+                  <div>{line}</div>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section className="settings-panel">
@@ -469,6 +502,7 @@ export function AdminSettingsPageClient() {
             </div>
             <form className="settings-form settings-form--inline" onSubmit={handleCreateMember}>
               <input
+                disabled={!access.canManageMembers}
                 onChange={(event) =>
                   setNewMember((current) => ({ ...current, name: event.target.value }))
                 }
@@ -477,6 +511,7 @@ export function AdminSettingsPageClient() {
                 value={newMember.name}
               />
               <input
+                disabled={!access.canManageMembers}
                 onChange={(event) =>
                   setNewMember((current) => ({ ...current, email: event.target.value }))
                 }
@@ -485,6 +520,7 @@ export function AdminSettingsPageClient() {
                 value={newMember.email}
               />
               <input
+                disabled={!access.canManageMembers}
                 onChange={(event) =>
                   setNewMember((current) => ({ ...current, password: event.target.value }))
                 }
@@ -493,15 +529,21 @@ export function AdminSettingsPageClient() {
                 value={newMember.password}
               />
               <select
+                disabled={!access.canManageMembers}
                 onChange={(event) =>
                   setNewMember((current) => ({ ...current, role: event.target.value }))
                 }
                 value={newMember.role}
               >
-                <option value="intern">Intern</option>
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
                 <option value="owner">Owner</option>
               </select>
-              <button className="settings-button" disabled={state.saving} type="submit">
+              <button
+                className="settings-button"
+                disabled={state.saving || !access.canManageMembers}
+                type="submit"
+              >
                 Add member
               </button>
             </form>
@@ -516,26 +558,34 @@ export function AdminSettingsPageClient() {
                         ? " • shared workspace pool"
                         : ` • cap ${formatCredits(member.monthlyCreditCap)} credits`}
                     </div>
+                    <div className="settings-table__meta">
+                      {member.capabilitySummary.join(" • ")}
+                    </div>
                   </div>
                   <select
+                    disabled={!access.canManageMembers}
                     defaultValue={member.role}
                     onChange={(event) =>
                       void updateMember(member.id, { role: event.target.value })
                     }
                   >
-                    <option value="intern">Intern</option>
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
                     <option value="owner">Owner</option>
                   </select>
                   <select
+                    disabled={!access.canManageMembers}
                     defaultValue={member.status}
                     onChange={(event) =>
                       void updateMember(member.id, { status: event.target.value })
                     }
                   >
                     <option value="active">Active</option>
+                    <option value="restricted">Restricted</option>
                     <option value="suspended">Suspended</option>
                   </select>
                   <input
+                    disabled={!access.canManageMembers}
                     defaultValue={member.monthlyCreditCap ?? ""}
                     min={0}
                     onBlur={(event) => {
@@ -549,6 +599,7 @@ export function AdminSettingsPageClient() {
                   />
                   <button
                     className="settings-button settings-button--ghost"
+                    disabled={!access.canManageMembers}
                     onClick={() => void resetPassword(member.id)}
                     type="button"
                   >
@@ -574,6 +625,7 @@ export function AdminSettingsPageClient() {
                 <label className="settings-field" key={key}>
                   <span>{key}</span>
                   <input
+                    disabled={!access.canManageGovernance}
                     onChange={(event) =>
                       setRetentionFields((current) => ({
                         ...current,
@@ -585,14 +637,18 @@ export function AdminSettingsPageClient() {
                   />
                 </label>
               ))}
-              <button className="settings-button" disabled={state.saving} type="submit">
+              <button
+                className="settings-button"
+                disabled={state.saving || !access.canManageGovernance}
+                type="submit"
+              >
                 Save retention rules
               </button>
             </form>
             <div className="settings-job-controls">
               <button
                 className="settings-button"
-                disabled={state.saving}
+                disabled={state.saving || !access.canManageGovernance}
                 onClick={() => void queueJob("organization_export")}
                 type="button"
               >
@@ -608,7 +664,9 @@ export function AdminSettingsPageClient() {
               </label>
               <button
                 className="settings-button settings-button--ghost"
-                disabled={state.saving || !latestExportJob || !cutoffDate}
+                disabled={
+                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
+                }
                 onClick={() => void queueJob("history_purge")}
                 type="button"
               >
@@ -616,7 +674,9 @@ export function AdminSettingsPageClient() {
               </button>
               <button
                 className="settings-button settings-button--ghost"
-                disabled={state.saving || !latestExportJob || !cutoffDate}
+                disabled={
+                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
+                }
                 onClick={() => void queueJob("import_metadata_purge")}
                 type="button"
               >
@@ -624,7 +684,9 @@ export function AdminSettingsPageClient() {
               </button>
               <button
                 className="settings-button settings-button--ghost"
-                disabled={state.saving || !latestExportJob || !cutoffDate}
+                disabled={
+                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
+                }
                 onClick={() => void queueJob("knowledge_delete")}
                 type="button"
               >
@@ -656,7 +718,7 @@ export function AdminSettingsPageClient() {
                     <span>{job.requestedByUserEmail ?? "Automatic"}</span>
                     <span>{job.artifact.hasArtifact ? formatBytes(job.artifact.byteSize) : "No artifact"}</span>
                   </div>
-                  {job.artifact.hasArtifact ? (
+                  {job.artifact.hasArtifact && access.canManageGovernance ? (
                     <a
                       className="settings-link"
                       href={`/api/admin/governance-jobs/${encodeURIComponent(job.id)}/download`}

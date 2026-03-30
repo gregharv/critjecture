@@ -52,7 +52,7 @@ export function WorkspaceShell({
               >
                 Knowledge
               </Link>
-              {user.role === "owner" ? (
+              {user.access.canViewOperations ? (
                 <>
                   <Link
                     className={`shell-nav__link ${activePage === "operations" ? "is-active" : ""}`}
@@ -82,6 +82,8 @@ export function WorkspaceShell({
                   {user.organizationName}
                   {" · "}
                   {getRoleLabel(user.role)}
+                  {" · "}
+                  {user.membershipStatus}
                   {" · "}
                   {user.email}
                 </span>

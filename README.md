@@ -1,6 +1,6 @@
 # Critjecture
 
-Critjecture is an auditable AI data analyst for business teams. It combines a chat interface, role-aware access to company files, sandboxed analysis tooling, generated outputs, and an owner-visible audit trail of what the system did to produce each answer.
+Critjecture is an auditable AI data analyst for business teams. It combines a chat interface, role-aware access to company files, sandboxed analysis tooling, generated outputs, and an admin-visible audit trail of what the system did to produce each answer.
 
 The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` and a separate `uv`-managed Python environment in `packages/python-sandbox`.
 
@@ -45,10 +45,11 @@ When a question depends on company data, the assistant searches the current orga
 
 ### Roles
 
-The current MVP has two real application roles per organization membership:
+The current product has three fixed application roles per organization membership:
 
-- `Intern`: limited to `company_data/public`
-- `Owner`: can access all of that organization's `company_data`
+- `member`: limited to `company_data/public`
+- `admin`: can access all of that organization's `company_data` plus audit, operations, member management, and review docs
+- `owner`: all admin capabilities plus organization settings, export downloads, and destructive governance
 
 Role is derived from the authenticated server session and organization membership, not from client-side UI state.
 
@@ -58,9 +59,9 @@ Protected routes require sign-in. Critjecture currently ships with:
 
 - one seeded organization
 - one seeded `Owner`
-- one seeded `Intern`
+- one seeded `Member`
 
-Sessions are cookie-based. Backend routes derive permissions and tenant scope from the authenticated session, and generated files are only retrievable by the authenticated user who created them inside the same organization.
+Sessions are cookie-based. Backend routes derive permissions and tenant scope from the authenticated session. Generated files remain creator-owned by default and can also be retrieved by the organization owner inside the same organization.
 
 Deployment modes:
 
@@ -69,7 +70,7 @@ Deployment modes:
 
 ### Audit Logs
 
-The owner audit dashboard lives at `http://localhost:3000/admin/logs`.
+The admin audit dashboard lives at `http://localhost:3000/admin/logs`.
 
 It shows a newest-first list of chat turn cards scoped to the current organization. Expanding a card reveals a chronological timeline of:
 
@@ -80,7 +81,7 @@ Each card can be filtered to show all events, only assistant responses, or only 
 
 ### Operations
 
-The owner operations dashboard lives at `http://localhost:3000/admin/operations`.
+The admin operations dashboard lives at `http://localhost:3000/admin/operations`.
 
 It adds:
 
@@ -96,7 +97,7 @@ Observed API routes attach `x-critjecture-request-id` so production failures can
 
 ### Settings
 
-The owner settings dashboard lives at `http://localhost:3000/admin/settings`.
+The admin settings dashboard lives at `http://localhost:3000/admin/settings`.
 
 It adds:
 
@@ -115,8 +116,8 @@ The knowledge library lives at `http://localhost:3000/knowledge`.
 
 Authenticated users can upload `.csv`, `.txt`, `.md`, and text-extractable `.pdf` files into the current organization's knowledge tree.
 
-- `Intern`: uploads only to `company_data/public/uploads/...`
-- `Owner`: uploads to either `company_data/public/uploads/...` or `company_data/admin/uploads/...`
+- `member`: read-only public-scope visibility
+- `admin` and `owner`: uploads to either `company_data/public/uploads/...` or `company_data/admin/uploads/...`
 
 Uploaded files are indexed on upload, tracked in SQLite metadata, visible in the knowledge library UI, and searchable through the existing `search_company_knowledge` flow. Uploaded files that pass authorization can also be staged into the Python sandbox through the existing `inputFiles` mechanism.
 

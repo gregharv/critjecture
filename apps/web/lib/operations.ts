@@ -1563,7 +1563,13 @@ export async function getOperationsSummary(input: {
           ? Math.max(0, Number(row.creditCap) - Number(row.creditsUsed ?? 0))
           : null,
       requestCount: Number(row.requestCount ?? 0),
-      status: (row.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
+      status: (
+        row.status === "suspended"
+          ? "suspended"
+          : row.status === "restricted"
+            ? "restricted"
+            : "active"
+      ) as UsageActorSummary["status"],
       totalTokens: Number(row.totalTokens ?? 0),
       userId: row.userId as string,
     }))

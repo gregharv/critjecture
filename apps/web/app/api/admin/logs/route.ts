@@ -27,11 +27,11 @@ export async function GET(request: Request) {
     });
   }
 
-  if (user.role !== "owner") {
+  if (!user.access.canViewAuditLogs) {
     return finalizeObservedRequest(observed, {
       errorCode: "admin_forbidden",
       outcome: "error",
-      response: buildObservedErrorResponse("Only Owner can view audit logs.", 403),
+      response: buildObservedErrorResponse("This membership cannot view audit logs.", 403),
     });
   }
 

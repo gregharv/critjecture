@@ -35,7 +35,7 @@ export async function GET(
     });
   }
 
-  if (user.role !== "owner") {
+  if (!user.access.canManageGovernance) {
     return finalizeObservedRequest(observed, {
       errorCode: "governance_forbidden",
       governanceJobId: jobId,

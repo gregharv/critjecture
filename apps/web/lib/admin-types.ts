@@ -1,5 +1,5 @@
+import type { MembershipStatus } from "@/lib/access-control";
 import type { UserRole } from "@/lib/roles";
-import type { UserStatus } from "@/lib/users";
 import type { WorkspacePlanSummary, WorkspacePlanUsageSnapshot } from "@/lib/workspace-plans";
 
 export const GOVERNANCE_JOB_TYPES = [
@@ -25,13 +25,14 @@ export type OrganizationWorkspacePlanSummary = WorkspacePlanSummary &
   Pick<WorkspacePlanUsageSnapshot, "exhausted" | "remainingCredits" | "resetAt" | "usedCredits">;
 
 export type AdminMemberRecord = {
+  capabilitySummary: string[];
   createdAt: number;
   email: string;
   id: string;
   monthlyCreditCap: number | null;
   name: string | null;
   role: UserRole;
-  status: UserStatus;
+  status: MembershipStatus;
   updatedAt: number;
 };
 

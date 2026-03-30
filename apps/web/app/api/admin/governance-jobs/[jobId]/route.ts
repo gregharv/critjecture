@@ -35,12 +35,12 @@ export async function GET(
     });
   }
 
-  if (user.role !== "owner") {
+  if (!user.access.canViewGovernance) {
     return finalizeObservedRequest(observed, {
       errorCode: "governance_forbidden",
       governanceJobId: jobId,
       outcome: "error",
-      response: buildObservedErrorResponse("Only Owner can view governance jobs.", 403),
+      response: buildObservedErrorResponse("This membership cannot view governance jobs.", 403),
     });
   }
 

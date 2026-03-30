@@ -108,6 +108,17 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!user.access.canUseAnswerTools) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "membership_restricted",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot use chat or answer-generation tools.",
+        403,
+      ),
+    });
+  }
+
   const budgetDecision = await enforceBudgetPolicy({
     requestId: observed.requestId,
     routeGroup: "chat",

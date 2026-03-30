@@ -11,7 +11,11 @@ import type {
   ConversationMetadata,
   ConversationSessionData,
 } from "@/lib/conversation-types";
-import type { UserRole } from "@/lib/roles";
+import {
+  fromLegacyStoredUserRole,
+  toLegacyStoredUserRole,
+  type UserRole,
+} from "@/lib/roles";
 
 type ConversationUsage = SessionMetadata["usage"];
 
@@ -34,8 +38,8 @@ function getRoleRank(role: UserRole) {
   return role === "owner" ? 1 : 0;
 }
 
-function canAccessConversation(currentRole: UserRole, storedRole: UserRole) {
-  return getRoleRank(currentRole) >= getRoleRank(storedRole);
+function canAccessConversation(currentRole: UserRole, storedRole: "intern" | "owner") {
+  return getRoleRank(currentRole) >= getRoleRank(fromLegacyStoredUserRole(storedRole));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -276,7 +280,7 @@ export async function upsertConversation(input: {
       id: input.conversationId,
       organizationId: input.organizationId,
       userId: input.userId,
-      userRole: input.userRole,
+      userRole: toLegacyStoredUserRole(input.userRole),
       title: metadata.title,
       previewText: metadata.preview,
       messageCount: metadata.messageCount,
@@ -294,7 +298,7 @@ export async function upsertConversation(input: {
       set: {
         organizationId: input.organizationId,
         userId: input.userId,
-        userRole: input.userRole,
+        userRole: toLegacyStoredUserRole(input.userRole),
         title: metadata.title,
         previewText: metadata.preview,
         messageCount: metadata.messageCount,

@@ -3,13 +3,16 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
+import {
+  buildAccessSnapshot,
+  type MembershipStatus,
+} from "@/lib/access-control";
 import { getAppDatabase } from "@/lib/app-db";
 import { organizationMemberships, organizations, users } from "@/lib/app-schema";
 import type { AdminMemberRecord, OrganizationAdminSummary } from "@/lib/admin-types";
 import { ensureOrganizationMembership } from "@/lib/organizations";
 import { hashPassword } from "@/lib/passwords";
-import type { UserRole } from "@/lib/roles";
-import type { UserStatus } from "@/lib/users";
+import { toLegacyStoredUserRole, type UserRole } from "@/lib/roles";
 
 function mapMemberRow(row: {
   createdAt: number;
@@ -18,10 +21,15 @@ function mapMemberRow(row: {
   monthlyCreditCap: number | null;
   name: string | null;
   role: UserRole;
-  status: UserStatus;
+  status: MembershipStatus;
   updatedAt: number;
 }) {
+  const access = buildAccessSnapshot(row.role, row.status);
+
   return {
+    capabilitySummary: access.capabilities.map((capability) =>
+      capability.replaceAll("_", " "),
+    ),
     createdAt: row.createdAt,
     email: row.email,
     id: row.id,
@@ -101,9 +109,9 @@ async function countActiveOwners(organizationId: string) {
 export function wouldRemoveLastActiveOwner(input: {
   activeOwnerCount: number;
   currentRole: UserRole;
-  currentStatus: UserStatus;
+  currentStatus: MembershipStatus;
   nextRole: UserRole;
-  nextStatus: UserStatus;
+  nextStatus: MembershipStatus;
 }) {
   const currentlyActiveOwner =
     input.currentRole === "owner" && input.currentStatus === "active";
@@ -114,7 +122,7 @@ export function wouldRemoveLastActiveOwner(input: {
 
 async function assertOrganizationKeepsOwner(input: {
   nextRole: UserRole;
-  nextStatus: UserStatus;
+  nextStatus: MembershipStatus;
   organizationId: string;
   userId: string;
 }) {
@@ -172,7 +180,7 @@ export async function createOrganizationMember(input: {
   organizationId: string;
   password: string;
   role: UserRole;
-  status?: UserStatus;
+  status?: MembershipStatus;
 }) {
   const db = await getAppDatabase();
   const normalizedEmail = input.email.trim().toLowerCase();
@@ -201,11 +209,11 @@ export async function createOrganizationMember(input: {
     createdAt: now,
     email: normalizedEmail,
     id: userId,
-      name,
-      passwordHash,
-      role: input.role,
-      status: "active",
-      updatedAt: now,
+    name,
+    passwordHash,
+    role: toLegacyStoredUserRole(input.role),
+    status: "active",
+    updatedAt: now,
   });
 
   await ensureOrganizationMembership(userId, input.organizationId, input.role, {
@@ -229,7 +237,7 @@ export async function updateOrganizationMember(input: {
   name?: string | null;
   organizationId: string;
   role?: UserRole;
-  status?: UserStatus;
+  status?: MembershipStatus;
   userId: string;
 }) {
   const db = await getAppDatabase();
@@ -262,7 +270,7 @@ export async function updateOrganizationMember(input: {
     .update(users)
     .set({
       name: nextName,
-      role: nextRole,
+      role: toLegacyStoredUserRole(nextRole),
       updatedAt: now,
     })
     .where(eq(users.id, input.userId));

@@ -1856,3 +1856,75 @@ Step 25 was implemented as a real workspace-level commercial control model that 
 - `pnpm --filter web test`
 - `pnpm --filter web lint`
 - `pnpm --filter web build`
+
+## Step 26: Fixed RBAC and Access-Control Surface
+
+### What Was Implemented
+
+Step 26 was implemented as a fixed-role RBAC pass that replaces the earlier `Owner` / `Intern` split with a membership-driven access model built around `owner`, `admin`, and `member`, plus org-membership states `active`, `restricted`, and `suspended`.
+
+- Added a centralized access-control layer in `apps/web/lib/access-control.ts`.
+  - Defines the fixed capability matrix for:
+    - chat, search, and sandbox-backed answer tools
+    - knowledge library visibility and writes
+    - member management
+    - audit and operations visibility
+    - admin settings and organization settings
+    - governance job visibility, management, and downloads
+    - generated-asset override access for owners
+- Reworked auth and session state so organization membership is the authorization source of truth.
+  - Session payloads now carry membership status and a server-derived access snapshot
+  - Restricted members can authenticate but land in an explicitly limited workspace state
+  - Suspended memberships now fail login with a specific suspension error instead of looking like bad credentials
+- Expanded the membership schema and migration set:
+  - `apps/web/drizzle/0011_step26_rbac_memberships.sql`
+  - `organization_memberships.role` now stores `member | admin | owner`
+  - `organization_memberships.status` now stores `active | restricted | suspended`
+  - existing non-owner memberships are backfilled to `member`
+- Replaced scattered role checks across product routes and pages with capability-driven enforcement.
+  - Search, chat, analysis, chart, document, knowledge, audit, operations, settings, governance, and customer-review routes now gate behavior through the shared access snapshot
+  - `admin` can manage members, view audit and operations data, and use answer-producing tools across `public` and `admin` scopes
+  - `member` remains limited to `public` knowledge and creator-owned generated outputs
+  - `restricted` can sign in but cannot use answer tools, knowledge writes, or admin surfaces
+- Updated the admin and workspace UI.
+  - Settings now exposes the fixed access-control matrix and the new role/state controls
+  - Workspace navigation and page guards are capability-driven instead of owner-only
+  - Chat and knowledge pages now show explicit restricted-state messaging
+- Reconciled product and security docs so shipped claims now describe `Owner`, `Admin`, and `Member` rather than `Owner` and `Intern`
+
+### Current Step 26 Behavior
+
+- `Owner`
+  - Has full workspace control across `public` and `admin` scopes
+  - Can manage organization settings, governance jobs, governance downloads, members, audit, and operations
+  - Can download another member's generated assets when needed
+- `Admin`
+  - Can use answer-producing tools across `public` and `admin` scopes
+  - Can manage members and view audit, operations, settings, and customer-review materials
+  - Cannot change core organization settings or run destructive governance actions reserved for owners
+- `Member`
+  - Can use chat, search, analysis, chart, and document generation against `public` scope only
+  - Can access only their own conversations and generated outputs
+- `Restricted`
+  - Can authenticate
+  - Cannot use answer tools, search, sandbox-backed tools, knowledge writes, or admin surfaces
+  - Sees an explicit restricted workspace state instead of generic failures
+- `Suspended`
+  - Cannot authenticate to the workspace
+  - Receives a suspension-specific login error
+
+### Important Implementation Details
+
+- Step 26 intentionally chose a fixed server-defined capability matrix rather than custom roles or per-member overrides.
+- Membership is now the runtime authorization source of truth, but `users.role` and some historical audit/conversation storage remain on the older role shape for compatibility and are mapped at the application layer.
+- The shipped knowledge classifications remain `public` and `admin`; this step does not add new data classes.
+- Raw generated-asset download remains creator-owned by default, with an owner override but no new admin override.
+- Commercial credit exhaustion remains distinct from access-control failures:
+  - credit exhaustion still returns `429`
+  - restricted or unauthorized access returns explicit access errors
+
+### Verification
+
+- `pnpm --filter web test`
+- `pnpm --filter web exec tsc --noEmit`
+- `pnpm --filter web build`

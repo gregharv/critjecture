@@ -34,6 +34,17 @@ export async function POST(
     });
   }
 
+  if (!user.access.canWriteKnowledge) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "knowledge_import_forbidden",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot retry knowledge import jobs.",
+        403,
+      ),
+    });
+  }
+
   const rateLimitDecision = await enforceRateLimitPolicy({
     routeGroup: "knowledge_import",
     user,

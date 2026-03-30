@@ -116,6 +116,17 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!user.access.canUseAnswerTools) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "search_forbidden",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot search workspace knowledge.",
+        403,
+      ),
+    });
+  }
+
   const rateLimitDecision = await enforceRateLimitPolicy({
     routeGroup: "search",
     user,

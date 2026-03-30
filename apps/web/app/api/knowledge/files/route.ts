@@ -31,6 +31,10 @@ export async function GET(request: Request) {
     return jsonError("Authentication required.", 401);
   }
 
+  if (!user.access.canViewKnowledgeLibrary) {
+    return jsonError("This membership cannot view the knowledge library.", 403);
+  }
+
   const { searchParams } = new URL(request.url);
   const scope = parseKnowledgeScopeFilter(searchParams.get("scope"));
   const status = parseKnowledgeStatusFilter(searchParams.get("status"));
@@ -77,6 +81,17 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!user.access.canWriteKnowledge) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "knowledge_upload_forbidden",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot upload or import knowledge files.",
+        403,
+      ),
+    });
+  }
+
   const rateLimitDecision = await enforceRateLimitPolicy({
     routeGroup: "knowledge_upload",
     user,
@@ -115,14 +130,6 @@ export async function POST(request: Request) {
       errorCode: "missing_file",
       outcome: "error",
       response: buildObservedErrorResponse("file must be provided as a multipart upload.", 400),
-    });
-  }
-
-  if (typeof scope !== "string" && user.role === "owner") {
-    return finalizeObservedRequest(observed, {
-      errorCode: "missing_scope",
-      outcome: "error",
-      response: buildObservedErrorResponse("scope must be provided for owner uploads.", 400),
     });
   }
 

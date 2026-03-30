@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
+import type { AccessSnapshot } from "@/lib/access-control";
 import type {
   CreateKnowledgeImportJobResponse,
   GetKnowledgeImportJobResponse,
@@ -26,6 +27,7 @@ import {
 import type { UserRole } from "@/lib/roles";
 
 type KnowledgePageClientProps = {
+  access: AccessSnapshot;
   role: UserRole;
 };
 
@@ -157,7 +159,7 @@ function getProgress(job: KnowledgeImportJobRecord) {
   );
 }
 
-export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
+export function KnowledgePageClient({ access, role }: KnowledgePageClientProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
@@ -185,7 +187,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
   ) => {
     const searchParams = new URLSearchParams();
 
-    if (nextScopeFilter !== "all" && role === "owner") {
+    if (nextScopeFilter !== "all" && access.visibleKnowledgeScopes.includes("admin")) {
       searchParams.set("scope", nextScopeFilter);
     }
 
@@ -284,10 +286,18 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
   }, [loadFiles, loadJobDetail, loadJobs, scopeFilter, state.activeJobId, statusFilter]);
 
   useEffect(() => {
+    if (!access.canViewKnowledgeLibrary) {
+      return;
+    }
+
     void refreshAll({ selectedJobId: null });
-  }, [refreshAll]);
+  }, [access.canViewKnowledgeLibrary, refreshAll]);
 
   useEffect(() => {
+    if (!access.canViewKnowledgeLibrary) {
+      return;
+    }
+
     if (!shouldRepoll(state.jobs)) {
       return;
     }
@@ -299,7 +309,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [refreshAll, state.activeJobId, state.jobs]);
+  }, [access.canViewKnowledgeLibrary, refreshAll, state.activeJobId, state.jobs]);
 
   async function handleQuickUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -469,6 +479,24 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
     }
   }
 
+  if (!access.canViewKnowledgeLibrary) {
+    return (
+      <section className="knowledge-page">
+        <div className="knowledge-panel">
+          <div className="knowledge-panel__header">
+            <div>
+              <p className="knowledge-panel__eyebrow">Access</p>
+              <h1 className="knowledge-panel__title">Knowledge library unavailable</h1>
+            </div>
+            <p className="knowledge-panel__copy">
+              This membership cannot browse or import knowledge files.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="knowledge-page">
       <div className="knowledge-panel knowledge-panel--hero">
@@ -487,8 +515,9 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
         <div className="knowledge-import-scope">
           <label className="knowledge-field knowledge-field--compact">
             <span className="knowledge-field__label">Import scope</span>
-            {role === "owner" ? (
+            {access.canWriteKnowledge && access.visibleKnowledgeScopes.includes("admin") ? (
               <select
+                disabled={!access.canWriteKnowledge}
                 onChange={(event) => {
                   setImportScope(event.currentTarget.value as ImportScopeValue);
                 }}
@@ -511,9 +540,17 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
             </div>
             <label className="knowledge-field">
               <span className="knowledge-field__label">File</span>
-              <input accept={KNOWLEDGE_UPLOAD_ACCEPT} name="file" type="file" />
+              <input
+                accept={KNOWLEDGE_UPLOAD_ACCEPT}
+                disabled={!access.canWriteKnowledge}
+                name="file"
+                type="file"
+              />
             </label>
-            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+            <button
+              className="knowledge-button knowledge-button--primary"
+              disabled={state.submitting || !access.canWriteKnowledge}
+            >
               {state.submitting ? "Submitting..." : "Start upload job"}
             </button>
             <p className="knowledge-upload__hint">
@@ -531,12 +568,16 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
               <input
                 {...DIRECTORY_INPUT_PROPS}
                 accept={KNOWLEDGE_UPLOAD_ACCEPT}
+                disabled={!access.canWriteKnowledge}
                 multiple
                 name="directory-files"
                 type="file"
               />
             </label>
-            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+            <button
+              className="knowledge-button knowledge-button--primary"
+              disabled={state.submitting || !access.canWriteKnowledge}
+            >
               {state.submitting ? "Submitting..." : "Start directory job"}
             </button>
             <p className="knowledge-upload__hint">
@@ -551,9 +592,17 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
             </div>
             <label className="knowledge-field">
               <span className="knowledge-field__label">Archive</span>
-              <input accept={KNOWLEDGE_ARCHIVE_ACCEPT} name="archive" type="file" />
+              <input
+                accept={KNOWLEDGE_ARCHIVE_ACCEPT}
+                disabled={!access.canWriteKnowledge}
+                name="archive"
+                type="file"
+              />
             </label>
-            <button className="knowledge-button knowledge-button--primary" disabled={state.submitting}>
+            <button
+              className="knowledge-button knowledge-button--primary"
+              disabled={state.submitting || !access.canWriteKnowledge}
+            >
               {state.submitting ? "Submitting..." : "Start archive job"}
             </button>
             <p className="knowledge-upload__hint">
@@ -625,7 +674,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                   {job.retryableFailedFileCount > 0 ? (
                     <button
                       className="knowledge-button"
-                      disabled={state.submitting}
+                      disabled={state.submitting || !access.canWriteKnowledge}
                       onClick={() => {
                         void handleRetry(job.id);
                       }}
@@ -685,7 +734,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
                       {file.stage === "retryable_failed" ? (
                         <button
                           className="knowledge-button"
-                          disabled={state.submitting}
+                          disabled={state.submitting || !access.canWriteKnowledge}
                           onClick={() => {
                             void handleRetry(activeJob.id);
                           }}
@@ -713,7 +762,7 @@ export function KnowledgePageClient({ role }: KnowledgePageClientProps) {
           </div>
 
           <div className="knowledge-toolbar__filters">
-            {role === "owner" ? (
+            {access.visibleKnowledgeScopes.includes("admin") ? (
               <label className="knowledge-field knowledge-field--compact">
                 <span className="knowledge-field__label">Scope</span>
                 <select

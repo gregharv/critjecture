@@ -17,8 +17,8 @@ async function requireOwnerUser() {
     return { error: jsonError("Authentication required.", 401), user: null };
   }
 
-  if (user.role !== "owner") {
-    return { error: jsonError("Only Owner can manage members.", 403), user: null };
+  if (!user.access.canManageMembers) {
+    return { error: jsonError("This membership cannot manage members.", 403), user: null };
   }
 
   return { error: null, user };
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   }
 
   if (!isUserRole(body.role)) {
-    return jsonError("Role must be intern or owner.", 400);
+    return jsonError("Role must be member, admin, or owner.", 400);
   }
 
   try {

@@ -1,4 +1,3 @@
-import type { UserRole } from "@/lib/roles";
 import type { CreateKnowledgeImportJobResponse } from "@/lib/knowledge-import-types";
 
 export const KNOWLEDGE_ACCESS_SCOPES = ["public", "admin"] as const;
@@ -35,11 +34,4 @@ export type UploadKnowledgeFileResponse = CreateKnowledgeImportJobResponse;
 
 export function isKnowledgeAccessScope(value: string): value is KnowledgeAccessScope {
   return KNOWLEDGE_ACCESS_SCOPES.includes(value as KnowledgeAccessScope);
-}
-
-export function canRoleAccessKnowledgeScope(
-  role: UserRole,
-  scope: KnowledgeAccessScope,
-) {
-  return role === "owner" || scope === "public";
 }

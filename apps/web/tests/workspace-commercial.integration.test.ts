@@ -83,7 +83,7 @@ describe("workspace commercial controls", () => {
         name: "Analyst User",
         organizationId: owner!.organizationId,
         password: "analyst-password",
-        role: "intern",
+        role: "member",
       });
 
       await updateOrganizationMember({

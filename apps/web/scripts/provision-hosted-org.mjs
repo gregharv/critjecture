@@ -160,7 +160,7 @@ async function main() {
         now,
         now,
       );
-      insertMembership.run(randomUUID(), organizationId, internUserId, "intern", now, now);
+      insertMembership.run(randomUUID(), organizationId, internUserId, "member", now, now);
     }
   });
 

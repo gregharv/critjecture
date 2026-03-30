@@ -3,6 +3,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
+import { buildAccessSnapshot, type MembershipStatus } from "@/lib/access-control";
 import { getAppDatabase } from "@/lib/app-db";
 import { users } from "@/lib/app-schema";
 import { isSingleOrgDeployment } from "@/lib/deployment-mode";
@@ -12,7 +13,11 @@ import {
   getPrimaryMembershipForUser,
 } from "@/lib/organizations";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
-import { type UserRole } from "@/lib/roles";
+import {
+  toLegacyStoredUserRole,
+  type LegacyStoredUserRole,
+  type UserRole,
+} from "@/lib/roles";
 
 export const USER_STATUSES = ["active", "suspended"] as const;
 
@@ -23,13 +28,15 @@ export type AppUser = {
   id: string;
   name: string | null;
   passwordHash: string;
-  role: UserRole;
+  role: LegacyStoredUserRole;
   status: UserStatus;
 };
 
 export type AuthenticatedAppUser = {
+  access: ReturnType<typeof buildAccessSnapshot>;
   email: string;
   id: string;
+  membershipStatus: MembershipStatus;
   name: string | null;
   organizationId: string;
   organizationName: string;
@@ -87,7 +94,7 @@ async function upsertSeedUser(input: SeedUserInput) {
       email: input.email,
       name: input.name,
       passwordHash,
-      role: input.role,
+      role: toLegacyStoredUserRole(input.role),
       status: "active",
       createdAt: now,
       updatedAt: now,
@@ -106,7 +113,7 @@ async function upsertSeedUser(input: SeedUserInput) {
       email: input.email,
       name: input.name,
       passwordHash,
-      role: input.role,
+      role: toLegacyStoredUserRole(input.role),
       status: "active",
       updatedAt: now,
     })
@@ -124,7 +131,7 @@ async function ensureSeedUsers() {
 
   const seedUsers = [
     getSeedUserInput("CRITJECTURE_OWNER", "owner"),
-    getSeedUserInput("CRITJECTURE_INTERN", "intern"),
+    getSeedUserInput("CRITJECTURE_INTERN", "member"),
   ].filter((value): value is SeedUserInput => value !== null);
 
   for (const seedUser of seedUsers) {
@@ -196,13 +203,15 @@ async function getAuthenticatedUserForRecord(user: AppUser): Promise<Authenticat
     return null;
   }
 
-  if (membership.status !== "active") {
+  if (membership.status === "suspended") {
     return null;
   }
 
   return {
+    access: buildAccessSnapshot(membership.role, membership.status),
     email: user.email,
     id: user.id,
+    membershipStatus: membership.status,
     name: user.name,
     organizationId: membership.organizationId,
     organizationName: membership.organizationName,
@@ -245,4 +254,30 @@ export async function authenticateUser(email: string, password: string) {
   }
 
   return getAuthenticatedUserForRecord(user);
+}
+
+export async function getLoginFailureReason(email: string, password: string) {
+  const user = await getUserByEmail(email);
+
+  if (!user) {
+    return "invalid" as const;
+  }
+
+  const passwordMatches = await verifyPassword(password, user.passwordHash);
+
+  if (!passwordMatches) {
+    return "invalid" as const;
+  }
+
+  if (user.status !== "active") {
+    return "suspended" as const;
+  }
+
+  const membership = await getPrimaryMembershipForUser(user.id);
+
+  if (!membership || membership.status === "suspended") {
+    return "suspended" as const;
+  }
+
+  return "ok" as const;
 }

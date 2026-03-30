@@ -179,6 +179,17 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!user.access.canUseAnswerTools) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "sandbox_forbidden",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot generate charts.",
+        403,
+      ),
+    });
+  }
+
   const budgetDecision = await enforceBudgetPolicy({
     requestId: observed.requestId,
     routeGroup: "sandbox",

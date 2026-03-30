@@ -7,11 +7,11 @@ This document packages the current Critjecture MVP for internal or customer secu
 Critjecture is an auditable AI data analyst for business data with:
 
 - authenticated users and organization memberships
-- server-enforced `Owner` / `Intern` role checks
+- server-enforced fixed `owner` / `admin` / `member` role checks plus membership-state enforcement
 - organization-scoped company-data storage and retrieval
 - a constrained tool surface for search, analysis, chart generation, and document generation
 - a Python sandbox path for approved analysis and artifact generation
-- owner-visible audit, operations, governance, backup, and recovery surfaces
+- privileged audit, operations, governance, backup, and recovery surfaces
 
 The current product is designed for governed business-data answers and narrow operational workflows, not open-ended autonomous execution.
 
@@ -70,7 +70,7 @@ Current tenant boundaries:
 
 - authentication derives the acting user, organization, and role on the server
 - organization memberships scope access to company data, chat history, audit records, governance jobs, generated assets, and uploads
-- generated assets remain bound to the creating user and organization when they are retrieved
+- generated assets remain bound to the creating user and organization when they are retrieved, with an owner override for same-organization review
 - organization-managed files live under organization-specific storage roots
 
 Hosted-mode boundary notes:
@@ -93,7 +93,7 @@ Current privacy posture:
 
 - access is scoped to the authenticated organization and role
 - uploaded files are stored in organization-owned paths and are searchable only when authorization allows it
-- audit and governance data are visible through owner-admin surfaces inside the same organization
+- audit and governance data are visible through privileged admin surfaces inside the same organization
 - retention settings can prune request logs, usage events, chat history, import metadata, and export artifacts according to organization policy
 - destructive purge flows are gated behind recent export creation for the covered data classes
 

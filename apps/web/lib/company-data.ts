@@ -4,6 +4,7 @@ import { constants as fsConstants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import { ensureOrganizationCompanyDataRoot } from "@/lib/app-paths";
 import { assertManagedKnowledgeDocumentReady } from "@/lib/knowledge-document-access";
 import type { UserRole } from "@/lib/roles";
@@ -38,15 +39,16 @@ export function normalizeCompanyDataRelativePath(relativePath: string) {
 }
 
 function assertRoleAllowsCompanyDataPath(relativePath: string, role: UserRole) {
-  if (role === "owner") {
+  const scope =
+    relativePath === "public" || relativePath.startsWith("public/")
+      ? "public"
+      : "admin";
+
+  if (canRoleAccessKnowledgeScope(role, scope)) {
     return;
   }
 
-  if (relativePath === "public" || relativePath.startsWith("public/")) {
-    return;
-  }
-
-  throw new Error("Intern role may only access files inside company_data/public.");
+  throw new Error("This role may only access files inside company_data/public.");
 }
 
 export async function resolveAuthorizedCompanyDataFile(

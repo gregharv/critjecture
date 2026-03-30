@@ -50,8 +50,10 @@ export const organizationMemberships = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["intern", "owner"] }).notNull(),
-    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+    role: text("role", { enum: ["member", "admin", "owner"] }).notNull(),
+    status: text("status", { enum: ["active", "restricted", "suspended"] })
+      .notNull()
+      .default("active"),
     monthlyCreditCap: integer("monthly_credit_cap"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
@@ -59,11 +61,11 @@ export const organizationMemberships = sqliteTable(
   (table) => [
     check(
       "organization_memberships_role_check",
-      sql`${table.role} in ('intern', 'owner')`,
+      sql`${table.role} in ('member', 'admin', 'owner')`,
     ),
     check(
       "organization_memberships_status_check",
-      sql`${table.status} in ('active', 'suspended')`,
+      sql`${table.status} in ('active', 'restricted', 'suspended')`,
     ),
     uniqueIndex("organization_memberships_org_user_idx").on(
       table.organizationId,

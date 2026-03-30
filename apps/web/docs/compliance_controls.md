@@ -4,13 +4,14 @@ This document summarizes the customer-visible governance and retention controls 
 
 ## Current Governance Controls
 
-- member administration for `Owner` and `Intern`
+- member administration for fixed `owner`, `admin`, and `member` roles
+- membership states for `active`, `restricted`, and `suspended`
 - password resets and member suspension/reactivation
 - configurable retention windows for request logs, usage events, alerts, chat history, and import metadata
 - full-organization export bundles
 - destructive purge jobs that require a completed export from the last 24 hours
 
-These controls are organization-scoped and available through the owner settings surface.
+These controls are organization-scoped and available through the privileged settings surface.
 
 ## Retention And Deletion Model
 
@@ -30,7 +31,7 @@ Retention controls change what the running app keeps over time, but they do not 
 - governance actions are stored as organization-scoped governance jobs
 - automatic retention cleanup produces completed governance job records with the cutoff and counts applied
 - exports include organization data, member metadata, audit records, operations data, knowledge metadata, and managed files
-- owner-visible audit logs capture assistant responses, tool calls, parameters, accessed files, summaries, and errors for chat turns in the same organization
+- privileged audit logs capture assistant responses, tool calls, parameters, accessed files, summaries, and errors for chat turns in the same organization
 
 ## Practical Boundary
 

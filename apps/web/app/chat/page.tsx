@@ -1,6 +1,7 @@
 import { ChatShellWithRole } from "@/components/chat-shell";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requirePageUser } from "@/lib/auth-state";
+import { getRestrictedWorkspaceMessage } from "@/lib/access-control";
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +10,23 @@ export default async function ChatPage() {
 
   return (
     <WorkspaceShell activePage="chat" user={user}>
-      <ChatShellWithRole
-        organizationSlug={user.organizationSlug}
-        role={user.role}
-        userId={user.id}
-      />
+      {user.access.canUseAnswerTools ? (
+        <ChatShellWithRole
+          organizationSlug={user.organizationSlug}
+          role={user.role}
+          userId={user.id}
+        />
+      ) : (
+        <section className="settings-panel">
+          <div className="settings-panel__header">
+            <div>
+              <div className="settings-panel__eyebrow">Access</div>
+              <h2>Workspace restricted</h2>
+            </div>
+          </div>
+          <p>{getRestrictedWorkspaceMessage(user.membershipStatus)}</p>
+        </section>
+      )}
     </WorkspaceShell>
   );
 }

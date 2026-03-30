@@ -28,14 +28,24 @@ describe("GET /api/admin/customer-review/[doc]", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns 403 for intern users", async () => {
-    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "intern" }));
+  it("returns 403 for member users", async () => {
+    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "member" }));
 
     const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
       params: Promise.resolve({ doc: "security-review" }),
     });
 
     expect(response.status).toBe(403);
+  });
+
+  it("returns 200 for admin users", async () => {
+    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "admin" }));
+
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
+      params: Promise.resolve({ doc: "security-review" }),
+    });
+
+    expect(response.status).toBe(200);
   });
 
   it("returns 404 for unknown document slugs", async () => {

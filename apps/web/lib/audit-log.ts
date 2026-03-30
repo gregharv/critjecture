@@ -20,7 +20,7 @@ import type {
   ToolCallStatus,
   TurnStatus,
 } from "@/lib/audit-types";
-import type { UserRole } from "@/lib/roles";
+import { toLegacyStoredUserRole, type UserRole } from "@/lib/roles";
 
 function normalizeLimit(limit: number) {
   if (!Number.isFinite(limit)) {
@@ -49,7 +49,7 @@ export async function createChatTurnLog(input: {
     completedAt: null,
     status: "started",
     userId: input.userId,
-    userRole: input.userRole,
+    userRole: toLegacyStoredUserRole(input.userRole),
     userPromptText: input.userPromptText,
     createdAt: Date.now(),
   });

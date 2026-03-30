@@ -105,9 +105,9 @@ describe("POST /api/company-knowledge/search", () => {
     expect(body.summary).toContain("Role: Owner.");
   });
 
-  it("returns intern-scoped results without admin files", async () => {
-    const user = createSessionUser({ role: "intern" });
-    const result = createSearchResult("intern");
+  it("returns member-scoped results without admin files", async () => {
+    const user = createSessionUser({ role: "member" });
+    const result = createSearchResult("member");
     mocks.getSessionUser.mockResolvedValue(user);
     mocks.searchCompanyKnowledge.mockResolvedValue(result);
 
@@ -117,7 +117,7 @@ describe("POST /api/company-knowledge/search", () => {
     const body = await readJson<typeof result & { role: string; summary: string }>(response);
 
     expect(response.status).toBe(200);
-    expect(body.role).toBe("intern");
+    expect(body.role).toBe("member");
     expect(body.selectedFiles).toEqual(["public/holidays.txt"]);
     expect(body.summary).not.toContain("admin/");
   });

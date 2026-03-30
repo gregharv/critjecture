@@ -2,42 +2,10 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 25 finished the workspace commercial control model for pooled monthly credits. The remaining work is now split into three tracks:
+Step 26 finished the governed SMB access-control pass. The remaining work is now split into two tracks:
 
-1. close the remaining product-control gaps required by the governed SMB offering
-2. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
-3. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
-
-## Phase 0: Product Controls Required For Broad SMB Launch
-
-## Step 26: Real RBAC and Policy Controls For Governed Answers
-
-### Goal
-
-Raise the current `Owner` / `Intern` model into a role and policy system that matches the product claim of governed business-data answers.
-
-### What Should Be Implemented
-
-- expand authorization beyond the current two-role split:
-  - add a clearer permission model for search, sandbox analysis, document generation, admin visibility, and governance actions
-  - decide whether permissions are fixed-role, custom-role, or capability-flag based
-- enforce role-aware controls on answer-producing actions:
-  - what data scopes can be searched
-  - which tools can be executed
-  - which generated outputs can be viewed or downloaded
-  - which audit and operations details are visible
-- add admin management surfaces for those controls:
-  - member role assignment beyond `Owner` and `Intern`
-  - policy visibility in settings or a dedicated access-control surface
-  - explicit UX for suspended, restricted, or over-budget users
-- reconcile docs and product language so the claimed RBAC model matches the actual shipped permission boundary
-
-### Acceptance Criteria
-
-- the authorization model is more expressive than `Owner` versus `Intern`
-- critical tool execution and answer retrieval paths enforce the expanded permissions consistently
-- admin surfaces can manage and explain those permissions without relying on hidden env config
-- product docs can honestly describe governed role-aware controls over data access and answer generation
+1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
+2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
 
 ## Phase 1: `single_org` Production Readiness
 
@@ -193,9 +161,13 @@ Finish the remaining platform, product, and documentation work required to descr
   - owner-visible credit balances and per-member monthly caps in settings and operations
   - workspace membership suspension moved to the org-membership layer rather than the global user row
   - customer-facing credit reporting preserved alongside internal USD/token telemetry
-- The remaining product-control gap before a broad SMB launch is:
-  - richer role and policy controls than the current `Owner` / `Intern` split
+- Step 26 is complete:
+  - fixed-role `owner`, `admin`, and `member` authorization with centralized capability checks
+  - org-membership states `active`, `restricted`, and `suspended`
+  - capability-driven gating across answer tools, knowledge, audit, operations, settings, and governance routes
+  - restricted-workspace UX and suspension-specific login failures
+  - docs aligned to the shipped RBAC model instead of the older `Owner` / `Intern` split
 - The main near-term goal is not more surface area:
-  - it is closing the commercial/governance gaps needed for the flat-rate product and then converting the current pilot-ready system into a defensible `single_org` production deployment
+  - it is converting the current governed SMB system into a defensible `single_org` production deployment and then raising `hosted` to a higher bar
 - `hosted` should be treated as a separate bar:
   - stronger isolation, stronger supervisor operations, and a clearer persistence strategy are still required before calling it broadly production-ready

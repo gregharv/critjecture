@@ -14,7 +14,7 @@ Use `single_org` for:
 
 Current characteristics:
 
-- seeds the default organization and pilot `Owner` / `Intern` users from environment variables
+- seeds the default organization and pilot `Owner` / `Member` users from environment variables
 - keeps storage, logs, and operations under one customer-managed deployment footprint
 - runs sandbox jobs through the in-app local supervisor using host `bubblewrap` + `prlimit`
 

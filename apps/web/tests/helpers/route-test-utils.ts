@@ -1,15 +1,21 @@
+import { buildAccessSnapshot } from "@/lib/access-control";
 import type { SessionUser } from "@/lib/auth-state";
 import type { UserRole } from "@/lib/roles";
 
 export function createSessionUser(overrides: Partial<SessionUser> = {}): SessionUser {
+  const role = overrides.role ?? "owner";
+  const membershipStatus = overrides.membershipStatus ?? "active";
+
   return {
+    access: overrides.access ?? buildAccessSnapshot(role, membershipStatus),
     email: "owner@example.com",
     id: "user-1",
+    membershipStatus,
     name: "Owner User",
     organizationId: "org-1",
     organizationName: "Critjecture Test Org",
     organizationSlug: "critjecture-test-org",
-    role: "owner",
+    role,
     ...overrides,
   };
 }
@@ -63,25 +69,25 @@ export function createBudgetDecision(overrides: Partial<{
 }
 
 export function createSearchResult(role: UserRole = "owner") {
-  const scopeDescription =
-    role === "owner"
-      ? "all company_data files for the organization"
-      : "public company_data files for the organization";
+  const elevated = role === "owner" || role === "admin";
+  const scopeDescription = elevated
+    ? "all company_data files for the organization"
+    : "public company_data files for the organization";
 
   return {
     candidateFiles: [
       {
-        file: role === "owner" ? "admin/contractors_2026.csv" : "public/holidays.txt",
+        file: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
         matchedTerms: ["2026", "contractors"],
         matches: [
           {
-            file: role === "owner" ? "admin/contractors_2026.csv" : "public/holidays.txt",
+            file: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
             line: 1,
-            text: role === "owner" ? "ledger_year,contractor,payout" : "Office closed July 4",
+            text: elevated ? "ledger_year,contractor,payout" : "Office closed July 4",
           },
         ],
         preview:
-          role === "owner"
+          elevated
             ? {
                 columns: ["ledger_year", "contractor", "payout"],
                 kind: "csv" as const,
@@ -96,15 +102,15 @@ export function createSearchResult(role: UserRole = "owner") {
     ],
     matches: [
       {
-        file: role === "owner" ? "admin/contractors_2026.csv" : "public/holidays.txt",
+        file: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
         line: 1,
-        text: role === "owner" ? "ledger_year,contractor,payout" : "Office closed July 4",
+        text: elevated ? "ledger_year,contractor,payout" : "Office closed July 4",
       },
     ],
-    recommendedFiles: [role === "owner" ? "admin/contractors_2026.csv" : "public/holidays.txt"],
+    recommendedFiles: [elevated ? "admin/contractors_2026.csv" : "public/holidays.txt"],
     scopeDescription,
-    searchedDirectory: role === "owner" ? "company_data" : "company_data/public",
-    selectedFiles: [role === "owner" ? "admin/contractors_2026.csv" : "public/holidays.txt"],
+    searchedDirectory: elevated ? "company_data" : "company_data/public",
+    selectedFiles: [elevated ? "admin/contractors_2026.csv" : "public/holidays.txt"],
     selectionReason: "single-candidate" as const,
     selectionRequired: false,
   };

@@ -28,10 +28,6 @@ async function requireOwnerUser() {
     return { error: jsonError("Authentication required.", 401), user: null };
   }
 
-  if (user.role !== "owner") {
-    return { error: jsonError("Only Owner can manage governance jobs.", 403), user: null };
-  }
-
   return { error: null, user };
 }
 
@@ -49,6 +45,14 @@ export async function GET() {
       errorCode: "governance_forbidden",
       outcome: "error",
       response: error ?? jsonError("Authentication required.", 401),
+    });
+  }
+
+  if (!user.access.canViewGovernance) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "governance_forbidden",
+      outcome: "error",
+      response: buildObservedErrorResponse("This membership cannot view governance jobs.", 403),
     });
   }
 
@@ -72,6 +76,14 @@ export async function POST(request: Request) {
       errorCode: "governance_forbidden",
       outcome: "error",
       response: error ?? jsonError("Authentication required.", 401),
+    });
+  }
+
+  if (!user.access.canManageGovernance) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "governance_forbidden",
+      outcome: "error",
+      response: buildObservedErrorResponse("Only Owner can manage governance jobs.", 403),
     });
   }
 

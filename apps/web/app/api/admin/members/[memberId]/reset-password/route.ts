@@ -19,8 +19,8 @@ export async function POST(
     return jsonError("Authentication required.", 401);
   }
 
-  if (user.role !== "owner") {
-    return jsonError("Only Owner can reset passwords.", 403);
+  if (!user.access.canManageMembers) {
+    return jsonError("This membership cannot reset member passwords.", 403);
   }
 
   const { memberId } = await context.params;

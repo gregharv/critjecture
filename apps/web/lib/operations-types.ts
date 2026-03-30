@@ -2,6 +2,7 @@ import type {
   OperationsPoliciesSnapshot,
   OperationsRouteGroup,
 } from "@/lib/operations-policy";
+import type { MembershipStatus } from "@/lib/access-control";
 import type { SandboxExecutionBackend } from "@/lib/sandbox-policy";
 import type { CommercialUsageClass, WorkspacePlanSummary } from "@/lib/workspace-plans";
 
@@ -63,7 +64,7 @@ export type UsageActorSummary = {
   quantity: number;
   remainingCreditCap: number | null;
   requestCount: number;
-  status: "active" | "suspended";
+  status: MembershipStatus;
   totalTokens: number;
   userId: string;
 };

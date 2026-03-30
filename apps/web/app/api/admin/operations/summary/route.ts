@@ -27,11 +27,11 @@ export async function GET(request: Request) {
     });
   }
 
-  if (user.role !== "owner") {
+  if (!user.access.canViewOperations) {
     return finalizeObservedRequest(observed, {
       errorCode: "admin_forbidden",
       outcome: "error",
-      response: buildObservedErrorResponse("Only Owner can view operations.", 403),
+      response: buildObservedErrorResponse("This membership cannot view operations.", 403),
     });
   }
 

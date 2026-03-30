@@ -13,6 +13,7 @@ import path from "node:path";
 
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
+import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import type { SessionUser } from "@/lib/auth-state";
 import { ensureOrganizationKnowledgeStagingRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
@@ -37,7 +38,6 @@ import {
   type KnowledgeImportSourceKind,
 } from "@/lib/knowledge-import-types";
 import {
-  canRoleAccessKnowledgeScope,
   isKnowledgeAccessScope,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   type KnowledgeAccessScope,
@@ -171,7 +171,7 @@ function getAllowedUploadConfig(extension: string) {
 }
 
 function normalizeRequestedScope(role: SessionUser["role"], requestedScope: string) {
-  if (role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(role, "admin")) {
     return "public" as const;
   }
 
@@ -918,7 +918,7 @@ export async function listKnowledgeImportJobs(user: SessionUser) {
   const db = await getAppDatabase();
   const whereClauses = [eq(knowledgeImportJobs.organizationId, user.organizationId)];
 
-  if (user.role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(user.role, "admin")) {
     whereClauses.push(eq(knowledgeImportJobs.accessScope, "public"));
   }
 
@@ -960,7 +960,7 @@ export async function getKnowledgeImportJob(user: SessionUser, jobId: string) {
     eq(knowledgeImportJobs.organizationId, user.organizationId),
   ];
 
-  if (user.role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(user.role, "admin")) {
     whereClauses.push(eq(knowledgeImportJobs.accessScope, "public"));
   }
 
@@ -991,7 +991,7 @@ export async function retryKnowledgeImportJob(user: SessionUser, jobId: string) 
     eq(knowledgeImportJobs.organizationId, user.organizationId),
   ];
 
-  if (user.role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(user.role, "admin")) {
     whereClauses.push(eq(knowledgeImportJobs.accessScope, "public"));
   }
 

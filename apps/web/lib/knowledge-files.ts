@@ -8,12 +8,13 @@ import { TextDecoder } from "node:util";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
+import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
+import type { SessionUser } from "@/lib/auth-state";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAppDatabase } from "@/lib/app-db";
 import { documents, documentChunks, users } from "@/lib/app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 import {
-  canRoleAccessKnowledgeScope,
   isKnowledgeAccessScope,
   KNOWLEDGE_UPLOAD_ACCEPT,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
@@ -21,7 +22,6 @@ import {
   type KnowledgeFileRecord,
   type KnowledgeIngestionStatus,
 } from "@/lib/knowledge-types";
-import type { SessionUser } from "@/lib/auth-state";
 
 const execFileAsync = promisify(execFile);
 
@@ -103,7 +103,7 @@ function getAllowedUploadConfig(extension: string) {
 }
 
 function resolveUploadScope(role: SessionUser["role"], requestedScope: string) {
-  if (role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(role, "admin")) {
     return "public" as const;
   }
 
@@ -326,7 +326,7 @@ export async function listKnowledgeFiles(
     inArray(documents.sourceType, [...KNOWLEDGE_MANAGED_SOURCE_TYPES]),
   ];
 
-  if (user.role !== "owner") {
+  if (!canRoleAccessKnowledgeScope(user.role, "admin")) {
     whereClauses.push(eq(documents.accessScope, "public"));
   } else if (filters.scope) {
     whereClauses.push(eq(documents.accessScope, filters.scope));

@@ -7,7 +7,7 @@ import type {
   ListChatTurnLogsResponse,
   ToolCallLog,
 } from "@/lib/audit-types";
-import { getRoleLabel } from "@/lib/roles";
+import { fromLegacyStoredUserRole, getRoleLabel } from "@/lib/roles";
 
 type AuditLogState = {
   error: string | null;
@@ -356,7 +356,9 @@ function ChatTurnCard({ turn }: { turn: ChatTurnLog }) {
       <summary className="audit-card__summary">
         <div className="audit-card__summary-main">
           <div className="audit-card__meta">
-            <span className="audit-badge">{getRoleLabel(turn.userRole)}</span>
+            <span className="audit-badge">
+              {getRoleLabel(fromLegacyStoredUserRole(turn.userRole))}
+            </span>
             <span className={`audit-status audit-status--${turn.status}`}>
               {turn.status}
             </span>

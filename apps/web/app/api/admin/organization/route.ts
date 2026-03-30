@@ -21,10 +21,6 @@ async function requireOwnerUser() {
     return { error: jsonError("Authentication required.", 401), user: null };
   }
 
-  if (user.role !== "owner") {
-    return { error: jsonError("Only Owner can manage organization settings.", 403), user: null };
-  }
-
   return { error: null, user };
 }
 
@@ -33,6 +29,10 @@ export async function GET() {
 
   if (error || !user) {
     return error;
+  }
+
+  if (!user.access.canAccessAdminSettings) {
+    return jsonError("This membership cannot view organization settings.", 403);
   }
 
   const organization = await getOrganizationById(user.organizationId);
@@ -71,6 +71,10 @@ export async function PATCH(request: Request) {
 
   if (error || !user) {
     return error;
+  }
+
+  if (!user.access.canManageOrganizationSettings) {
+    return jsonError("Only Owner can change organization settings.", 403);
   }
 
   let body: { name?: string };

@@ -14,6 +14,7 @@ import {
   organizationMemberships,
   organizations,
 } from "@/lib/app-schema";
+import type { MembershipStatus } from "@/lib/access-control";
 import type { UserRole } from "@/lib/roles";
 import { ensureWorkspacePlanForOrganization } from "@/lib/workspace-plans";
 
@@ -23,7 +24,7 @@ export type OrganizationMembershipContext = {
   organizationName: string;
   organizationSlug: string;
   role: UserRole;
-  status: "active" | "suspended";
+  status: MembershipStatus;
 };
 
 const SINGLE_ORGANIZATION_MODE_ERROR =
@@ -187,7 +188,7 @@ export async function ensureOrganizationMembership(
   role: UserRole,
   options: {
     monthlyCreditCap?: number | null;
-    status?: "active" | "suspended";
+    status?: MembershipStatus;
   } = {},
 ) {
   const db = await getAppDatabase();

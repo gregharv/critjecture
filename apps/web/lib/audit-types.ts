@@ -1,3 +1,5 @@
+import type { LegacyStoredUserRole } from "@/lib/roles";
+
 export const TURN_STATUSES = ["started", "completed", "failed"] as const;
 export const TOOL_CALL_STATUSES = ["started", "completed", "error"] as const;
 export const ASSISTANT_MESSAGE_TYPES = [
@@ -108,7 +110,7 @@ export type ChatTurnLog = {
   userEmail: string | null;
   userId: string | null;
   userName: string | null;
-  userRole: "intern" | "owner";
+  userRole: LegacyStoredUserRole;
 };
 
 export type CreateChatTurnResponse = {

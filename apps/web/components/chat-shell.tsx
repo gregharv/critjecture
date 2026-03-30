@@ -41,6 +41,7 @@ import {
   DEFAULT_CHAT_THINKING_LEVEL,
   getSessionModelId,
 } from "@/lib/chat-models";
+import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type ChatShellState = {
@@ -409,7 +410,7 @@ function createToolRouteError(
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
-    role === "owner"
+    canRoleAccessKnowledgeScope(role, "admin")
       ? "You may search all files inside the current organization's company_data when needed."
       : "You may search only public files inside the current organization's company_data/public. Never imply access to admin-only data.";
 

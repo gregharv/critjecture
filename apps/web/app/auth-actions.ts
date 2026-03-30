@@ -3,6 +3,7 @@
 import { AuthError } from "next-auth";
 
 import { signIn, signOut } from "@/auth";
+import { getLoginFailureReason } from "@/lib/users";
 
 export type LoginActionState = {
   error: string | null;
@@ -15,6 +16,16 @@ export async function loginAction(
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")) : "";
   const password =
     typeof formData.get("password") === "string" ? String(formData.get("password")) : "";
+
+  const failureReason = await getLoginFailureReason(email, password);
+
+  if (failureReason === "suspended") {
+    return { error: "This account or membership is suspended." };
+  }
+
+  if (failureReason === "invalid") {
+    return { error: "Invalid email or password." };
+  }
 
   try {
     await signIn("credentials", {

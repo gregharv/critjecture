@@ -1,5 +1,6 @@
 import type { DefaultSession } from "next-auth";
 
+import type { MembershipStatus } from "@/lib/access-control";
 import type { UserRole } from "@/lib/roles";
 
 declare module "next-auth" {
@@ -11,6 +12,7 @@ declare module "next-auth" {
       organizationId: string;
       organizationName: string;
       organizationSlug: string;
+      membershipStatus: MembershipStatus;
       role: UserRole;
     };
   }
@@ -22,6 +24,7 @@ declare module "next-auth" {
     organizationId: string;
     organizationName: string;
     organizationSlug: string;
+    membershipStatus: MembershipStatus;
     role: UserRole;
   }
 }
@@ -31,6 +34,7 @@ declare module "next-auth/jwt" {
     organizationId?: string;
     organizationName?: string;
     organizationSlug?: string;
+    membershipStatus?: MembershipStatus;
     role?: UserRole;
   }
 }

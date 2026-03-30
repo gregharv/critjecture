@@ -9,7 +9,7 @@ export default async function KnowledgePage() {
 
   return (
     <WorkspaceShell activePage="knowledge" user={user}>
-      <KnowledgePageClient role={user.role} />
+      <KnowledgePageClient access={user.access} role={user.role} />
     </WorkspaceShell>
   );
 }

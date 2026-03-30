@@ -35,6 +35,10 @@ export async function GET() {
     return jsonError("Authentication required.", 401);
   }
 
+  if (!user.access.canViewKnowledgeLibrary) {
+    return jsonError("This membership cannot view knowledge import jobs.", 403);
+  }
+
   try {
     const jobs = await listKnowledgeImportJobs(user);
     return NextResponse.json({ jobs });
@@ -62,6 +66,17 @@ export async function POST(request: Request) {
       errorCode: "auth_required",
       outcome: "error",
       response: buildObservedErrorResponse("Authentication required.", 401),
+    });
+  }
+
+  if (!user.access.canWriteKnowledge) {
+    return finalizeObservedRequest(observed, {
+      errorCode: "knowledge_import_forbidden",
+      outcome: "blocked",
+      response: buildObservedErrorResponse(
+        "This membership cannot create knowledge import jobs.",
+        403,
+      ),
     });
   }
 
