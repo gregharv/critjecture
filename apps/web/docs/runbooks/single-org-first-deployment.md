@@ -20,6 +20,7 @@ pnpm backup:verify -- --deployment-mode single_org
 - confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, and `CRITJECTURE_SANDBOX_CONTAINER_IMAGE`
 - confirm the sandbox supervisor service is running and Docker can start the configured image
 - confirm `pdftotext` is installed on the web-app host
+- confirm the bootstrap owner/member credentials are set only for first access and are stored outside source control
 
 ## Required Operator Responsibilities
 
@@ -68,6 +69,8 @@ pnpm release:proof:single-org -- \
 
 - `/api/health` returns healthy or an understood degraded state
 - owner can sign in and load `/admin/logs`, `/admin/operations`, and `/admin/settings`
+- bootstrap owner/member credentials are rotated through `/admin/settings` before customer handoff
+- an app restart does not revert the rotated credentials
 - one upload succeeds
 - one sandbox task succeeds
 - the release-proof JSON and Markdown records are stored with the deployment evidence

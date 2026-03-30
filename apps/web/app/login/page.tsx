@@ -20,7 +20,7 @@ export default async function LoginPage() {
           <h1>Sign in to the workspace</h1>
           <p>
             Chat, audits, and generated files now require an authenticated session. Use
-            one of the seeded pilot accounts configured in `apps/web/.env.local`.
+            one of the bootstrap accounts configured in `apps/web/.env.local`.
           </p>
         </div>
         <LoginForm />

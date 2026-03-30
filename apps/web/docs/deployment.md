@@ -1,8 +1,13 @@
 # Deployment Modes
 
-Critjecture's current supported deployment envelope is SQLite-first in both `single_org` and `hosted` modes. The intended first production path is a controlled `single_org` pilot or customer-managed on-prem deployment. `hosted` is supported for Railway-style operation, but it has a higher review and operational bar because it depends on shared operator-managed infrastructure and a dedicated sandbox supervisor service.
+This is the canonical deployment and cutover guide for Critjecture's currently supported production envelope.
 
-For a concise review summary of deployment and security boundaries, start with `security_review.md`.
+The current repo claim is intentionally split:
+
+- `single_org` is production-ready for controlled customer-managed deployments inside the envelope documented here
+- `hosted` is supported for careful review and limited operation, but it is not yet broadly production-ready
+
+For a concise security and trust-boundary summary, pair this document with `security_review.md`.
 
 ## `single_org`
 
@@ -10,19 +15,58 @@ Use `single_org` for:
 
 - local development
 - customer-managed hardware
-- tightly controlled on-prem or single-customer pilot environments
+- tightly controlled on-prem or single-customer deployments
 
-Current characteristics:
+### Supported Production Envelope
 
-- seeds the default organization and pilot `Owner` / `Member` users from environment variables
-- keeps storage, logs, and operations under one customer-managed deployment footprint
-- defaults sandbox jobs to a dedicated container supervisor service configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
-- expects `CRITJECTURE_SANDBOX_CONTAINER_IMAGE` to point at the repo-owned sandbox runner image
-- keeps `local_supervisor` (`bubblewrap` + `prlimit`) only as an explicit local-dev/test override
+Current production expectations for `single_org`:
+
+- one customer-managed deployment footprint for app, SQLite storage, tenant storage, and operator procedures
+- persistent SQLite storage plus persistent organization storage roots
+- `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=container_supervisor`
+- `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, and `CRITJECTURE_SANDBOX_CONTAINER_IMAGE` configured
+- the repo-owned sandbox supervisor service deployed with Docker Engine available on the supervisor host
+- `pdftotext` installed on the web-app host
+- operator-managed secrets for auth, model access, and sandbox connectivity
+- explicit backups for both the database and tenant storage
+
+Bootstrap credential expectations:
+
+- `CRITJECTURE_OWNER_*` and `CRITJECTURE_INTERN_*` create the bootstrap owner/member accounts only when those accounts do not already exist
+- those env values are first-access bootstrap credentials, not authoritative long-lived production passwords
+- after first access, operators should rotate the bootstrap credentials through the admin member-management flow before customer handoff
+- password resets and membership changes are expected to persist across app restarts
+
+Current workload and sandbox limits for the supported envelope:
+
+- per-user active sandbox jobs: `1`
+- global active sandbox jobs: `4`
+- wall timeout: `10s`
+- CPU limit: `8s`
+- memory limit: `512 MiB`
+- process limit: `64`
+- stdout/stderr capture limit: `1 MiB`
+- output artifact size limit: `10 MiB`
+- generated artifact retention: `24h`
 
 Local development note:
 
+- `local_supervisor` (`bubblewrap` + `prlimit`) remains available only as an explicit dev/test override
 - if the dedicated supervisor service is not running, set `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=local_supervisor` intentionally instead of expecting an implicit fallback
+
+### Canonical Cutover Checklist
+
+For a real `single_org` production cutover, use `apps/web/docs/runbooks/single-org-first-deployment.md` as the canonical operator checklist.
+
+That runbook is the required cutover path for:
+
+- environment pre-flight verification
+- restore-drill evidence
+- release-proof evidence
+- bootstrap-credential rotation before handoff
+- post-cutover smoke checks
+
+For later production-changing releases, use `apps/web/docs/runbooks/single-org-routine-upgrade.md`.
 
 ## `hosted`
 
@@ -34,19 +78,15 @@ Current characteristics:
 - tenant creation is operator-managed through the provisioning script, not tenant self-service
 - the web app must be configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
 - the sandbox path depends on a dedicated remote supervisor service and should be treated as a required production dependency
-
-Hosted-mode review note:
-
 - tenant separation is enforced by authenticated organization scoping and storage-path boundaries inside shared operator-managed infrastructure
 
 ## Shared Runtime Requirements
 
 - persistent SQLite storage
 - persistent organization storage roots
-- Docker Engine plus the dedicated sandbox supervisor service for production `single_org`
-- `pdftotext` on the host for PDF ingestion
 - explicit backups for both the database and tenant storage
-- operator-managed secrets for auth, model access, and hosted sandbox connectivity
+- operator-managed secrets for auth, model access, and sandbox connectivity
+- `pdftotext` on the host for PDF ingestion
 
 ## Backup And Restore
 
@@ -75,7 +115,7 @@ Restore expectations:
 ## Recovery Drills
 
 - `single_org`: run `pnpm backup:verify -- --deployment-mode single_org` after schema or storage-layout changes
-- `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for Railway-style deploys
+- `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for hosted deploys
 
 `pnpm backup:verify` proves the repo's recovery tooling still works in representative fixtures. It is not the production release record for a real `single_org` environment.
 
@@ -121,6 +161,14 @@ Runbooks:
 - `apps/web/docs/runbooks/single-org-restore-drill.md`
 - `apps/web/docs/runbooks/single-org-first-deployment.md`
 - `apps/web/docs/runbooks/single-org-routine-upgrade.md`
+
+## Hosted-Only Deferred Work
+
+The remaining blockers to a broader production claim are `hosted` concerns, not `single_org` blockers:
+
+- stronger tenant isolation than the current shared-infrastructure boundary
+- a stronger hosted supervisor operating model, including failure drills and monitoring ownership
+- a clearer persistence and scale answer for growing hosted concurrency and tenant count
 
 ## Retention
 

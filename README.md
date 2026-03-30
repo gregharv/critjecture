@@ -57,15 +57,15 @@ Role is derived from the authenticated server session and organization membershi
 
 Protected routes require sign-in. Critjecture currently ships with:
 
-- one seeded organization
-- one seeded `Owner`
-- one seeded `Member`
+- one bootstrap organization
+- one bootstrap `Owner`
+- one bootstrap `Member`
 
 Sessions are cookie-based. Backend routes derive permissions and tenant scope from the authenticated session. Generated files remain creator-owned by default and can also be retrieved by the organization owner inside the same organization.
 
 Deployment modes:
 
-- `single_org`: local development and on-prem, with env-seeded default org and pilot users
+- `single_org`: local development and on-prem, with env-seeded bootstrap org and bootstrap users
 - `hosted`: Railway-style centrally managed multi-org deployment, where tenant provisioning is handled by the operator script
 
 ### Audit Logs
@@ -177,6 +177,8 @@ apps/web                  Next.js app, API routes, audit UI, chat UI
 apps/web/docs             Canonical customer-review, deployment, and runbook documentation
 sample_company_data       Bundled sample company data copied into org storage on first boot
 deployment.md             Compatibility wrapper pointing at the canonical deployment guide
+compliance_controls.md    Compatibility wrapper pointing at the canonical compliance guide
+hosted_provisioning.md    Compatibility wrapper pointing at the canonical hosted guide
 packages/python-sandbox   Isolated Python runtime managed by uv
 packages/sandbox-supervisor Dedicated container-backed sandbox supervisor service
 steps_completed.md        Implementation history by milestone
@@ -271,18 +273,27 @@ When the workspace or member cap is exhausted, credit-consuming routes return `4
 Operator incident runbooks live under `apps/web/docs/runbooks/` and cover sandbox, storage, migration, backup/restore, hosted, and on-prem response paths.
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
-If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, missing seeded user env vars mean login will not succeed because no pilot accounts will be available.
+If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, missing bootstrap user env vars mean first login will not succeed because no bootstrap accounts will be available.
+If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, bootstrap passwords are used only to create missing bootstrap accounts and are expected to be rotated through `/admin/settings` before customer handoff.
 If `CRITJECTURE_DEPLOYMENT_MODE=hosted`, tenant orgs and users should be created with `pnpm --filter web provision:hosted-org`.
 
 ## Deployment
 
 The supported current deployment envelope is SQLite-backed in both current modes:
 
-- `single_org` for local development, customer-managed hardware, and controlled on-prem pilots
+- `single_org` for local development, customer-managed hardware, and controlled on-prem deployments
 - `single_org` production should point at the repo-owned supervisor in `packages/sandbox-supervisor`
 - `hosted` for Railway-style centrally operated deployments with a dedicated sandbox supervisor service
 
-The intended first production path is a controlled `single_org` pilot. `hosted` remains supported, but it carries a higher operational and security-review bar because tenant isolation is enforced in shared operator-managed infrastructure.
+`single_org` is now production-ready for controlled customer-managed deployments inside one clear support envelope:
+
+- persistent SQLite storage and tenant storage roots
+- dedicated container-backed sandbox supervisor with Docker Engine on the supervisor host
+- `pdftotext` on the web-app host
+- explicit backups plus restore-drill and release-proof records
+- current sandbox envelope of `1` active run per user, `4` globally, `10s` wall time, `8s` CPU, `512 MiB` memory, `64` processes, `1 MiB` stdio capture, `10 MiB` artifact cap, and `24h` artifact retention
+
+`hosted` remains supported, but it is not yet broadly production-ready because tenant isolation, hosted supervisor operations, and hosted persistence/scale work still carry a higher bar.
 
 Start with:
 
@@ -302,7 +313,8 @@ Read [security_review.md](/home/hard2vary/projects/critjecture/apps/web/docs/sec
 Read [deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/deployment.md) for exact storage, backup, restore, and hosted/on-prem guidance.
 Read [compliance_controls.md](/home/hard2vary/projects/critjecture/apps/web/docs/compliance_controls.md) for the shipped governance and retention controls.
 Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/apps/web/docs/hosted_provisioning.md) for the hosted multi-org provisioning flow.
-Read the `apps/web/docs/runbooks/single-org-*.md` runbooks for the required first-deployment and routine-upgrade release gate in `single_org`.
+Read [single-org-first-deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/runbooks/single-org-first-deployment.md) for the canonical `single_org` cutover checklist.
+Read [single-org-routine-upgrade.md](/home/hard2vary/projects/critjecture/apps/web/docs/runbooks/single-org-routine-upgrade.md) for the `single_org` routine-upgrade gate.
 
 ## Demo Data
 

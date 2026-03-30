@@ -2,37 +2,10 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 28 finished the stronger `single_org` sandbox-boundary pass. The remaining work is now split into two tracks:
+Step 29 finished the `single_org` production cutover package. The remaining work is now the hosted production track:
 
-1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
-2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
-
-## Phase 1: `single_org` Production Readiness
-
-## Step 29: `single_org` Production Cutover Package
-
-### Goal
-
-Package the final minimum set of product and operational checks needed to call controlled `single_org` deployments production-ready.
-
-### What Should Be Implemented
-
-- validate the exact supported `single_org` production envelope:
-  - customer-managed hardware
-  - required host dependencies
-  - supported backup and recovery posture
-  - supported workload limits
-- add any missing small but necessary polish for real production use:
-  - safer initial credential handling or first-login rotation guidance
-  - final deployment checklist cleanup
-  - final doc reconciliation across README, deployment, security, and runbooks
-- explicitly mark which remaining items are postponed because they are `hosted` concerns rather than `single_org` blockers
-
-### Acceptance Criteria
-
-- the repo can honestly describe controlled `single_org` deployments as production-ready
-- there is one clear supported envelope and one clear operator checklist
-- remaining gaps are clearly identified as outside the `single_org` production claim
+1. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
+2. preserve the narrower `single_org` production claim while hosted-only hardening continues
 
 ## Phase 2: `hosted` Production Readiness
 
@@ -131,7 +104,12 @@ Finish the remaining platform, product, and documentation work required to descr
   - sandbox backend selection is explicit and fail closed instead of silently falling back to local `bubblewrap`
   - a repo-owned sandbox supervisor package and runner image definition now exist for customer-managed deployment
   - deployment, readiness, security, and runbook docs now describe the new production boundary clearly
+- Step 29 is complete:
+  - bootstrap `single_org` credentials now create missing first-access accounts without overwriting existing passwords or membership state on restart
+  - the `single_org` production envelope is now documented concretely across readiness, deployment, security, and README materials
+  - one canonical `single_org` cutover checklist now exists in the first-deployment runbook
+  - remaining production blockers are now called out explicitly as hosted-only work rather than `single_org` gaps
 - The main near-term goal is not more surface area:
-  - it is converting the current governed SMB system into a defensible `single_org` production deployment and then raising `hosted` to a higher bar
+  - it is raising `hosted` to a materially stronger production bar without weakening the now-narrower `single_org` claim
 - `hosted` should be treated as a separate bar:
   - stronger isolation, stronger supervisor operations, and a clearer persistence strategy are still required before calling it broadly production-ready

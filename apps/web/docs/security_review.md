@@ -1,6 +1,6 @@
 # Security Review Pack
 
-This document packages the current Critjecture MVP for internal or customer security review. It describes the shipped system as it exists today, the operator assumptions it relies on, and the boundaries of the currently supported deployment envelope.
+This document packages the current Critjecture system for internal or customer security review. It describes the shipped boundaries, the operator assumptions they rely on, and the limits of the current production claim.
 
 ## System Summary
 
@@ -9,7 +9,7 @@ Critjecture is an auditable AI data analyst for business data with:
 - authenticated users and organization memberships
 - server-enforced fixed `owner` / `admin` / `member` role checks plus membership-state enforcement
 - organization-scoped company-data storage and retrieval
-- a constrained tool surface for search, analysis, chart generation, and document generation
+- constrained search, analysis, chart, and document tooling
 - a Python sandbox path for approved analysis and artifact generation
 - privileged audit, operations, governance, backup, and recovery surfaces
 
@@ -17,23 +17,24 @@ The current product is designed for governed business-data answers and narrow op
 
 ## Supported Deployment Envelope
 
-The current supported deployment modes are:
+The current deployment answer is intentionally split:
 
 - `single_org`
   - local development
   - customer-managed hardware
-  - tightly controlled on-prem or single-customer pilot environments
+  - controlled on-prem or single-customer deployments
+  - the only mode currently described as production-ready, and only inside the documented support envelope
 - `hosted`
-  - centrally operated Railway-style deployments
+  - centrally operated multi-organization deployments
   - multiple organizations in one deployment
-  - a required dedicated sandbox supervisor service for Python execution
+  - supported only with a higher review bar and not yet broadly production-ready
 
 Explicit non-goals for the current envelope:
 
 - self-service public SaaS onboarding
 - arbitrary tenant-managed code execution outside the shipped tool contracts
 - broad enterprise compliance claims beyond the controls documented in this repo
-- async heavy analytics or large warehouse-style workloads
+- async heavy analytics or warehouse-style workloads beyond the current synchronous sandbox envelope
 
 ## Secrets And Credential Handling Expectations
 
@@ -41,11 +42,12 @@ Critjecture expects operators to provide secrets and privileged configuration th
 
 Current expectations:
 
-- keep `AUTH_SECRET`, `OPENAI_API_KEY`, and any hosted sandbox supervisor credentials out of source control
+- keep `AUTH_SECRET`, `OPENAI_API_KEY`, and sandbox supervisor credentials out of source control
 - use distinct secrets per environment
-- limit access to deployment secrets to operators with production responsibility
+- limit deployment-secret access to operators with production responsibility
 - rotate secrets through operator processes when staff or infrastructure boundaries change
-- avoid sharing seeded pilot credentials outside controlled `single_org` environments
+- treat `single_org` bootstrap account credentials as first-access credentials, not permanent production passwords
+- rotate bootstrap owner/member credentials through the admin member-management flow before customer handoff
 - for `single_org` production changes, capture the named secret-storage owner and secret-rotation owner in the release-proof record
 
 The app does not currently provide an in-product secret vault, bring-your-own-key workflow, or customer-managed encryption-key system.
@@ -73,8 +75,9 @@ For controlled customer-managed deployments, the operator is responsible for:
 - storage and backup encryption posture
 - `CRITJECTURE_ALERT_WEBHOOK_URL` configuration and delivery ownership
 - incident contact ownership for the environment
+- bootstrap credential rotation before customer handoff
 
-The repo now includes `pnpm restore:drill:single-org` and `pnpm release:proof:single-org` so those responsibilities are captured as release evidence instead of left to tribal knowledge.
+The repo includes `pnpm restore:drill:single-org` and `pnpm release:proof:single-org` so those responsibilities are captured as release evidence instead of left to tribal knowledge.
 
 ## Tenant Isolation And Trust Boundaries
 
@@ -121,22 +124,33 @@ Current controls and expectations:
 
 - approved files are staged into fresh per-run workspaces
 - inherited environment variables are stripped before Python execution
-- execution is bounded by timeout, memory, process, and output validation rules
+- execution is bounded by timeout, memory, process, output, and retention rules
 - `single_org` production uses a dedicated container supervisor service and per-run OCI containers
 - `local_supervisor` keeps `bubblewrap` + `prlimit` only as an explicit dev/test fallback
 - `hosted` requires a dedicated remote sandbox supervisor and should be reviewed as a separate operational dependency
-- operators should run the documented backup and restore verification flow after storage-layout or migration changes
 - `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover
 - operators should capture `x-critjecture-request-id` together with sandbox, governance, and import identifiers during incident response
+
+Current `single_org` production envelope for sandbox-backed work:
+
+- per-user active sandbox jobs: `1`
+- global active sandbox jobs: `4`
+- wall timeout: `10s`
+- CPU limit: `8s`
+- memory limit: `512 MiB`
+- process limit: `64`
+- stdout/stderr capture limit: `1 MiB`
+- output artifact size limit: `10 MiB`
+- generated artifact retention: `24h`
 
 See the deployment guide and runbooks for the exact operator procedures.
 
 ## Remaining Review Notes
 
-The main remaining hardening gap is not missing product surface area; it is the review and approval bar around the current system boundaries.
+The main remaining hardening gap is now primarily a `hosted` bar, not missing `single_org` product surface area.
 
 Important caveats:
 
 - `single_org` is the lower-risk first deployment path because it is customer-managed and narrower in scope
-- `hosted` has a higher review bar because it introduces shared operator-managed infrastructure and the dedicated sandbox supervisor dependency
-- future work such as stronger sandbox isolation, broader invite/onboarding workflows, or async heavy-job support would be new hardening/product steps, not claims of the current MVP
+- `hosted` still has a higher review bar because it introduces shared operator-managed infrastructure and the dedicated sandbox supervisor dependency
+- future work such as stronger hosted isolation, stronger hosted supervisor operations, or a different hosted persistence path would be new hardening steps, not claims of the current production package

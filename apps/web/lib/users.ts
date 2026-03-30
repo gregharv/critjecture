@@ -1,11 +1,11 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { buildAccessSnapshot, type MembershipStatus } from "@/lib/access-control";
 import { getAppDatabase } from "@/lib/app-db";
-import { users } from "@/lib/app-schema";
+import { organizationMemberships, users } from "@/lib/app-schema";
 import { isSingleOrgDeployment } from "@/lib/deployment-mode";
 import {
   ensureDefaultOrganization,
@@ -80,13 +80,14 @@ function getSeedUserInput(prefix: "CRITJECTURE_OWNER" | "CRITJECTURE_INTERN", ro
 
 async function upsertSeedUser(input: SeedUserInput) {
   const db = await getAppDatabase();
-  const passwordHash = await hashPassword(input.password);
-  const now = Date.now();
   const existingUser = await db.query.users.findFirst({
     where: eq(users.email, input.email),
   });
+  const defaultOrganization = await ensureDefaultOrganization();
 
   if (!existingUser) {
+    const passwordHash = await hashPassword(input.password);
+    const now = Date.now();
     const createdUserId = randomUUID();
 
     await db.insert(users).values({
@@ -99,29 +100,20 @@ async function upsertSeedUser(input: SeedUserInput) {
       createdAt: now,
       updatedAt: now,
     });
-
-    const defaultOrganization = await ensureDefaultOrganization();
-
     await ensureOrganizationMembership(createdUserId, defaultOrganization.id, input.role);
 
     return;
   }
+  const existingMembership = await db.query.organizationMemberships.findFirst({
+    where: and(
+      eq(organizationMemberships.organizationId, defaultOrganization.id),
+      eq(organizationMemberships.userId, existingUser.id),
+    ),
+  });
 
-  await db
-    .update(users)
-    .set({
-      email: input.email,
-      name: input.name,
-      passwordHash,
-      role: toLegacyStoredUserRole(input.role),
-      status: "active",
-      updatedAt: now,
-    })
-    .where(eq(users.id, existingUser.id));
-
-  const defaultOrganization = await ensureDefaultOrganization();
-
-  await ensureOrganizationMembership(existingUser.id, defaultOrganization.id, input.role);
+  if (!existingMembership) {
+    await ensureOrganizationMembership(existingUser.id, defaultOrganization.id, input.role);
+  }
 }
 
 async function ensureSeedUsers() {

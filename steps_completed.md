@@ -2102,3 +2102,66 @@ Step 28 was implemented as a stronger production `single_org` execution boundary
 - `pnpm --filter web lint`
 - `pnpm --filter web build`
 - `node --check packages/sandbox-supervisor/server.mjs`
+
+## Step 29: `single_org` Production Cutover Package
+
+### What Was Implemented
+
+Step 29 was implemented as the final `single_org` production packaging pass: it tightened bootstrap credential behavior, documented one concrete supported production envelope, and reconciled the operator-facing cutover materials around one canonical checklist.
+
+- Hardened `single_org` bootstrap-user behavior:
+  - `apps/web/lib/users.ts`
+  - bootstrap owner/member env vars now create missing accounts and memberships only
+  - existing users no longer have their password hashes, roles, or status overwritten on restart
+  - existing membership state no longer gets silently reset during reseed
+- Added targeted regression coverage:
+  - `apps/web/tests/user-bootstrap.integration.test.ts`
+  - covers:
+    - password rotation surviving a later seed-state pass
+    - suspended bootstrap memberships remaining suspended after reseed
+    - hosted mode continuing to avoid bootstrap seeding
+- Reconciled the production-readiness and cutover docs:
+  - `production_readiness.md`
+  - `release_checklist.md`
+  - `README.md`
+  - `apps/web/.env.local.example`
+  - `apps/web/app/login/page.tsx`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/runbooks/single-org-first-deployment.md`
+  - now documents:
+    - `single_org` as production-ready only inside one explicit customer-managed support envelope
+    - bootstrap credentials as first-access-only rather than long-lived production passwords
+    - the canonical `single_org` cutover path through the first-deployment runbook
+    - the remaining `hosted` gaps as separate roadmap work rather than `single_org` blockers
+- Restored the missing repo-root customer-review wrappers:
+  - `deployment.md`
+  - `compliance_controls.md`
+  - `hosted_provisioning.md`
+  - now points at the canonical `apps/web/docs` sources advertised elsewhere in the repo
+
+### Current Step 29 Behavior
+
+- `single_org`
+  - can be described as production-ready for controlled customer-managed deployments inside the documented envelope
+  - uses bootstrap owner/member credentials only to create missing first-access accounts
+  - preserves password resets and membership changes across restarts
+  - points operators at one canonical cutover checklist: `apps/web/docs/runbooks/single-org-first-deployment.md`
+- `hosted`
+  - remains supported, but not broadly production-ready
+  - is now called out more explicitly as the remaining higher-bar production track
+
+### Important Implementation Details
+
+- Step 29 intentionally did not add a dedicated first-login password-rotation product flow.
+- The existing admin member-management flow remains the supported credential-rotation path after bootstrap access is established.
+- The production claim remains narrow and deployment-specific:
+  - customer-managed hardware
+  - dedicated container-backed sandbox supervisor
+  - explicit backup, restore-drill, and release-proof evidence
+  - current synchronous sandbox workload envelope documented in the deployment and security docs
+- This step closes the `single_org` production-packaging track without changing the separate hosted hardening sequence in Steps 30-32.
+
+### Verification
+
+- `pnpm --filter web exec vitest run tests/user-bootstrap.integration.test.ts tests/workspace-commercial.integration.test.ts tests/customer-review-docs.test.ts tests/sandbox-policy.test.ts`

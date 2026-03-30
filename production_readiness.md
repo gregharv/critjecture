@@ -1,8 +1,8 @@
 # Production Readiness
 
-This document states what Critjecture is ready for now, what still blocks a production claim, and how that answer changes between `single_org` and `hosted` deployments.
+This document states what Critjecture is ready for now, what remains out of scope for the current production claim, and how that answer differs between `single_org` and `hosted`.
 
-It reflects the repo after Step 27. It is intentionally specific to the current codebase, docs, and operator tooling.
+It reflects the repo after Step 29.
 
 ## Readiness Call
 
@@ -11,118 +11,75 @@ Critjecture is not yet broadly production-ready across all deployment modes.
 Current call by deployment target:
 
 - `single_org`
-  - close to production-ready for controlled customer-managed deployments
-  - reasonable for a serious on-prem or single-customer rollout once the dedicated container supervisor is deployed and the operator follows the documented security, backup, restore-drill, and release-proof requirements
+  - production-ready for controlled customer-managed deployments inside the documented support envelope
+  - intended for customer-managed hardware where the operator follows the documented cutover, backup, restore-drill, and release-proof flows
 - `hosted`
-  - not yet a comfortable broad-production target
-  - usable only for teams willing to accept the current shared-infrastructure boundary and the dedicated sandbox-supervisor dependency
+  - not yet broadly production-ready
+  - still suitable only for carefully reviewed centrally operated deployments willing to accept the current shared-infrastructure boundary
 
-The main point is this: the product surface is no longer the blocker. The remaining work is mostly platform hardening and operational proof.
+The important distinction is simple: Step 29 closes the minimum production package for `single_org`, not for `hosted`.
 
-## What Already Exists
+## What The `single_org` Claim Covers
 
-The repo already includes the foundations you would expect before a serious deployment:
+The current `single_org` production claim is deliberately narrow. It assumes:
 
-- authenticated users, organizations, and server-enforced RBAC
-- durable SQLite-backed app state with repeatable migrations
-- organization-scoped company-data search, uploads, and generated-file handling
-- constrained Python analysis/chart/document tooling
-- owner-visible audit logs, governance controls, exports, and purge flows
-- route health checks, usage/rate-limit controls, and operational alerts
-- scripted backup creation, clean restore tooling, and repeatable recovery drills
-- customer-review deployment, compliance, provisioning, and security docs
-- automated route, integration, and end-to-end test coverage
+- customer-managed hardware and operator-managed deployment secrets
+- persistent SQLite storage plus persistent tenant storage roots
+- a dedicated container-backed sandbox supervisor service with Docker Engine available on the supervisor host
+- `pdftotext` on the web-app host for PDF ingestion
+- explicit backups for database and tenant storage
+- one successful restore drill for the exact environment before first cutover
+- one release-proof record for first deployment and each production-changing upgrade
+- bootstrap owner/member credentials provided out-of-band for first access, then rotated through the documented admin flow
 
-Those are real production foundations. They are no longer hypothetical roadmap items.
+Current workload and sandbox envelope for that claim:
 
-## Required Before We Should Call It Production-Ready
+- per-user active sandbox jobs: `1`
+- global active sandbox jobs: `4`
+- wall timeout: `10s`
+- CPU limit: `8s`
+- memory limit: `512 MiB`
+- process limit: `64`
+- stdout/stderr capture limit: `1 MiB`
+- output artifact size limit: `10 MiB`
+- generated artifact retention: `24h`
 
-These are the remaining items that still look like true production blockers rather than optional polish.
+Within that envelope, the repo now has the minimum product and operator package needed for a defensible controlled `single_org` deployment.
 
-### 1. Stronger Sandbox Isolation
+## What Is Already In Place
 
-The sandbox boundary is now split more clearly by deployment:
+The repo already includes the production foundations that matter for this narrower claim:
 
-- `single_org` uses a dedicated container-backed supervisor service
-- `hosted` still uses a supervisor-mediated remote boundary that needs more production hardening
+- authenticated users, organizations, RBAC, and membership-state enforcement
+- repeatable SQLite migrations and organization-scoped persistent storage
+- auditable search, analysis, chart, document, governance, and admin flows
+- fail-closed sandbox execution through a dedicated supervisor boundary for production `single_org`
+- scripted backup creation, restore verification, restore drills, and release-proof records
+- operator runbooks covering first deployment, routine upgrades, sandbox failures, storage failures, backup failures, and on-prem recovery
 
-Still needed for the broader platform story:
+These are no longer roadmap placeholders. They are shipped behavior and operator tooling.
 
-- finish the hosted-side hardening and operating model
-- prove the new boundary in real `single_org` environments through deployment and runbook evidence
+## What Remains Outside The Current Production Claim
 
-Why this is still a blocker:
+These items are not blockers for the current `single_org` claim, but they are still outside the repo's broad-production answer:
 
-- code execution is the highest-risk feature in the product
-- model-generated code is still the highest-risk feature, so the new boundary has to be operated deliberately and fail closed
+- self-service public SaaS onboarding
+- async heavy-job handling beyond the current synchronous sandbox envelope
+- broader enterprise attestations beyond the controls documented here
+- richer end-user lifecycle features such as conversation archive/search/delete
 
-### 2. Operational Proof Now Exists For `single_org`
+## Hosted-Only Remaining Gaps
 
-The repo now includes the missing `single_org` operator workflow:
+The remaining production blockers are now primarily `hosted` concerns:
 
-- `pnpm restore:drill:single-org` for real environment restore drills
-- `pnpm release:proof:single-org` for release-gated operator sign-off
-- dedicated first-deployment and routine-upgrade runbooks
+- stronger tenant isolation inside shared operator-managed infrastructure
+- production hardening of the hosted sandbox supervisor as a first-class dependency
+- a clearer hosted persistence and scale answer as concurrency and tenant count grow
 
-That closes the earlier repo-level gap around release-gated operations. The remaining work is execution per environment, not missing product or tooling surface.
-
-### 3. Hosted Deployment Hardening
-
-`hosted` has a meaningfully higher bar than `single_org`.
-
-Still needed:
-
-- a stronger answer for tenant isolation inside shared operator-managed infrastructure
-- production validation of the dedicated sandbox supervisor as a first-class dependency
-- a decision on whether the SQLite-first envelope is still acceptable as hosted concurrency grows
-
-Why this is still a blocker:
-
-- hosted mode places multiple organizations inside one deployment footprint
-- application-level org scoping is necessary, but many production customers will want stronger infrastructure guarantees
-
-## Things That Matter, But Are Not The Main Blockers
-
-These are real gaps, but they are not the reason the repo is still short of a production claim.
-
-- invite-based onboarding instead of manual account creation and credential handoff
-- richer conversation lifecycle tools such as search, rename, archive, or delete
-- broader compliance packaging or formal attestations if a customer requires them
-- async heavy-job support for workloads that exceed the current synchronous sandbox envelope
-
-## Deployment-Specific Guidance
-
-### `single_org`
-
-If the goal is a real customer-managed deployment on their own hardware, the remaining list is relatively short.
-
-Before calling that mode production-ready, operators should execute:
-
-- an explicit release-proof record covering secret storage, TLS termination, storage encryption, backup encryption, alert ownership, and incident ownership
-- at least one successful restore drill against the exact environment shape that will be deployed
-- the container supervisor is deployed, healthy, and using the intended sandbox image
-
-If those are satisfied, `single_org` is much closer to a production decision than it was earlier in the roadmap.
-
-### `hosted`
-
-If the goal is a broadly offered centrally managed multi-tenant deployment, more work is still needed.
-
-Before calling that mode production-ready, we should have:
-
-- stronger sandbox and infrastructure isolation than the current shared deployment story
-- production operations around the hosted sandbox supervisor, including failure drills and monitoring ownership
-- confidence that the SQLite-first runtime is still the right fit for the concurrency and recovery expectations of hosted customers
-
-Without those, `hosted` should still be described as carefully reviewed or limited-availability, not broadly production-ready.
+Those are the next roadmap items because they are required before calling `hosted` broadly production-ready.
 
 ## Bottom Line
 
-Yes, there is still more to do before Critjecture should be described as production-ready in the broad sense.
+The repo can now honestly describe controlled `single_org` deployments as production-ready within one clear support envelope and one clear operator cutover path.
 
-The remaining must-do items are:
-
-1. strengthen the sandbox isolation boundary
-2. raise the hosted deployment story to a higher tenant-isolation and infrastructure-hardening standard
-
-If the target is a controlled `single_org` rollout, the remaining repo gap is now mostly the sandbox boundary and final supported-envelope packaging. If the target is broadly offered `hosted` multi-tenant production, the remaining gap is still material.
+The repo still cannot honestly describe Critjecture as broadly production-ready across both deployment modes, because `hosted` still has material isolation, supervisor, and scale work remaining.
