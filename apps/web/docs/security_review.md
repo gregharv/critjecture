@@ -4,7 +4,7 @@ This document packages the current Critjecture MVP for internal or customer secu
 
 ## System Summary
 
-Critjecture is a local-first property-management assistant with:
+Critjecture is an auditable AI data analyst for business data with:
 
 - authenticated users and organization memberships
 - server-enforced `Owner` / `Intern` role checks
@@ -13,7 +13,7 @@ Critjecture is a local-first property-management assistant with:
 - a Python sandbox path for approved analysis and artifact generation
 - owner-visible audit, operations, governance, backup, and recovery surfaces
 
-The current product is designed for narrow operational workflows, not open-ended autonomous execution.
+The current product is designed for governed business-data answers and narrow operational workflows, not open-ended autonomous execution.
 
 ## Supported Deployment Envelope
 

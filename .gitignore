@@ -17,3 +17,4 @@ storage
 apps/web/.playwright-storage
 apps/web/playwright-report
 apps/web/test-results
+pricing_go_to_market_draft.md

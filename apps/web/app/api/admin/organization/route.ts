@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
+import type { GetOrganizationAdminResponse } from "@/lib/admin-types";
 import { getSessionUser } from "@/lib/auth-state";
 import { getOrganizationById, updateOrganizationDisplayName } from "@/lib/organizations";
+import {
+  getWorkspaceCommercialUsageSnapshot,
+  getWorkspacePlanSummary,
+} from "@/lib/workspace-plans";
 
 export const runtime = "nodejs";
 
@@ -36,13 +41,29 @@ export async function GET() {
     return jsonError("Organization not found.", 404);
   }
 
-  return NextResponse.json({
+  const [workspacePlan, workspaceUsage] = await Promise.all([
+    getWorkspacePlanSummary(user.organizationId),
+    getWorkspaceCommercialUsageSnapshot({
+      organizationId: user.organizationId,
+    }),
+  ]);
+
+  const response: GetOrganizationAdminResponse = {
     organization: {
       id: organization.id,
       name: organization.name,
       slug: organization.slug,
     },
-  });
+    workspacePlan: {
+      ...workspacePlan,
+      exhausted: workspaceUsage.exhausted,
+      remainingCredits: workspaceUsage.remainingCredits,
+      resetAt: workspaceUsage.resetAt,
+      usedCredits: workspaceUsage.usedCredits,
+    },
+  };
+
+  return NextResponse.json(response);
 }
 
 export async function PATCH(request: Request) {

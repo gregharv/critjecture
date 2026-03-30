@@ -1731,12 +1731,14 @@ a {
 
 .settings-grid {
   display: grid;
+  align-items: start;
   gap: 20px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .settings-panel {
   display: grid;
+  align-self: start;
   gap: 18px;
   padding: 22px;
 }

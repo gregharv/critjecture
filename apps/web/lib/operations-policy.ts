@@ -29,11 +29,16 @@ export type RouteGroupPolicy = {
 };
 
 export type OperationsPoliciesSnapshot = {
-  budgets: {
-    dailyModelCostCapUsdOrganization: number;
-    dailyModelCostCapUsdUser: number;
-    dailySandboxRunCapOrganization: number;
-    dailySandboxRunCapUser: number;
+  commercial: {
+    hardCapBehavior: "block";
+    monthlyIncludedCredits: number;
+    rateCard: {
+      analysis: number;
+      chart: number;
+      chat: number;
+      document: number;
+      import: number;
+    };
     warningRatio: number;
   };
   chat: {
@@ -80,25 +85,7 @@ export const CHAT_MAX_TOKENS_HARD_CAP = Math.trunc(
   parseNumberEnv(process.env.CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP, 4000),
 );
 
-export const DAILY_MODEL_COST_CAP_USD_USER = parseNumberEnv(
-  process.env.CRITJECTURE_DAILY_MODEL_COST_CAP_USD_USER,
-  3,
-);
-
-export const DAILY_MODEL_COST_CAP_USD_ORGANIZATION = parseNumberEnv(
-  process.env.CRITJECTURE_DAILY_MODEL_COST_CAP_USD_ORGANIZATION,
-  20,
-);
-
-export const DAILY_SANDBOX_RUN_CAP_USER = Math.trunc(
-  parseNumberEnv(process.env.CRITJECTURE_DAILY_SANDBOX_RUN_CAP_USER, 25),
-);
-
-export const DAILY_SANDBOX_RUN_CAP_ORGANIZATION = Math.trunc(
-  parseNumberEnv(process.env.CRITJECTURE_DAILY_SANDBOX_RUN_CAP_ORGANIZATION, 100),
-);
-
-export const BUDGET_WARNING_RATIO = 0.8;
+export const COMMERCIAL_WARNING_RATIO = 0.8;
 
 export const OPERATIONS_ROUTE_POLICIES: Record<RateLimitedRouteGroup, RouteGroupPolicy> = {
   chat: {
@@ -144,12 +131,17 @@ export function getRouteGroupPolicy(group: RateLimitedRouteGroup) {
 
 export function getOperationsPoliciesSnapshot(): OperationsPoliciesSnapshot {
   return {
-    budgets: {
-      dailyModelCostCapUsdOrganization: DAILY_MODEL_COST_CAP_USD_ORGANIZATION,
-      dailyModelCostCapUsdUser: DAILY_MODEL_COST_CAP_USD_USER,
-      dailySandboxRunCapOrganization: DAILY_SANDBOX_RUN_CAP_ORGANIZATION,
-      dailySandboxRunCapUser: DAILY_SANDBOX_RUN_CAP_USER,
-      warningRatio: BUDGET_WARNING_RATIO,
+    commercial: {
+      hardCapBehavior: "block",
+      monthlyIncludedCredits: 500,
+      rateCard: {
+        analysis: 8,
+        chart: 10,
+        chat: 1,
+        document: 12,
+        import: 2,
+      },
+      warningRatio: COMMERCIAL_WARNING_RATIO,
     },
     chat: {
       maxTokensHardCap: CHAT_MAX_TOKENS_HARD_CAP,
@@ -175,5 +167,5 @@ export function getRetentionWindowMs(days: number) {
 }
 
 export function getBudgetWarningThreshold(limit: number) {
-  return limit * BUDGET_WARNING_RATIO;
+  return limit * COMMERCIAL_WARNING_RATIO;
 }

@@ -1,19 +1,32 @@
 # Critjecture
 
-Critjecture is a local-first AI workspace for property-management operations. It combines a chat interface, role-aware access to company files, sandboxed Python tooling, generated charts and documents, and an owner-facing audit trail of what the assistant did.
+Critjecture is an auditable AI data analyst for business teams. It combines a chat interface, role-aware access to company files, sandboxed analysis tooling, generated outputs, and an owner-visible audit trail of what the system did to produce each answer.
 
 The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` and a separate `uv`-managed Python environment in `packages/python-sandbox`.
 
 ## What It Does
 
-- Answers questions against tenant-owned company knowledge with role-based access control.
-- Searches organization data and asks for clarification when multiple files are plausible.
+- Answers business questions against organization data with role-based access control.
+- Searches organization knowledge and asks for clarification when multiple files are plausible.
 - Runs structured data analysis in an isolated Python sandbox using Polars.
-- Generates PNG charts and PDF documents from approved company data.
+- Generates PNG charts and PDF documents when those outputs help explain or operationalize an answer.
 - Persists short-lived chart-ready analysis results in SQLite so `analysisResultId` survives normal app restarts within its TTL.
-- Lets authenticated users upload approved tenant files into organization-owned knowledge storage.
+- Lets authenticated users upload approved files into organization-owned knowledge storage.
 - Records chat turns, tool calls, accessed files, and assistant responses in an audit dashboard.
-- Provides scripted backup creation, clean restore tooling, and repeatable recovery drills for the persisted runtime state.
+- Provides scripted backup creation, clean restore tooling, and repeatable recovery drills for persisted runtime state.
+
+## Commercial Packaging Direction
+
+Critjecture is intended to be packaged as a flat-rate team product rather than a seat-based assistant:
+
+- one monthly workspace price
+- unlimited seats
+- pooled monthly credits for analysis and answer generation
+- admin visibility into per-user usage
+- admin controls to restrict heavy users when needed
+- predictable monthly spend through a hard cap once included credits are exhausted
+
+This is aimed at teams that want governed business-data answers for the whole company without deciding which employees get a paid seat.
 
 ## Core Experience
 
@@ -74,7 +87,8 @@ It adds:
 - route health and dependency checks
 - recent failures and rate-limit activity
 - open operational alerts
-- per-user and per-organization usage and cost summaries
+- workspace credit balance, reset window, and per-user heavy-usage visibility
+- internal per-user and per-organization usage and cost summaries
 
 There is also a public `GET /api/health` endpoint for liveness/readiness checks.
 
@@ -86,6 +100,8 @@ The owner settings dashboard lives at `http://localhost:3000/admin/settings`.
 
 It adds:
 
+- workspace plan and remaining pooled credits
+- member monthly credit caps plus suspend/reactivate controls
 - member creation, role changes, suspension/reactivation, and password resets
 - organization display-name updates
 - retention settings for logs, usage, alerts, chat history, and import metadata
@@ -129,7 +145,7 @@ The runtime storage model is:
 - governance/export artifacts: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/governance`
 - ephemeral sandbox workspaces: `/tmp/workspace/<run-id>`
 
-The repo-root `sample_company_data/` directory is bundled sample data. On first boot, Critjecture copies that sample data into the active organization's storage directory if needed.
+The repo-root `sample_company_data/` directory is bundled demo data. On first boot, Critjecture copies that sample data into the active organization's storage directory if needed.
 
 ### Sandbox
 
@@ -214,10 +230,6 @@ CRITJECTURE_INTERN_PASSWORD=change-me-intern
 CRITJECTURE_INTERN_NAME=Intern Demo
 CRITJECTURE_REQUEST_LOG_RETENTION_DAYS=14
 CRITJECTURE_USAGE_RETENTION_DAYS=30
-CRITJECTURE_DAILY_MODEL_COST_CAP_USD_USER=3
-CRITJECTURE_DAILY_MODEL_COST_CAP_USD_ORGANIZATION=20
-CRITJECTURE_DAILY_SANDBOX_RUN_CAP_USER=25
-CRITJECTURE_DAILY_SANDBOX_RUN_CAP_ORGANIZATION=100
 CRITJECTURE_SANDBOX_SUPERVISOR_HEARTBEAT_MS=1000
 CRITJECTURE_SANDBOX_SUPERVISOR_LEASE_MS=25000
 CRITJECTURE_SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS=30000
@@ -227,6 +239,26 @@ CRITJECTURE_SANDBOX_SUPERVISOR_TIMEOUT_MS=15000
 CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
 CRITJECTURE_ALERT_WEBHOOK_URL=
 ```
+
+## Workspace Credits
+
+Critjecture now enforces a workspace-level commercial model:
+
+- one pooled monthly credit balance per workspace
+- monthly reset from the workspace billing anchor date
+- hard cap once included credits are exhausted
+- optional per-member monthly credit caps inside the shared pool
+
+Current default credit consumption:
+
+- chat requests: 1 credit
+- data analysis runs: 8 credits
+- chart generation runs: 10 credits
+- document generation runs: 12 credits
+- knowledge import jobs: 2 credits per accepted file
+- company knowledge search: 0 credits
+
+When the workspace or member cap is exhausted, credit-consuming routes return `429` with `status: "credit_exhausted"` plus remaining-balance and reset metadata. Operational rate limits still apply separately and continue to return `status: "rate_limited"`.
 
 Operator incident runbooks live under `apps/web/docs/runbooks/` and cover sandbox, storage, migration, backup/restore, hosted, and on-prem response paths.
 

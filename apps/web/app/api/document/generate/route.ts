@@ -42,10 +42,11 @@ function expectSinglePdfAsset(generatedAssets: GeneratedSandboxAsset[]) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "document.generate";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "sandbox",
-    routeKey: "document.generate",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
   }
 
   const budgetDecision = await enforceBudgetPolicy({
+    requestId: observed.requestId,
     routeGroup: "sandbox",
+    routeKey,
     user,
   });
 
@@ -156,6 +159,7 @@ export async function POST(request: Request) {
           quantity: 1,
           status: result.status,
           subjectName: "generate_document",
+          usageClass: "document",
         },
       ],
     });

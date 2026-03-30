@@ -1,5 +1,6 @@
 import type { UserRole } from "@/lib/roles";
 import type { UserStatus } from "@/lib/users";
+import type { WorkspacePlanSummary, WorkspacePlanUsageSnapshot } from "@/lib/workspace-plans";
 
 export const GOVERNANCE_JOB_TYPES = [
   "organization_export",
@@ -20,10 +21,14 @@ export type OrganizationAdminSummary = {
   slug: string;
 };
 
+export type OrganizationWorkspacePlanSummary = WorkspacePlanSummary &
+  Pick<WorkspacePlanUsageSnapshot, "exhausted" | "remainingCredits" | "resetAt" | "usedCredits">;
+
 export type AdminMemberRecord = {
   createdAt: number;
   email: string;
   id: string;
+  monthlyCreditCap: number | null;
   name: string | null;
   role: UserRole;
   status: UserStatus;
@@ -69,6 +74,11 @@ export type GovernanceJobRecord = {
 export type ListOrganizationMembersResponse = {
   members: AdminMemberRecord[];
   organization: OrganizationAdminSummary;
+};
+
+export type GetOrganizationAdminResponse = {
+  organization: OrganizationAdminSummary;
+  workspacePlan: OrganizationWorkspacePlanSummary;
 };
 
 export type SaveComplianceSettingsResponse = {

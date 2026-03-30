@@ -31,6 +31,7 @@ export async function PATCH(
 
   const { memberId } = await context.params;
   let body: {
+    monthlyCreditCap?: number | null;
     name?: string | null;
     role?: string;
     status?: string;
@@ -50,8 +51,20 @@ export async function PATCH(
     return jsonError("Status must be active or suspended.", 400);
   }
 
+  if (
+    body.monthlyCreditCap !== undefined &&
+    body.monthlyCreditCap !== null &&
+    (typeof body.monthlyCreditCap !== "number" || !Number.isFinite(body.monthlyCreditCap) || body.monthlyCreditCap < 0)
+  ) {
+    return jsonError("monthlyCreditCap must be a non-negative number or null.", 400);
+  }
+
   try {
     const member = await updateOrganizationMember({
+      monthlyCreditCap:
+        typeof body.monthlyCreditCap === "number" || body.monthlyCreditCap === null
+          ? body.monthlyCreditCap
+          : undefined,
       name:
         typeof body.name === "string" || body.name === null ? body.name : undefined,
       organizationId: user.organizationId,

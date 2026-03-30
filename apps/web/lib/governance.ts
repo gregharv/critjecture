@@ -624,8 +624,9 @@ async function buildExportBundle(job: GovernanceJobRow) {
         userId: users.id,
         email: users.email,
         name: users.name,
+        monthlyCreditCap: organizationMemberships.monthlyCreditCap,
         role: organizationMemberships.role,
-        status: users.status,
+        status: organizationMemberships.status,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
       })

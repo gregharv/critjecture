@@ -15,6 +15,7 @@ function mapMemberRow(row: {
   createdAt: number;
   email: string;
   id: string;
+  monthlyCreditCap: number | null;
   name: string | null;
   role: UserRole;
   status: UserStatus;
@@ -24,6 +25,7 @@ function mapMemberRow(row: {
     createdAt: row.createdAt,
     email: row.email,
     id: row.id,
+    monthlyCreditCap: row.monthlyCreditCap,
     name: row.name,
     role: row.role,
     status: row.status,
@@ -59,8 +61,9 @@ async function getOrganizationMemberRow(input: {
       email: users.email,
       id: users.id,
       membershipRole: organizationMemberships.role,
+      monthlyCreditCap: organizationMemberships.monthlyCreditCap,
       name: users.name,
-      status: users.status,
+      status: organizationMemberships.status,
       updatedAt: users.updatedAt,
     })
     .from(organizationMemberships)
@@ -88,7 +91,7 @@ async function countActiveOwners(organizationId: string) {
       and(
         eq(organizationMemberships.organizationId, organizationId),
         eq(organizationMemberships.role, "owner"),
-        eq(users.status, "active"),
+        eq(organizationMemberships.status, "active"),
       ),
     );
 
@@ -145,9 +148,10 @@ export async function listOrganizationMembers(organizationId: string) {
         createdAt: users.createdAt,
         email: users.email,
         id: users.id,
+        monthlyCreditCap: organizationMemberships.monthlyCreditCap,
         name: users.name,
         role: organizationMemberships.role,
-        status: users.status,
+        status: organizationMemberships.status,
         updatedAt: users.updatedAt,
       })
       .from(organizationMemberships)
@@ -168,11 +172,14 @@ export async function createOrganizationMember(input: {
   organizationId: string;
   password: string;
   role: UserRole;
+  status?: UserStatus;
 }) {
   const db = await getAppDatabase();
   const normalizedEmail = input.email.trim().toLowerCase();
   const password = input.password.trim();
   const name = input.name?.trim() || null;
+
+  const status = input.status ?? "active";
 
   if (!normalizedEmail || !password) {
     throw new Error("Email and password are required.");
@@ -194,27 +201,31 @@ export async function createOrganizationMember(input: {
     createdAt: now,
     email: normalizedEmail,
     id: userId,
-    name,
-    passwordHash,
-    role: input.role,
-    status: "active",
-    updatedAt: now,
+      name,
+      passwordHash,
+      role: input.role,
+      status: "active",
+      updatedAt: now,
   });
 
-  await ensureOrganizationMembership(userId, input.organizationId, input.role);
+  await ensureOrganizationMembership(userId, input.organizationId, input.role, {
+    status,
+  });
 
   return mapMemberRow({
     createdAt: now,
     email: normalizedEmail,
     id: userId,
+    monthlyCreditCap: null,
     name,
     role: input.role,
-    status: "active",
+    status,
     updatedAt: now,
   });
 }
 
 export async function updateOrganizationMember(input: {
+  monthlyCreditCap?: number | null;
   name?: string | null;
   organizationId: string;
   role?: UserRole;
@@ -230,6 +241,12 @@ export async function updateOrganizationMember(input: {
 
   const nextRole = input.role ?? existing.membershipRole;
   const nextStatus = input.status ?? existing.status;
+  const nextMonthlyCreditCap =
+    input.monthlyCreditCap === undefined
+      ? existing.monthlyCreditCap
+      : input.monthlyCreditCap === null
+        ? null
+        : Math.max(0, Math.trunc(input.monthlyCreditCap));
 
   await assertOrganizationKeepsOwner({
     nextRole,
@@ -246,17 +263,20 @@ export async function updateOrganizationMember(input: {
     .set({
       name: nextName,
       role: nextRole,
-      status: nextStatus,
       updatedAt: now,
     })
     .where(eq(users.id, input.userId));
 
-  await ensureOrganizationMembership(input.userId, input.organizationId, nextRole);
+  await ensureOrganizationMembership(input.userId, input.organizationId, nextRole, {
+    monthlyCreditCap: nextMonthlyCreditCap,
+    status: nextStatus,
+  });
 
   return mapMemberRow({
     createdAt: existing.createdAt,
     email: existing.email,
     id: existing.id,
+    monthlyCreditCap: nextMonthlyCreditCap,
     name: nextName,
     role: nextRole,
     status: nextStatus,
@@ -297,6 +317,7 @@ export async function resetOrganizationMemberPassword(input: {
     createdAt: existing.createdAt,
     email: existing.email,
     id: existing.id,
+    monthlyCreditCap: existing.monthlyCreditCap,
     name: existing.name,
     role: existing.membershipRole,
     status: existing.status,

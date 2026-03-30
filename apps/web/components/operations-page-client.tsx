@@ -31,6 +31,10 @@ function formatInteger(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function formatCredits(value: number) {
+  return `${formatInteger(value)} cr`;
+}
+
 function getHealthTone(status: OperationsSummaryResponse["health"]["status"]) {
   if (status === "ok") {
     return "ok";
@@ -104,9 +108,11 @@ export function OperationsPageClient() {
   const headlineMetrics = useMemo(() => {
     if (!summary) {
       return {
+        creditsUsed: 0,
         costUsd: 0,
         openAlerts: 0,
         rateLimited: 0,
+        remainingCredits: 0,
         requests: 0,
         sandboxRuns: 0,
         totalTokens: 0,
@@ -114,12 +120,14 @@ export function OperationsPageClient() {
     }
 
     return {
+      creditsUsed: summary.workspace.usedCredits,
       costUsd: summary.usageSummary.byEventType.reduce((sum, item) => sum + item.costUsd, 0),
       openAlerts: summary.alerts.length,
       rateLimited: summary.routeMetrics.reduce(
         (sum, item) => sum + item.rateLimitedCount,
         0,
       ),
+      remainingCredits: summary.workspace.remainingCredits,
       requests: summary.routeMetrics.reduce((sum, item) => sum + item.requestCount, 0),
       sandboxRuns: summary.usageSummary.byEventType
         .filter((item) => item.eventType === "sandbox_run")
@@ -138,7 +146,7 @@ export function OperationsPageClient() {
           <div className="operations-hero__eyebrow">Admin</div>
           <h1 className="operations-hero__title">Operations</h1>
           <p className="operations-hero__copy">
-            Health, limits, costs, and recent failures for the current organization.
+            Health, credit usage, rate limits, and recent failures for the current workspace.
           </p>
         </div>
         <div className="operations-window-switch" role="tablist" aria-label="Summary window">
@@ -188,16 +196,20 @@ export function OperationsPageClient() {
                 <strong>{formatInteger(headlineMetrics.requests)}</strong>
               </article>
               <article className="operations-metric">
-                <span className="operations-metric__label">Total Cost</span>
-                <strong>{formatUsd(headlineMetrics.costUsd)}</strong>
+                <span className="operations-metric__label">Credits Used</span>
+                <strong>{formatCredits(headlineMetrics.creditsUsed)}</strong>
               </article>
               <article className="operations-metric">
-                <span className="operations-metric__label">Tokens</span>
-                <strong>{formatInteger(headlineMetrics.totalTokens)}</strong>
+                <span className="operations-metric__label">Credits Left</span>
+                <strong>{formatCredits(headlineMetrics.remainingCredits)}</strong>
               </article>
               <article className="operations-metric">
                 <span className="operations-metric__label">Sandbox Runs</span>
                 <strong>{formatInteger(headlineMetrics.sandboxRuns)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Internal Cost</span>
+                <strong>{formatUsd(headlineMetrics.costUsd)}</strong>
               </article>
               <article className="operations-metric">
                 <span className="operations-metric__label">Open Alerts</span>
@@ -209,6 +221,39 @@ export function OperationsPageClient() {
               </article>
             </div>
             {state.error ? <p className="operations-inline-error">{state.error}</p> : null}
+          </section>
+
+          <section className="operations-panel">
+            <div className="operations-panel__header">
+              <div>
+                <div className="operations-panel__eyebrow">Workspace Plan</div>
+                <h2>{summary.workspace.planName}</h2>
+              </div>
+              <span
+                className={`operations-status operations-status--${summary.workspace.exhausted ? "critical" : "ok"}`}
+              >
+                {summary.workspace.planCode}
+              </span>
+            </div>
+            <div className="operations-metrics">
+              <article className="operations-metric">
+                <span className="operations-metric__label">Included</span>
+                <strong>{formatCredits(summary.workspace.monthlyIncludedCredits)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Used</span>
+                <strong>{formatCredits(summary.workspace.usedCredits)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Pending</span>
+                <strong>{formatCredits(summary.workspace.pendingCredits)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Remaining</span>
+                <strong>{formatCredits(summary.workspace.remainingCredits)}</strong>
+              </article>
+            </div>
+            <p>Hard cap: {summary.workspace.hardCapBehavior}. Resets {formatTimestamp(summary.workspace.resetAt)}.</p>
           </section>
 
           <section className="operations-panel">
@@ -370,7 +415,7 @@ export function OperationsPageClient() {
                 <span>Event</span>
                 <span>Route</span>
                 <span>Requests</span>
-                <span>Tokens</span>
+                <span>Credits</span>
                 <span>Cost</span>
               </div>
               {summary.usageSummary.byEventType.map((metric) => (
@@ -381,7 +426,7 @@ export function OperationsPageClient() {
                   <span>{metric.eventType}</span>
                   <span>{metric.routeGroup}</span>
                   <span>{formatInteger(metric.requestCount)}</span>
-                  <span>{formatInteger(metric.totalTokens)}</span>
+                  <span>{formatCredits(metric.commercialCredits)}</span>
                   <span>{formatUsd(metric.costUsd)}</span>
                 </div>
               ))}
@@ -398,17 +443,23 @@ export function OperationsPageClient() {
             <div className="operations-table">
               <div className="operations-table__row operations-table__row--head">
                 <span>User</span>
+                <span>Status</span>
                 <span>Requests</span>
-                <span>Tokens</span>
-                <span>Sandbox</span>
+                <span>Credits</span>
+                <span>Cap</span>
                 <span>Cost</span>
               </div>
               {summary.usageSummary.byUser.map((metric) => (
                 <div className="operations-table__row" key={metric.userId}>
                   <span>{metric.name}</span>
+                  <span>{metric.status}</span>
                   <span>{formatInteger(metric.requestCount)}</span>
-                  <span>{formatInteger(metric.totalTokens)}</span>
-                  <span>{formatInteger(metric.quantity)}</span>
+                  <span>{formatCredits(metric.creditsUsed)}</span>
+                  <span>
+                    {metric.creditCap === null
+                      ? "Shared pool"
+                      : `${formatCredits(metric.remainingCreditCap ?? 0)} left`}
+                  </span>
                   <span>{formatUsd(metric.costUsd)}</span>
                 </div>
               ))}

@@ -15,12 +15,15 @@ import {
   organizations,
 } from "@/lib/app-schema";
 import type { UserRole } from "@/lib/roles";
+import { ensureWorkspacePlanForOrganization } from "@/lib/workspace-plans";
 
 export type OrganizationMembershipContext = {
+  monthlyCreditCap: number | null;
   organizationId: string;
   organizationName: string;
   organizationSlug: string;
   role: UserRole;
+  status: "active" | "suspended";
 };
 
 const SINGLE_ORGANIZATION_MODE_ERROR =
@@ -90,6 +93,10 @@ export async function ensureDefaultOrganization() {
 
     await db.insert(organizations).values(createdOrganization);
     await ensureOrganizationCompanyDataRoot(configuredSlug);
+    await ensureWorkspacePlanForOrganization({
+      billingAnchorAt: now,
+      organizationId: createdOrganization.id,
+    });
 
     return createdOrganization;
   }
@@ -103,6 +110,10 @@ export async function ensureDefaultOrganization() {
     .where(eq(organizations.id, existingOrganization.id));
 
   await ensureOrganizationCompanyDataRoot(existingOrganization.slug);
+  await ensureWorkspacePlanForOrganization({
+    billingAnchorAt: existingOrganization.createdAt,
+    organizationId: existingOrganization.id,
+  });
 
   return {
     ...existingOrganization,
@@ -143,6 +154,10 @@ export async function createOrganization(input: {
 
   await db.insert(organizations).values(createdOrganization);
   await ensureOrganizationCompanyDataRoot(createdOrganization.slug);
+  await ensureWorkspacePlanForOrganization({
+    billingAnchorAt: createdOrganization.createdAt,
+    organizationId: createdOrganization.id,
+  });
 
   return createdOrganization;
 }
@@ -170,9 +185,18 @@ export async function ensureOrganizationMembership(
   userId: string,
   organizationId: string,
   role: UserRole,
+  options: {
+    monthlyCreditCap?: number | null;
+    status?: "active" | "suspended";
+  } = {},
 ) {
   const db = await getAppDatabase();
   const now = Date.now();
+  const nextStatus = options.status ?? "active";
+  const nextMonthlyCreditCap =
+    typeof options.monthlyCreditCap === "number" && Number.isFinite(options.monthlyCreditCap)
+      ? Math.max(0, Math.trunc(options.monthlyCreditCap))
+      : null;
   const existingMembership = await db.query.organizationMemberships.findFirst({
     where: and(
       eq(organizationMemberships.organizationId, organizationId),
@@ -184,8 +208,10 @@ export async function ensureOrganizationMembership(
     await db.insert(organizationMemberships).values({
       createdAt: now,
       id: randomUUID(),
+      monthlyCreditCap: nextMonthlyCreditCap,
       organizationId,
       role,
+      status: nextStatus,
       updatedAt: now,
       userId,
     });
@@ -196,7 +222,9 @@ export async function ensureOrganizationMembership(
   await db
     .update(organizationMemberships)
     .set({
+      monthlyCreditCap: nextMonthlyCreditCap,
       role,
+      status: nextStatus,
       updatedAt: now,
     })
     .where(eq(organizationMemberships.id, existingMembership.id));
@@ -214,10 +242,12 @@ export async function getPrimaryMembershipForUser(userId: string) {
 
     const rows = await db
       .select({
+        monthlyCreditCap: organizationMemberships.monthlyCreditCap,
         organizationId: organizations.id,
         organizationName: organizations.name,
         organizationSlug: organizations.slug,
         role: organizationMemberships.role,
+        status: organizationMemberships.status,
       })
       .from(organizationMemberships)
       .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))
@@ -234,11 +264,13 @@ export async function getPrimaryMembershipForUser(userId: string) {
   }
 
   const rows = await db
-    .select({
+      .select({
+      monthlyCreditCap: organizationMemberships.monthlyCreditCap,
       organizationId: organizations.id,
       organizationName: organizations.name,
       organizationSlug: organizations.slug,
       role: organizationMemberships.role,
+      status: organizationMemberships.status,
     })
     .from(organizationMemberships)
     .innerJoin(organizations, eq(organizations.id, organizationMemberships.organizationId))

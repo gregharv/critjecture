@@ -1788,3 +1788,71 @@ Step 24 was implemented as a customer-review packaging pass for the post-Step-23
 - Verification completed for this implementation:
   - `pnpm --filter web exec vitest run tests/customer-review-route.test.ts tests/customer-review-docs.test.ts`
   - `pnpm --filter web test`
+
+## Step 25: Workspace Plans and Pooled Credit Enforcement
+
+### What Was Implemented
+
+Step 25 was implemented as a real workspace-level commercial control model that replaces the earlier env-only daily caps with pooled monthly credits, workspace plan metadata, and per-member governance.
+
+- Added workspace-commercial schema and migration support:
+  - `workspace_plans` for per-organization plan metadata, billing anchors, reset windows, and rate cards
+  - `workspace_commercial_ledger` for reserved, committed, released, and blocked credit events
+  - membership-level `status` and `monthly_credit_cap` on `organization_memberships`
+  - `usage_events` fields for `usage_class` and customer-facing `commercial_credits`
+- Added workspace-plan bootstrap and billing-window logic in `apps/web/lib/workspace-plans.ts`.
+  - Seeds a default `Flat SMB` plan per organization
+  - Tracks billing-anchor monthly reset windows
+  - Maps route paths to commercial usage classes
+- Replaced the older rolling 24-hour budget enforcement in `apps/web/lib/operations.ts`.
+  - Reserves credits before chat, analysis, chart, document, and import work begins
+  - Commits credits on success and releases them on failed requests
+  - Returns distinct `429` credit-exhaustion responses with remaining-balance and reset metadata
+  - Keeps operational rate limits separate from commercial exhaustion
+- Updated owner-facing admin and operations surfaces.
+  - Settings now show plan balance and per-member monthly caps
+  - Operations now show workspace credits, heavy users, and internal cost telemetry side by side
+  - Desktop settings layout was adjusted so wide-screen panels size to their own content instead of stretching to the tallest row
+- Moved workspace suspension to the membership layer instead of globally suspending the user account.
+  - Auth now requires both an active user account and an active organization membership
+  - Member updates now manage org-scoped suspension and monthly caps
+- Updated product docs in `README.md` and `overview.md` to describe:
+  - what consumes credits
+  - what does not
+  - when credits reset
+  - what happens at the hard cap
+
+### Current Step 25 Behavior
+
+- Each organization now has one seeded workspace plan with:
+  - monthly included credits
+  - a billing-anchor reset window
+  - a fixed workload rate card
+- The current default workload charges are:
+  - chat: 1 credit per request
+  - analysis: 8 credits per request
+  - chart: 10 credits per request
+  - document: 12 credits per request
+  - imports: 2 credits per accepted file
+  - search: 0 credits
+- Owners can:
+  - see remaining pooled credits
+  - see high-usage members in operations
+  - set member monthly caps
+  - suspend a member inside the current workspace without disabling the whole account globally
+- Credit exhaustion now blocks only commercial routes and returns a customer-facing `credit_exhausted` status.
+- Operational rate limiting still returns separate `rate_limited` responses.
+
+### Important Implementation Details
+
+- Commercial usage is tracked separately from internal USD/token telemetry so customer-visible credits do not replace operator cost visibility.
+- Credit enforcement is bound to route-level usage classes rather than inferred loosely from raw telemetry strings.
+- Import workloads debit by accepted file count, while chat and sandbox-backed tools debit per request.
+- Reservation and finalization happen in the observed request pipeline so request logs, usage events, and commercial ledger entries stay correlated by request id.
+- The last active owner guard remains in place, so owner suspension still cannot orphan the workspace.
+
+### Verification
+
+- `pnpm --filter web test`
+- `pnpm --filter web lint`
+- `pnpm --filter web build`

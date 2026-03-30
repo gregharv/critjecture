@@ -3,6 +3,7 @@ import type {
   OperationsRouteGroup,
 } from "@/lib/operations-policy";
 import type { SandboxExecutionBackend } from "@/lib/sandbox-policy";
+import type { CommercialUsageClass, WorkspacePlanSummary } from "@/lib/workspace-plans";
 
 export type OperationalAlertSeverity = "warning" | "critical";
 export type OperationalAlertStatus = "open" | "resolved";
@@ -43,6 +44,7 @@ export type RouteMetricSummary = {
 };
 
 export type UsageMetricSummary = {
+  commercialCredits: number;
   costUsd: number;
   eventType: string;
   outputTokens: number;
@@ -53,13 +55,36 @@ export type UsageMetricSummary = {
 };
 
 export type UsageActorSummary = {
+  creditCap: number | null;
+  creditsUsed: number;
   costUsd: number;
   name: string;
   outputTokens: number;
   quantity: number;
+  remainingCreditCap: number | null;
   requestCount: number;
+  status: "active" | "suspended";
   totalTokens: number;
   userId: string;
+};
+
+export type WorkspaceCommercialSummary = WorkspacePlanSummary & {
+  exhausted: boolean;
+  pendingCredits: number;
+  remainingCredits: number;
+  resetAt: number;
+  usedCredits: number;
+};
+
+export type CommercialBlockSummary = {
+  planName: string;
+  remainingUserCredits: number | null;
+  remainingWorkspaceCredits: number;
+  requiredCredits: number;
+  resetAt: number;
+  scope: "user" | "workspace";
+  status: "credit_exhausted";
+  usageClass: CommercialUsageClass;
 };
 
 export type RecentFailureSummary = {
@@ -94,6 +119,7 @@ export type OperationsSummaryResponse = {
   alerts: OperationsAlertSummary[];
   health: HealthSummary;
   policies: OperationsPoliciesSnapshot;
+  workspace: WorkspaceCommercialSummary;
   rateLimitActivity: Array<{
     count: number;
     routeGroup: OperationsRouteGroup;

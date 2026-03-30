@@ -2,14 +2,46 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 24 finished the security/deployment review package. The remaining work is now split into two tracks:
+Step 25 finished the workspace commercial control model for pooled monthly credits. The remaining work is now split into three tracks:
 
-1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
-2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
+1. close the remaining product-control gaps required by the governed SMB offering
+2. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
+3. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
+
+## Phase 0: Product Controls Required For Broad SMB Launch
+
+## Step 26: Real RBAC and Policy Controls For Governed Answers
+
+### Goal
+
+Raise the current `Owner` / `Intern` model into a role and policy system that matches the product claim of governed business-data answers.
+
+### What Should Be Implemented
+
+- expand authorization beyond the current two-role split:
+  - add a clearer permission model for search, sandbox analysis, document generation, admin visibility, and governance actions
+  - decide whether permissions are fixed-role, custom-role, or capability-flag based
+- enforce role-aware controls on answer-producing actions:
+  - what data scopes can be searched
+  - which tools can be executed
+  - which generated outputs can be viewed or downloaded
+  - which audit and operations details are visible
+- add admin management surfaces for those controls:
+  - member role assignment beyond `Owner` and `Intern`
+  - policy visibility in settings or a dedicated access-control surface
+  - explicit UX for suspended, restricted, or over-budget users
+- reconcile docs and product language so the claimed RBAC model matches the actual shipped permission boundary
+
+### Acceptance Criteria
+
+- the authorization model is more expressive than `Owner` versus `Intern`
+- critical tool execution and answer retrieval paths enforce the expanded permissions consistently
+- admin surfaces can manage and explain those permissions without relying on hidden env config
+- product docs can honestly describe governed role-aware controls over data access and answer generation
 
 ## Phase 1: `single_org` Production Readiness
 
-## Step 25: Release-Gated Operations and Deployment Proof
+## Step 27: Release-Gated Operations and Deployment Proof
 
 ### Goal
 
@@ -34,7 +66,7 @@ Turn the existing backup, restore, runbook, and security guidance into enforced 
 - `single_org` operators can demonstrate backup verification and restore readiness without tribal knowledge
 - secret-handling, encryption, and incident-ownership expectations are explicit
 
-## Step 26: Stronger `single_org` Sandbox Boundary
+## Step 28: Stronger `single_org` Sandbox Boundary
 
 ### Goal
 
@@ -56,7 +88,7 @@ Raise the Python execution boundary from a hardened same-host namespace sandbox 
 - sandbox failures remain observable and fail closed
 - deployment docs and runbooks describe the new production boundary clearly
 
-## Step 27: `single_org` Production Cutover Package
+## Step 29: `single_org` Production Cutover Package
 
 ### Goal
 
@@ -83,7 +115,7 @@ Package the final minimum set of product and operational checks needed to call c
 
 ## Phase 2: `hosted` Production Readiness
 
-## Step 28: Hosted Isolation and Supervisor Hardening
+## Step 30: Hosted Isolation and Supervisor Hardening
 
 ### Goal
 
@@ -105,7 +137,7 @@ Raise the hosted deployment boundary above application-level tenant separation a
 - the supervisor dependency is treated as a first-class production service
 - hosted failure and recovery procedures are explicit and tested
 
-## Step 29: Hosted Persistence and Scale Envelope
+## Step 31: Hosted Persistence and Scale Envelope
 
 ### Goal
 
@@ -127,7 +159,7 @@ Decide and implement the persistence model that will support centrally operated 
 - the repo no longer depends on an ambiguous “SQLite-first unless traffic grows” answer
 - production docs state the supported hosted operating envelope concretely
 
-## Step 30: Hosted Production Launch Package
+## Step 32: Hosted Production Launch Package
 
 ### Goal
 
@@ -155,7 +187,15 @@ Finish the remaining platform, product, and documentation work required to descr
   - consolidated security review pack
   - aligned README, deployment, compliance, hosted provisioning, and readiness docs
   - owner-facing customer-review links served from one shared catalog
+- Step 25 is complete:
+  - workspace plans seeded per organization with billing-anchor reset windows
+  - pooled monthly credit enforcement for chat, analysis, chart, document, and import workloads
+  - owner-visible credit balances and per-member monthly caps in settings and operations
+  - workspace membership suspension moved to the org-membership layer rather than the global user row
+  - customer-facing credit reporting preserved alongside internal USD/token telemetry
+- The remaining product-control gap before a broad SMB launch is:
+  - richer role and policy controls than the current `Owner` / `Intern` split
 - The main near-term goal is not more surface area:
-  - it is converting the current pilot-ready system into a defensible `single_org` production deployment
+  - it is closing the commercial/governance gaps needed for the flat-rate product and then converting the current pilot-ready system into a defensible `single_org` production deployment
 - `hosted` should be treated as a separate bar:
   - stronger isolation, stronger supervisor operations, and a clearer persistence strategy are still required before calling it broadly production-ready

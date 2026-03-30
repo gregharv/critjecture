@@ -42,10 +42,11 @@ function buildSchemaSummary(csvSchemas: { columns: string[]; file: string }[]) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "data-analysis.run";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "sandbox",
-    routeKey: "data-analysis.run",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
   }
 
   const budgetDecision = await enforceBudgetPolicy({
+    requestId: observed.requestId,
     routeGroup: "sandbox",
+    routeKey,
     user,
   });
 
@@ -188,6 +191,7 @@ export async function POST(request: Request) {
           quantity: 1,
           status: result.status,
           subjectName: "run_data_analysis",
+          usageClass: "analysis",
         },
       ],
     });

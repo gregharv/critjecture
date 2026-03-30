@@ -162,10 +162,11 @@ print(f"Created chart.png with {len(x_values)} plotted values.")
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "visual-graph.run";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "sandbox",
-    routeKey: "visual-graph.run",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -179,7 +180,9 @@ export async function POST(request: Request) {
   }
 
   const budgetDecision = await enforceBudgetPolicy({
+    requestId: observed.requestId,
     routeGroup: "sandbox",
+    routeKey,
     user,
   });
 

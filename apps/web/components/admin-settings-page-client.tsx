@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import type {
   AdminMemberRecord,
+  GetOrganizationAdminResponse,
   GovernanceJobRecord,
   OrganizationComplianceSettings,
   OrganizationAdminSummary,
+  OrganizationWorkspacePlanSummary,
 } from "@/lib/admin-types";
 import { CUSTOMER_REVIEW_DOCS } from "@/lib/customer-review-docs";
 
@@ -18,6 +20,7 @@ type AdminSettingsState = {
   organization: OrganizationAdminSummary | null;
   saving: boolean;
   settings: OrganizationComplianceSettings | null;
+  workspacePlan: OrganizationWorkspacePlanSummary | null;
 };
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -39,6 +42,10 @@ function formatBytes(value: number | null) {
   }
 
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatCredits(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function getLatestCompletedExportJob(jobs: GovernanceJobRecord[]) {
@@ -71,6 +78,7 @@ export function AdminSettingsPageClient() {
     organization: null,
     saving: false,
     settings: null,
+    workspacePlan: null,
   });
   const [organizationName, setOrganizationName] = useState("");
   const [newMember, setNewMember] = useState({
@@ -131,7 +139,8 @@ export function AdminSettingsPageClient() {
         );
       }
 
-      const organization = organizationData.organization as OrganizationAdminSummary;
+      const organizationPayload = organizationData as GetOrganizationAdminResponse;
+      const organization = organizationPayload.organization as OrganizationAdminSummary;
       const members = membersData.members as AdminMemberRecord[];
       const settings = settingsData.settings as OrganizationComplianceSettings;
       const jobs = jobsData.jobs as GovernanceJobRecord[];
@@ -153,6 +162,7 @@ export function AdminSettingsPageClient() {
         organization,
         saving: false,
         settings,
+        workspacePlan: organizationPayload.workspacePlan,
       });
     } catch (caughtError) {
       setState((current) => ({
@@ -187,7 +197,7 @@ export function AdminSettingsPageClient() {
 
   const updateMember = async (
     memberId: string,
-    body: Record<string, string | null>,
+    body: Record<string, number | string | null>,
   ) => {
     setState((current) => ({ ...current, error: null, saving: true }));
 
@@ -404,7 +414,7 @@ export function AdminSettingsPageClient() {
           <div className="settings-hero__eyebrow">Admin</div>
           <h1 className="settings-hero__title">Settings and Governance</h1>
           <p className="settings-hero__copy">
-            Owner-managed members, retention rules, organization exports, and review docs.
+            Workspace credits, member guardrails, retention rules, exports, and review docs.
           </p>
         </div>
         {state.error ? <p className="settings-error">{state.error}</p> : null}
@@ -424,6 +434,16 @@ export function AdminSettingsPageClient() {
               </div>
               <span className="settings-panel__meta">{state.organization?.slug}</span>
             </div>
+            {state.workspacePlan ? (
+              <div className="settings-job__header">
+                <strong>
+                  {state.workspacePlan.planName}: {formatCredits(state.workspacePlan.remainingCredits)} credits left
+                </strong>
+                <span className={`settings-status settings-status--${state.workspacePlan.exhausted ? "failed" : "completed"}`}>
+                  resets {formatTimestamp(state.workspacePlan.resetAt)}
+                </span>
+              </div>
+            ) : null}
             <form className="settings-form" onSubmit={handleOrganizationSubmit}>
               <label className="settings-field">
                 <span>Display name</span>
@@ -490,7 +510,12 @@ export function AdminSettingsPageClient() {
                 <article className="settings-table__row" key={member.id}>
                   <div>
                     <strong>{member.name || member.email}</strong>
-                    <div className="settings-table__meta">{member.email}</div>
+                    <div className="settings-table__meta">
+                      {member.email}
+                      {member.monthlyCreditCap === null
+                        ? " • shared workspace pool"
+                        : ` • cap ${formatCredits(member.monthlyCreditCap)} credits`}
+                    </div>
                   </div>
                   <select
                     defaultValue={member.role}
@@ -510,6 +535,18 @@ export function AdminSettingsPageClient() {
                     <option value="active">Active</option>
                     <option value="suspended">Suspended</option>
                   </select>
+                  <input
+                    defaultValue={member.monthlyCreditCap ?? ""}
+                    min={0}
+                    onBlur={(event) => {
+                      const trimmed = event.target.value.trim();
+                      void updateMember(member.id, {
+                        monthlyCreditCap: trimmed === "" ? null : Number(trimmed),
+                      });
+                    }}
+                    placeholder="Shared pool"
+                    type="number"
+                  />
                   <button
                     className="settings-button settings-button--ghost"
                     onClick={() => void resetPassword(member.id)}

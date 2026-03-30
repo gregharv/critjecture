@@ -25,11 +25,13 @@ import { cleanupExpiredAnalysisResults } from "@/lib/analysis-results";
 import {
   operationalAlerts,
   knowledgeImportJobFiles,
+  organizationMemberships,
   organizations,
   rateLimitBuckets,
   requestLogs,
   usageEvents,
   users,
+  workspaceCommercialLedger,
 } from "@/lib/app-schema";
 import {
   getFallbackOperationsRetentionDefaults,
@@ -37,13 +39,7 @@ import {
   runGovernanceMaintenance,
 } from "@/lib/governance";
 import {
-  BUDGET_WARNING_RATIO,
   CHAT_MAX_TOKENS_HARD_CAP,
-  DAILY_MODEL_COST_CAP_USD_ORGANIZATION,
-  DAILY_MODEL_COST_CAP_USD_USER,
-  DAILY_SANDBOX_RUN_CAP_ORGANIZATION,
-  DAILY_SANDBOX_RUN_CAP_USER,
-  getBudgetWarningThreshold,
   getOperationsPoliciesSnapshot,
   getRetentionWindowMs,
   getRouteGroupPolicy,
@@ -51,6 +47,7 @@ import {
   type OperationsRouteGroup,
 } from "@/lib/operations-policy";
 import type {
+  CommercialBlockSummary,
   HealthCheckResult,
   HealthSummary,
   OperationsSummaryResponse,
@@ -64,12 +61,20 @@ import {
 } from "@/lib/observability";
 import { getSandboxBackendHealth } from "@/lib/python-sandbox";
 import { getSandboxHealthSnapshot } from "@/lib/sandbox-runs";
+import {
+  getCommercialUsageClassForRoute,
+  getOrganizationMembershipCommercialPolicy,
+  getWorkspaceCommercialUsageSnapshot,
+  getWorkspacePlanSummary,
+  type CommercialUsageClass,
+} from "@/lib/workspace-plans";
 
 type RequestOutcome = "blocked" | "error" | "ok" | "rate_limited";
 
 type RequestMetadata = Record<string, unknown>;
 
 type UsageEventInput = {
+  commercialCredits?: number;
   costUsd?: number;
   durationMs?: number | null;
   eventType: string;
@@ -80,6 +85,7 @@ type UsageEventInput = {
   status: string;
   subjectName?: string | null;
   totalTokens?: number;
+  usageClass?: CommercialUsageClass | "search" | "system";
 };
 
 type ObservedRequestContext = {
@@ -119,17 +125,13 @@ type RateLimitDecision = {
 type BudgetDecision = {
   errorCode: string;
   message: string;
-  metadata: RequestMetadata;
+  metadata: CommercialBlockSummary;
 };
 
 const ONE_MINUTE_MS = 60 * 1000;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * ONE_MINUTE_MS;
 
 let lastMaintenanceAt = 0;
-
-function roundCurrency(value: number) {
-  return Number(value.toFixed(6));
-}
 
 function parseWindowParam(value: string | null | undefined): "24h" | "7d" {
   return value === "7d" ? "7d" : "24h";
@@ -385,225 +387,189 @@ async function sumRateLimitRequests(input: {
   return Number(rows[0]?.total ?? 0);
 }
 
-async function getModelUsageTotals(input: {
-  organizationId: string;
-  userId: string;
-}) {
-  const db = await getAppDatabase();
-  const since = Date.now() - TWENTY_FOUR_HOURS_MS;
-  const [userRows, organizationRows] = await Promise.all([
-    db
-      .select({
-        costUsd: sql<number>`coalesce(sum(${usageEvents.costUsd}), 0)`,
-      })
-      .from(usageEvents)
-      .where(
-        and(
-          eq(usageEvents.eventType, "model_completion"),
-          eq(usageEvents.userId, input.userId),
-          gte(usageEvents.createdAt, since),
-        ),
-      ),
-    db
-      .select({
-        costUsd: sql<number>`coalesce(sum(${usageEvents.costUsd}), 0)`,
-      })
-      .from(usageEvents)
-      .where(
-        and(
-          eq(usageEvents.eventType, "model_completion"),
-          eq(usageEvents.organizationId, input.organizationId),
-          gte(usageEvents.createdAt, since),
-        ),
-      ),
-  ]);
+const COMMERCIAL_WARNING_RATIO = 0.8;
 
-  return {
-    organizationCostUsd: Number(organizationRows[0]?.costUsd ?? 0),
-    userCostUsd: Number(userRows[0]?.costUsd ?? 0),
-  };
+function getCommercialWarningThreshold(limit: number) {
+  return Math.max(0, Math.floor(limit * COMMERCIAL_WARNING_RATIO));
 }
 
-async function getSandboxUsageTotals(input: {
+function inferUsageClassForRequest(input: {
+  routeGroup: OperationsRouteGroup;
+  routeKey: string;
+}) {
+  const commercialUsageClass = getCommercialUsageClassForRoute(input);
+
+  if (commercialUsageClass) {
+    return commercialUsageClass;
+  }
+
+  if (input.routeGroup === "search") {
+    return "search" as const;
+  }
+
+  return "system" as const;
+}
+
+function buildCreditExhaustedErrorCode(scope: "user" | "workspace", usageClass: CommercialUsageClass) {
+  return `credit_${usageClass}_${scope}_exhausted`;
+}
+
+async function createCommercialLedgerEntry(input: {
+  creditsDelta: number;
+  metadata?: RequestMetadata;
   organizationId: string;
+  requestId: string;
+  routeGroup: OperationsRouteGroup;
+  status: "blocked" | "reserved";
+  usageClass: CommercialUsageClass;
   userId: string;
+  windowEndAt: number;
+  windowStartAt: number;
 }) {
   const db = await getAppDatabase();
-  const since = Date.now() - TWENTY_FOUR_HOURS_MS;
-  const [userRows, organizationRows] = await Promise.all([
-    db
-      .select({
-        quantity: sql<number>`coalesce(sum(${usageEvents.quantity}), 0)`,
-      })
-      .from(usageEvents)
-      .where(
-        and(
-          eq(usageEvents.eventType, "sandbox_run"),
-          eq(usageEvents.userId, input.userId),
-          gte(usageEvents.createdAt, since),
-        ),
-      ),
-    db
-      .select({
-        quantity: sql<number>`coalesce(sum(${usageEvents.quantity}), 0)`,
-      })
-      .from(usageEvents)
-      .where(
-        and(
-          eq(usageEvents.eventType, "sandbox_run"),
-          eq(usageEvents.organizationId, input.organizationId),
-          gte(usageEvents.createdAt, since),
-        ),
-      ),
-  ]);
+  const now = Date.now();
+
+  await db.insert(workspaceCommercialLedger).values({
+    createdAt: now,
+    creditsDelta: input.creditsDelta,
+    id: randomUUID(),
+    metadataJson: JSON.stringify(input.metadata ?? {}),
+    organizationId: input.organizationId,
+    requestId: input.requestId,
+    requestLogId: null,
+    routeGroup: input.routeGroup,
+    status: input.status,
+    updatedAt: now,
+    usageClass: input.usageClass,
+    userId: input.userId,
+    windowEndAt: input.windowEndAt,
+    windowStartAt: input.windowStartAt,
+  });
+}
+
+async function getCommercialLedgerEntry(requestId: string) {
+  const db = await getAppDatabase();
+  return db.query.workspaceCommercialLedger.findFirst({
+    where: eq(workspaceCommercialLedger.requestId, requestId),
+  });
+}
+
+async function finalizeCommercialLedgerEntry(input: {
+  outcome: RequestOutcome;
+  requestId: string;
+  requestLogId: string;
+}) {
+  const db = await getAppDatabase();
+  const existing = await getCommercialLedgerEntry(input.requestId);
+
+  if (!existing) {
+    return null;
+  }
+
+  const nextStatus =
+    existing.status === "reserved"
+      ? input.outcome === "ok"
+        ? "committed"
+        : "released"
+      : existing.status;
+
+  await db
+    .update(workspaceCommercialLedger)
+    .set({
+      requestLogId: input.requestLogId,
+      status: nextStatus,
+      updatedAt: Date.now(),
+    })
+    .where(eq(workspaceCommercialLedger.id, existing.id));
 
   return {
-    organizationQuantity: Number(organizationRows[0]?.quantity ?? 0),
-    userQuantity: Number(userRows[0]?.quantity ?? 0),
+    creditsDelta: existing.creditsDelta,
+    status: nextStatus,
+    usageClass: existing.usageClass,
   };
 }
 
 async function evaluateBudgetAlerts(user: SessionUser) {
-  const modelTotals = await getModelUsageTotals({
+  const plan = await getWorkspacePlanSummary(user.organizationId);
+  const workspaceUsage = await getWorkspaceCommercialUsageSnapshot({
+    organizationId: user.organizationId,
+  });
+  const membershipPolicy = await getOrganizationMembershipCommercialPolicy({
     organizationId: user.organizationId,
     userId: user.id,
   });
-  const sandboxTotals = await getSandboxUsageTotals({
+  const userUsage = await getWorkspaceCommercialUsageSnapshot({
     organizationId: user.organizationId,
     userId: user.id,
   });
 
-  const modelUserWarningKey = `budget:model:user:${user.id}:warning`;
-  const modelUserCriticalKey = `budget:model:user:${user.id}:critical`;
-  const modelOrgWarningKey = `budget:model:org:${user.organizationId}:warning`;
-  const modelOrgCriticalKey = `budget:model:org:${user.organizationId}:critical`;
-  const sandboxUserWarningKey = `budget:sandbox:user:${user.id}:warning`;
-  const sandboxUserCriticalKey = `budget:sandbox:user:${user.id}:critical`;
-  const sandboxOrgWarningKey = `budget:sandbox:org:${user.organizationId}:warning`;
-  const sandboxOrgCriticalKey = `budget:sandbox:org:${user.organizationId}:critical`;
+  const workspaceWarningKey = `credits:workspace:${user.organizationId}:warning`;
+  const workspaceCriticalKey = `credits:workspace:${user.organizationId}:critical`;
+  const workspaceWarning =
+    workspaceUsage.usedCredits + workspaceUsage.pendingCredits >=
+    getCommercialWarningThreshold(plan.monthlyIncludedCredits);
+  const workspaceCritical =
+    workspaceUsage.usedCredits + workspaceUsage.pendingCredits >= plan.monthlyIncludedCredits;
 
-  const modelUserWarning = modelTotals.userCostUsd >= getBudgetWarningThreshold(DAILY_MODEL_COST_CAP_USD_USER);
-  const modelUserCritical = modelTotals.userCostUsd >= DAILY_MODEL_COST_CAP_USD_USER;
-  const modelOrgWarning =
-    modelTotals.organizationCostUsd >=
-    getBudgetWarningThreshold(DAILY_MODEL_COST_CAP_USD_ORGANIZATION);
-  const modelOrgCritical =
-    modelTotals.organizationCostUsd >= DAILY_MODEL_COST_CAP_USD_ORGANIZATION;
-  const sandboxUserWarning =
-    sandboxTotals.userQuantity >= getBudgetWarningThreshold(DAILY_SANDBOX_RUN_CAP_USER);
-  const sandboxUserCritical = sandboxTotals.userQuantity >= DAILY_SANDBOX_RUN_CAP_USER;
-  const sandboxOrgWarning =
-    sandboxTotals.organizationQuantity >=
-    getBudgetWarningThreshold(DAILY_SANDBOX_RUN_CAP_ORGANIZATION);
-  const sandboxOrgCritical =
-    sandboxTotals.organizationQuantity >= DAILY_SANDBOX_RUN_CAP_ORGANIZATION;
-
-  if (modelUserWarning) {
+  if (workspaceWarning) {
     await upsertOperationalAlert({
-      alertType: "budget-warning",
-      dedupeKey: modelUserWarningKey,
-      message: `User daily model spend is ${roundCurrency(modelTotals.userCostUsd)} USD against a ${DAILY_MODEL_COST_CAP_USD_USER} USD cap.`,
+      alertType: "credit-warning",
+      dedupeKey: workspaceWarningKey,
+      message: `Workspace credit usage is ${workspaceUsage.usedCredits + workspaceUsage.pendingCredits} of ${plan.monthlyIncludedCredits} credits for ${plan.planName}.`,
       organizationId: user.organizationId,
       severity: "warning",
-      title: "User Model Budget Warning",
+      title: "Workspace Credit Warning",
+    });
+  } else {
+    await resolveOperationalAlert(workspaceWarningKey);
+  }
+
+  if (workspaceCritical) {
+    await upsertOperationalAlert({
+      alertType: "credit-exhausted",
+      dedupeKey: workspaceCriticalKey,
+      message: `Workspace credits are exhausted for ${plan.planName}.`,
+      organizationId: user.organizationId,
+      severity: "critical",
+      title: "Workspace Credit Exhausted",
+    });
+  } else {
+    await resolveOperationalAlert(workspaceCriticalKey);
+  }
+
+  const memberCap = membershipPolicy?.monthlyCreditCap ?? null;
+  const memberWarningKey = `credits:user:${user.id}:warning`;
+  const memberCriticalKey = `credits:user:${user.id}:critical`;
+  const userConsumed = userUsage.usedCredits + userUsage.pendingCredits;
+  const memberWarning = typeof memberCap === "number" && userConsumed >= getCommercialWarningThreshold(memberCap);
+  const memberCritical = typeof memberCap === "number" && userConsumed >= memberCap;
+
+  if (memberWarning && typeof memberCap === "number") {
+    await upsertOperationalAlert({
+      alertType: "credit-warning",
+      dedupeKey: memberWarningKey,
+      message: `Member credit usage is ${userConsumed} of ${memberCap} credits this billing window.`,
+      organizationId: user.organizationId,
+      severity: "warning",
+      title: "Member Credit Warning",
       userId: user.id,
     });
   } else {
-    await resolveOperationalAlert(modelUserWarningKey);
+    await resolveOperationalAlert(memberWarningKey);
   }
 
-  if (modelUserCritical) {
+  if (memberCritical && typeof memberCap === "number") {
     await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: modelUserCriticalKey,
-      message: `User daily model spend reached ${roundCurrency(modelTotals.userCostUsd)} USD.`,
+      alertType: "credit-exhausted",
+      dedupeKey: memberCriticalKey,
+      message: `Member monthly credit cap of ${memberCap} has been exhausted.`,
       organizationId: user.organizationId,
       severity: "critical",
-      title: "User Model Budget Exhausted",
+      title: "Member Credit Exhausted",
       userId: user.id,
     });
   } else {
-    await resolveOperationalAlert(modelUserCriticalKey);
-  }
-
-  if (modelOrgWarning) {
-    await upsertOperationalAlert({
-      alertType: "budget-warning",
-      dedupeKey: modelOrgWarningKey,
-      message: `Organization daily model spend is ${roundCurrency(modelTotals.organizationCostUsd)} USD against a ${DAILY_MODEL_COST_CAP_USD_ORGANIZATION} USD cap.`,
-      organizationId: user.organizationId,
-      severity: "warning",
-      title: "Organization Model Budget Warning",
-    });
-  } else {
-    await resolveOperationalAlert(modelOrgWarningKey);
-  }
-
-  if (modelOrgCritical) {
-    await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: modelOrgCriticalKey,
-      message: `Organization daily model spend reached ${roundCurrency(modelTotals.organizationCostUsd)} USD.`,
-      organizationId: user.organizationId,
-      severity: "critical",
-      title: "Organization Model Budget Exhausted",
-    });
-  } else {
-    await resolveOperationalAlert(modelOrgCriticalKey);
-  }
-
-  if (sandboxUserWarning) {
-    await upsertOperationalAlert({
-      alertType: "budget-warning",
-      dedupeKey: sandboxUserWarningKey,
-      message: `User daily sandbox runs are ${sandboxTotals.userQuantity} against a ${DAILY_SANDBOX_RUN_CAP_USER} run cap.`,
-      organizationId: user.organizationId,
-      severity: "warning",
-      title: "User Sandbox Budget Warning",
-      userId: user.id,
-    });
-  } else {
-    await resolveOperationalAlert(sandboxUserWarningKey);
-  }
-
-  if (sandboxUserCritical) {
-    await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: sandboxUserCriticalKey,
-      message: `User daily sandbox runs reached ${sandboxTotals.userQuantity}.`,
-      organizationId: user.organizationId,
-      severity: "critical",
-      title: "User Sandbox Budget Exhausted",
-      userId: user.id,
-    });
-  } else {
-    await resolveOperationalAlert(sandboxUserCriticalKey);
-  }
-
-  if (sandboxOrgWarning) {
-    await upsertOperationalAlert({
-      alertType: "budget-warning",
-      dedupeKey: sandboxOrgWarningKey,
-      message: `Organization daily sandbox runs are ${sandboxTotals.organizationQuantity} against a ${DAILY_SANDBOX_RUN_CAP_ORGANIZATION} run cap.`,
-      organizationId: user.organizationId,
-      severity: "warning",
-      title: "Organization Sandbox Budget Warning",
-    });
-  } else {
-    await resolveOperationalAlert(sandboxOrgWarningKey);
-  }
-
-  if (sandboxOrgCritical) {
-    await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: sandboxOrgCriticalKey,
-      message: `Organization daily sandbox runs reached ${sandboxTotals.organizationQuantity}.`,
-      organizationId: user.organizationId,
-      severity: "critical",
-      title: "Organization Sandbox Budget Exhausted",
-    });
-  } else {
-    await resolveOperationalAlert(sandboxOrgCriticalKey);
+    await resolveOperationalAlert(memberCriticalKey);
   }
 }
 
@@ -962,8 +928,20 @@ export async function finalizeObservedRequest(
     userId: context.user?.id ?? null,
   });
 
+  const commercialEntry = await finalizeCommercialLedgerEntry({
+    outcome: input.outcome,
+    requestId: context.requestId,
+    requestLogId,
+  });
+  const inferredUsageClass = inferUsageClassForRequest({
+    routeGroup: context.routeGroup,
+    routeKey: context.routeKey,
+  });
+
   for (const usageEvent of input.usageEvents ?? []) {
     await db.insert(usageEvents).values({
+      commercialCredits:
+        usageEvent.commercialCredits ?? (commercialEntry?.status === "committed" ? commercialEntry.creditsDelta : 0),
       costUsd: usageEvent.costUsd ?? 0,
       createdAt: completedAt,
       durationMs: usageEvent.durationMs ?? null,
@@ -980,6 +958,10 @@ export async function finalizeObservedRequest(
       status: usageEvent.status,
       subjectName: usageEvent.subjectName ?? null,
       totalTokens: usageEvent.totalTokens ?? 0,
+      usageClass:
+        usageEvent.usageClass ??
+        commercialEntry?.usageClass ??
+        inferredUsageClass,
       userId: context.user?.id ?? null,
     });
   }
@@ -1064,120 +1046,182 @@ export async function enforceRateLimitPolicy(input: {
 }
 
 export async function enforceBudgetPolicy(input: {
+  quantity?: number;
   routeGroup: RateLimitedRouteGroup;
+  routeKey: string;
+  requestId: string;
   user: SessionUser;
 }) {
-  if (input.routeGroup === "chat") {
-    const totals = await getModelUsageTotals({
-      organizationId: input.user.organizationId,
-      userId: input.user.id,
-    });
+  const usageClass = getCommercialUsageClassForRoute({
+    routeGroup: input.routeGroup,
+    routeKey: input.routeKey,
+  });
 
-    if (totals.userCostUsd >= DAILY_MODEL_COST_CAP_USD_USER) {
-      const decision: BudgetDecision = {
-        errorCode: "budget_model_user_exhausted",
-        message: "Daily user model budget exhausted. Try again after the rolling 24-hour window drops below the cap.",
-        metadata: {
-          capUsd: DAILY_MODEL_COST_CAP_USD_USER,
-          currentUsd: roundCurrency(totals.userCostUsd),
-          warningRatio: BUDGET_WARNING_RATIO,
-        },
-      };
-
-      await upsertOperationalAlert({
-        alertType: "budget-exhausted",
-        dedupeKey: `budget:model:user:${input.user.id}:critical`,
-        message: `User daily model spend reached ${roundCurrency(totals.userCostUsd)} USD.`,
-        organizationId: input.user.organizationId,
-        severity: "critical",
-        title: "User Model Budget Exhausted",
-        userId: input.user.id,
-      });
-
-      return decision;
-    }
-
-    if (totals.organizationCostUsd >= DAILY_MODEL_COST_CAP_USD_ORGANIZATION) {
-      const decision: BudgetDecision = {
-        errorCode: "budget_model_organization_exhausted",
-        message: "Organization daily model budget exhausted. Try again after the rolling 24-hour window drops below the cap.",
-        metadata: {
-          capUsd: DAILY_MODEL_COST_CAP_USD_ORGANIZATION,
-          currentUsd: roundCurrency(totals.organizationCostUsd),
-          warningRatio: BUDGET_WARNING_RATIO,
-        },
-      };
-
-      await upsertOperationalAlert({
-        alertType: "budget-exhausted",
-        dedupeKey: `budget:model:org:${input.user.organizationId}:critical`,
-        message: `Organization daily model spend reached ${roundCurrency(totals.organizationCostUsd)} USD.`,
-        organizationId: input.user.organizationId,
-        severity: "critical",
-        title: "Organization Model Budget Exhausted",
-      });
-
-      return decision;
-    }
-
+  if (!usageClass) {
     return null;
   }
 
-  if (input.routeGroup !== "sandbox") {
-    return null;
-  }
-
-  const totals = await getSandboxUsageTotals({
+  const plan = await getWorkspacePlanSummary(input.user.organizationId);
+  const membershipPolicy = await getOrganizationMembershipCommercialPolicy({
     organizationId: input.user.organizationId,
     userId: input.user.id,
   });
 
-  if (totals.userQuantity >= DAILY_SANDBOX_RUN_CAP_USER) {
-    const decision: BudgetDecision = {
-      errorCode: "budget_sandbox_user_exhausted",
-      message: "Daily user sandbox run budget exhausted. Try again after the rolling 24-hour window drops below the cap.",
-      metadata: {
-        capRuns: DAILY_SANDBOX_RUN_CAP_USER,
-        currentRuns: totals.userQuantity,
-        warningRatio: BUDGET_WARNING_RATIO,
-      },
+  if (!membershipPolicy || membershipPolicy.status !== "active") {
+    return null;
+  }
+
+  const quantity = Math.max(1, Math.trunc(input.quantity ?? 1));
+  const requiredCredits = Math.max(0, plan.rateCard[usageClass] * quantity);
+
+  if (requiredCredits <= 0) {
+    return null;
+  }
+
+  const workspaceUsage = await getWorkspaceCommercialUsageSnapshot({
+    organizationId: input.user.organizationId,
+  });
+  const remainingWorkspaceCredits = workspaceUsage.remainingCredits;
+
+  if (remainingWorkspaceCredits < requiredCredits) {
+    const metadata: CommercialBlockSummary = {
+      planName: plan.planName,
+      remainingUserCredits:
+        typeof membershipPolicy.monthlyCreditCap === "number"
+          ? Math.max(
+              0,
+              membershipPolicy.monthlyCreditCap -
+                (
+                  await getWorkspaceCommercialUsageSnapshot({
+                    organizationId: input.user.organizationId,
+                    userId: input.user.id,
+                  })
+                ).usedCredits,
+            )
+          : null,
+      remainingWorkspaceCredits,
+      requiredCredits,
+      resetAt: workspaceUsage.resetAt,
+      scope: "workspace",
+      status: "credit_exhausted",
+      usageClass,
     };
 
+    await createCommercialLedgerEntry({
+      creditsDelta: requiredCredits,
+      metadata,
+      organizationId: input.user.organizationId,
+      requestId: input.requestId,
+      routeGroup: input.routeGroup,
+      status: "blocked",
+      usageClass,
+      userId: input.user.id,
+      windowEndAt: workspaceUsage.windowEndAt,
+      windowStartAt: workspaceUsage.windowStartAt,
+    });
+
     await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: `budget:sandbox:user:${input.user.id}:critical`,
-      message: `User daily sandbox runs reached ${totals.userQuantity}.`,
+      alertType: "credit-exhausted",
+      dedupeKey: `credits:workspace:${input.user.organizationId}:critical`,
+      message: `Workspace credits are exhausted for ${plan.planName}.`,
       organizationId: input.user.organizationId,
       severity: "critical",
-      title: "User Sandbox Budget Exhausted",
+      title: "Workspace Credit Exhausted",
+    });
+
+    return {
+      errorCode: buildCreditExhaustedErrorCode("workspace", usageClass),
+      message: `Workspace credits are exhausted for ${plan.planName}.`,
+      metadata,
+    };
+  }
+
+  if (typeof membershipPolicy.monthlyCreditCap !== "number") {
+    await createCommercialLedgerEntry({
+      creditsDelta: requiredCredits,
+      metadata: {
+        planName: plan.planName,
+        reservedCredits: requiredCredits,
+      },
+      organizationId: input.user.organizationId,
+      requestId: input.requestId,
+      routeGroup: input.routeGroup,
+      status: "reserved",
+      usageClass,
+      userId: input.user.id,
+      windowEndAt: workspaceUsage.windowEndAt,
+      windowStartAt: workspaceUsage.windowStartAt,
+    });
+
+    return null;
+  }
+
+  const userUsage = await getWorkspaceCommercialUsageSnapshot({
+    organizationId: input.user.organizationId,
+    userId: input.user.id,
+  });
+  const remainingUserCredits = Math.max(
+    0,
+    membershipPolicy.monthlyCreditCap - userUsage.usedCredits - userUsage.pendingCredits,
+  );
+
+  if (remainingUserCredits < requiredCredits) {
+    const metadata: CommercialBlockSummary = {
+      planName: plan.planName,
+      remainingUserCredits,
+      remainingWorkspaceCredits,
+      requiredCredits,
+      resetAt: userUsage.resetAt,
+      scope: "user",
+      status: "credit_exhausted",
+      usageClass,
+    };
+
+    await createCommercialLedgerEntry({
+      creditsDelta: requiredCredits,
+      metadata,
+      organizationId: input.user.organizationId,
+      requestId: input.requestId,
+      routeGroup: input.routeGroup,
+      status: "blocked",
+      usageClass,
+      userId: input.user.id,
+      windowEndAt: userUsage.windowEndAt,
+      windowStartAt: userUsage.windowStartAt,
+    });
+
+    await upsertOperationalAlert({
+      alertType: "credit-exhausted",
+      dedupeKey: `credits:user:${input.user.id}:critical`,
+      message: `Member monthly credit cap of ${membershipPolicy.monthlyCreditCap} has been exhausted.`,
+      organizationId: input.user.organizationId,
+      severity: "critical",
+      title: "Member Credit Exhausted",
       userId: input.user.id,
     });
 
-    return decision;
-  }
-
-  if (totals.organizationQuantity >= DAILY_SANDBOX_RUN_CAP_ORGANIZATION) {
-    const decision: BudgetDecision = {
-      errorCode: "budget_sandbox_organization_exhausted",
-      message: "Organization daily sandbox run budget exhausted. Try again after the rolling 24-hour window drops below the cap.",
-      metadata: {
-        capRuns: DAILY_SANDBOX_RUN_CAP_ORGANIZATION,
-        currentRuns: totals.organizationQuantity,
-        warningRatio: BUDGET_WARNING_RATIO,
-      },
+    return {
+      errorCode: buildCreditExhaustedErrorCode("user", usageClass),
+      message: `This member has exhausted their monthly credit cap for ${plan.planName}.`,
+      metadata,
     };
-
-    await upsertOperationalAlert({
-      alertType: "budget-exhausted",
-      dedupeKey: `budget:sandbox:org:${input.user.organizationId}:critical`,
-      message: `Organization daily sandbox runs reached ${totals.organizationQuantity}.`,
-      organizationId: input.user.organizationId,
-      severity: "critical",
-      title: "Organization Sandbox Budget Exhausted",
-    });
-
-    return decision;
   }
+
+  await createCommercialLedgerEntry({
+    creditsDelta: requiredCredits,
+    metadata: {
+      planName: plan.planName,
+      reservedCredits: requiredCredits,
+    },
+    organizationId: input.user.organizationId,
+    requestId: input.requestId,
+    routeGroup: input.routeGroup,
+    status: "reserved",
+    usageClass,
+    userId: input.user.id,
+    windowEndAt: workspaceUsage.windowEndAt,
+    windowStartAt: workspaceUsage.windowStartAt,
+  });
 
   return null;
 }
@@ -1346,7 +1390,13 @@ export async function getOperationsSummary(input: {
   const db = await getAppDatabase();
   const window = parseWindowParam(input.windowParam);
   const since = Date.now() - getWindowMs(window);
-  const health = await getHealthSummary();
+  const [health, workspacePlan, workspaceUsage] = await Promise.all([
+    getHealthSummary(),
+    getWorkspacePlanSummary(input.organizationId),
+    getWorkspaceCommercialUsageSnapshot({
+      organizationId: input.organizationId,
+    }),
+  ]);
 
   const [alerts, routeMetrics, usageByRouteGroup, usageByEventType, byUser, recentFailures, rateLimitActivity] =
     await Promise.all([
@@ -1380,6 +1430,7 @@ export async function getOperationsSummary(input: {
         .groupBy(requestLogs.routeGroup),
       db
         .select({
+          commercialCredits: sql<number>`coalesce(sum(${usageEvents.commercialCredits}), 0)`,
           costUsd: sql<number>`coalesce(sum(${usageEvents.costUsd}), 0)`,
           eventType: sql<string>`'all'`,
           outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
@@ -1398,6 +1449,7 @@ export async function getOperationsSummary(input: {
         .groupBy(usageEvents.routeGroup),
       db
         .select({
+          commercialCredits: sql<number>`coalesce(sum(${usageEvents.commercialCredits}), 0)`,
           costUsd: sql<number>`coalesce(sum(${usageEvents.costUsd}), 0)`,
           eventType: usageEvents.eventType,
           outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
@@ -1416,24 +1468,40 @@ export async function getOperationsSummary(input: {
         .groupBy(usageEvents.routeGroup, usageEvents.eventType),
       db
         .select({
+          creditCap: organizationMemberships.monthlyCreditCap,
+          creditsUsed: sql<number>`coalesce(sum(${usageEvents.commercialCredits}), 0)`,
           costUsd: sql<number>`coalesce(sum(${usageEvents.costUsd}), 0)`,
           email: users.email,
           name: users.name,
           outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
           quantity: sql<number>`coalesce(sum(${usageEvents.quantity}), 0)`,
           requestCount: sql<number>`count(*)`,
+          status: organizationMemberships.status,
           totalTokens: sql<number>`coalesce(sum(${usageEvents.totalTokens}), 0)`,
           userId: usageEvents.userId,
         })
         .from(usageEvents)
         .leftJoin(users, eq(users.id, usageEvents.userId))
+        .leftJoin(
+          organizationMemberships,
+          and(
+            eq(organizationMemberships.userId, usageEvents.userId),
+            eq(organizationMemberships.organizationId, input.organizationId),
+          ),
+        )
         .where(
           and(
             eq(usageEvents.organizationId, input.organizationId),
             gte(usageEvents.createdAt, since),
           ),
         )
-        .groupBy(usageEvents.userId, users.email, users.name),
+        .groupBy(
+          usageEvents.userId,
+          users.email,
+          users.name,
+          organizationMemberships.monthlyCreditCap,
+          organizationMemberships.status,
+        ),
       db
         .select({
           completedAt: requestLogs.completedAt,
@@ -1481,15 +1549,30 @@ export async function getOperationsSummary(input: {
   const byUserSummary: UsageActorSummary[] = byUser
     .filter((row) => typeof row.userId === "string" && row.userId.length > 0)
     .map((row) => ({
+      creditCap:
+        typeof row.creditCap === "number" && Number.isFinite(row.creditCap)
+          ? Number(row.creditCap)
+          : null,
+      creditsUsed: Number(row.creditsUsed ?? 0),
       costUsd: Number(row.costUsd ?? 0),
       name: row.name || row.email || "Unknown user",
       outputTokens: Number(row.outputTokens ?? 0),
       quantity: Number(row.quantity ?? 0),
+      remainingCreditCap:
+        typeof row.creditCap === "number" && Number.isFinite(row.creditCap)
+          ? Math.max(0, Number(row.creditCap) - Number(row.creditsUsed ?? 0))
+          : null,
       requestCount: Number(row.requestCount ?? 0),
+      status: (row.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
       totalTokens: Number(row.totalTokens ?? 0),
       userId: row.userId as string,
     }))
-    .sort((left, right) => right.costUsd - left.costUsd || right.totalTokens - left.totalTokens);
+    .sort(
+      (left, right) =>
+        right.creditsUsed - left.creditsUsed ||
+        right.costUsd - left.costUsd ||
+        right.totalTokens - left.totalTokens,
+    );
 
   return {
     alerts: alerts.map((alert) => ({
@@ -1504,6 +1587,14 @@ export async function getOperationsSummary(input: {
     })),
     health,
     policies: getOperationsPoliciesSnapshot(),
+    workspace: {
+      ...workspacePlan,
+      exhausted: workspaceUsage.exhausted,
+      pendingCredits: workspaceUsage.pendingCredits,
+      remainingCredits: workspaceUsage.remainingCredits,
+      resetAt: workspaceUsage.resetAt,
+      usedCredits: workspaceUsage.usedCredits,
+    },
     rateLimitActivity: rateLimitActivity.map((row) => ({
       count: Number(row.count ?? 0),
       routeGroup: row.routeGroup as OperationsRouteGroup,
@@ -1534,6 +1625,7 @@ export async function getOperationsSummary(input: {
     })),
     usageSummary: {
       byEventType: usageByEventType.map((row) => ({
+        commercialCredits: Number(row.commercialCredits ?? 0),
         costUsd: Number(row.costUsd ?? 0),
         eventType: row.eventType,
         outputTokens: Number(row.outputTokens ?? 0),
@@ -1543,6 +1635,7 @@ export async function getOperationsSummary(input: {
         totalTokens: Number(row.totalTokens ?? 0),
       })),
       byRouteGroup: usageByRouteGroup.map((row) => ({
+        commercialCredits: Number(row.commercialCredits ?? 0),
         costUsd: Number(row.costUsd ?? 0),
         eventType: row.eventType,
         outputTokens: Number(row.outputTokens ?? 0),
@@ -1566,7 +1659,7 @@ export function buildRateLimitMessage(decision: RateLimitDecision) {
 export function buildBudgetExceededResponse(decision: BudgetDecision) {
   return buildObservedErrorResponse(decision.message, 429, {
     ...decision.metadata,
-    status: "blocked",
+    status: "credit_exhausted",
   });
 }
 

@@ -51,6 +51,8 @@ export const organizationMemberships = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["intern", "owner"] }).notNull(),
+    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+    monthlyCreditCap: integer("monthly_credit_cap"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -59,9 +61,94 @@ export const organizationMemberships = sqliteTable(
       "organization_memberships_role_check",
       sql`${table.role} in ('intern', 'owner')`,
     ),
+    check(
+      "organization_memberships_status_check",
+      sql`${table.status} in ('active', 'suspended')`,
+    ),
     uniqueIndex("organization_memberships_org_user_idx").on(
       table.organizationId,
       table.userId,
+    ),
+    index("organization_memberships_org_status_idx").on(table.organizationId, table.status),
+  ],
+);
+
+export const workspacePlans = sqliteTable(
+  "workspace_plans",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    planCode: text("plan_code").notNull(),
+    planName: text("plan_name").notNull(),
+    monthlyIncludedCredits: integer("monthly_included_credits").notNull(),
+    billingAnchorAt: integer("billing_anchor_at").notNull(),
+    currentWindowStartAt: integer("current_window_start_at").notNull(),
+    currentWindowEndAt: integer("current_window_end_at").notNull(),
+    hardCapBehavior: text("hard_cap_behavior", { enum: ["block"] })
+      .notNull()
+      .default("block"),
+    rateCardJson: text("rate_card_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check("workspace_plans_hard_cap_behavior_check", sql`${table.hardCapBehavior} in ('block')`),
+    uniqueIndex("workspace_plans_organization_id_idx").on(table.organizationId),
+    index("workspace_plans_window_end_idx").on(table.currentWindowEndAt),
+  ],
+);
+
+export const workspaceCommercialLedger = sqliteTable(
+  "workspace_commercial_ledger",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    requestLogId: text("request_log_id").references(() => requestLogs.id, {
+      onDelete: "set null",
+    }),
+    routeGroup: text("route_group").notNull(),
+    usageClass: text("usage_class", {
+      enum: ["analysis", "chart", "chat", "document", "import"],
+    }).notNull(),
+    creditsDelta: integer("credits_delta").notNull(),
+    windowStartAt: integer("window_start_at").notNull(),
+    windowEndAt: integer("window_end_at").notNull(),
+    status: text("status", {
+      enum: ["reserved", "committed", "released", "blocked"],
+    })
+      .notNull()
+      .default("reserved"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workspace_commercial_ledger_usage_class_check",
+      sql`${table.usageClass} in ('analysis', 'chart', 'chat', 'document', 'import')`,
+    ),
+    check(
+      "workspace_commercial_ledger_status_check",
+      sql`${table.status} in ('reserved', 'committed', 'released', 'blocked')`,
+    ),
+    index("workspace_commercial_ledger_request_id_idx").on(table.requestId),
+    index("workspace_commercial_ledger_org_window_status_idx").on(
+      table.organizationId,
+      table.windowStartAt,
+      table.status,
+    ),
+    index("workspace_commercial_ledger_user_window_status_idx").on(
+      table.userId,
+      table.windowStartAt,
+      table.status,
     ),
   ],
 );
@@ -670,6 +757,11 @@ export const usageEvents = sqliteTable(
     routeKey: text("route_key").notNull(),
     routeGroup: text("route_group").notNull(),
     eventType: text("event_type").notNull(),
+    usageClass: text("usage_class", {
+      enum: ["analysis", "chart", "chat", "document", "import", "search", "system"],
+    })
+      .notNull()
+      .default("system"),
     organizationId: text("organization_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
@@ -681,11 +773,16 @@ export const usageEvents = sqliteTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     totalTokens: integer("total_tokens").notNull().default(0),
     costUsd: real("cost_usd").notNull().default(0),
+    commercialCredits: integer("commercial_credits").notNull().default(0),
     durationMs: integer("duration_ms"),
     metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
+    check(
+      "usage_events_usage_class_check",
+      sql`${table.usageClass} in ('analysis', 'chart', 'chat', 'document', 'import', 'search', 'system')`,
+    ),
     index("usage_events_route_group_created_at_idx").on(table.routeGroup, table.createdAt),
     index("usage_events_organization_id_created_at_idx").on(table.organizationId, table.createdAt),
     index("usage_events_user_id_created_at_idx").on(table.userId, table.createdAt),

@@ -9,8 +9,10 @@ import {
 } from "@/lib/knowledge-files";
 import {
   beginObservedRequest,
+  buildBudgetExceededResponse,
   buildObservedErrorResponse,
   buildRateLimitedResponse,
+  enforceBudgetPolicy,
   enforceRateLimitPolicy,
   finalizeObservedRequest,
   runOperationsMaintenance,
@@ -58,10 +60,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "knowledge.files.upload_async";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "knowledge_upload",
-    routeKey: "knowledge.files.upload_async",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -123,6 +126,23 @@ export async function POST(request: Request) {
     });
   }
 
+  const budgetDecision = await enforceBudgetPolicy({
+    quantity: 1,
+    requestId: observed.requestId,
+    routeGroup: "knowledge_upload",
+    routeKey,
+    user,
+  });
+
+  if (budgetDecision) {
+    return finalizeObservedRequest(observed, {
+      errorCode: budgetDecision.errorCode,
+      metadata: budgetDecision.metadata,
+      outcome: "blocked",
+      response: buildBudgetExceededResponse(budgetDecision),
+    });
+  }
+
   try {
     const job = await createKnowledgeImportJobFromFiles({
       files: [
@@ -154,9 +174,10 @@ export async function POST(request: Request) {
             accessScope: job.accessScope,
             sourceKind: job.sourceKind,
           },
-          quantity: 1,
+          quantity: job.totalFileCount,
           status: job.status,
           subjectName: job.id,
+          usageClass: "import",
         },
       ],
     });

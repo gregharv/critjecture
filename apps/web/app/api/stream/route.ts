@@ -91,10 +91,11 @@ function roundCost(value: number) {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "chat.stream";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "chat",
-    routeKey: "chat.stream",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -108,7 +109,9 @@ export async function POST(request: Request) {
   }
 
   const budgetDecision = await enforceBudgetPolicy({
+    requestId: observed.requestId,
     routeGroup: "chat",
+    routeKey,
     user,
   });
 

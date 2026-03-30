@@ -196,6 +196,10 @@ async function getAuthenticatedUserForRecord(user: AppUser): Promise<Authenticat
     return null;
   }
 
+  if (membership.status !== "active") {
+    return null;
+  }
+
   return {
     email: user.email,
     id: user.id,

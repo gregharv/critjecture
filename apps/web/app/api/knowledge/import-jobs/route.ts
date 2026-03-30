@@ -8,8 +8,10 @@ import {
 } from "@/lib/knowledge-imports";
 import {
   beginObservedRequest,
+  buildBudgetExceededResponse,
   buildObservedErrorResponse,
   buildRateLimitedResponse,
+  enforceBudgetPolicy,
   enforceRateLimitPolicy,
   finalizeObservedRequest,
   runOperationsMaintenance,
@@ -46,10 +48,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
+  const routeKey = "knowledge.import_jobs.create";
   const observed = beginObservedRequest({
     method: "POST",
     routeGroup: "knowledge_import",
-    routeKey: "knowledge.import_jobs.create",
+    routeKey,
     user,
   });
   await runOperationsMaintenance();
@@ -96,6 +99,46 @@ export async function POST(request: Request) {
   const mode = getStringFormValue(formData, "mode") || "directory";
   const archive = formData.get("archive");
 
+  const fileEntries = archive instanceof File ? [] : formData.getAll("files");
+  const pathEntries = archive instanceof File ? [] : formData.getAll("paths");
+  const files = fileEntries
+    .map((entry, index) => {
+      if (!(entry instanceof File)) {
+        return null;
+      }
+
+      const relativePath =
+        typeof pathEntries[index] === "string" && String(pathEntries[index]).trim()
+          ? String(pathEntries[index]).trim()
+          : entry.name;
+
+      return {
+        file: entry,
+        relativePath,
+      };
+    })
+    .filter((entry): entry is { file: File; relativePath: string } => entry !== null);
+  const importQuantity = archive instanceof File ? 1 : files.length;
+
+  if (importQuantity > 0) {
+    const budgetDecision = await enforceBudgetPolicy({
+      quantity: importQuantity,
+      requestId: observed.requestId,
+      routeGroup: "knowledge_import",
+      routeKey,
+      user,
+    });
+
+    if (budgetDecision) {
+      return finalizeObservedRequest(observed, {
+        errorCode: budgetDecision.errorCode,
+        metadata: budgetDecision.metadata,
+        outcome: "blocked",
+        response: buildBudgetExceededResponse(budgetDecision),
+      });
+    }
+  }
+
   try {
     let job;
 
@@ -107,26 +150,6 @@ export async function POST(request: Request) {
         user,
       });
     } else {
-      const fileEntries = formData.getAll("files");
-      const pathEntries = formData.getAll("paths");
-      const files = fileEntries
-        .map((entry, index) => {
-          if (!(entry instanceof File)) {
-            return null;
-          }
-
-          const relativePath =
-            typeof pathEntries[index] === "string" && String(pathEntries[index]).trim()
-              ? String(pathEntries[index]).trim()
-              : entry.name;
-
-          return {
-            file: entry,
-            relativePath,
-          };
-        })
-        .filter((entry): entry is { file: File; relativePath: string } => entry !== null);
-
       job = await createKnowledgeImportJobFromFiles({
         files,
         requestedScope: scope,
@@ -154,9 +177,10 @@ export async function POST(request: Request) {
             accessScope: job.accessScope,
             sourceKind: job.sourceKind,
           },
-          quantity: 1,
+          quantity: job.totalFileCount,
           status: job.status,
           subjectName: job.id,
+          usageClass: "import",
         },
       ],
     });
