@@ -69,7 +69,33 @@ Restore expectations:
 
 - `single_org`: run `pnpm backup:verify -- --deployment-mode single_org` after schema or storage-layout changes
 - `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for Railway-style deploys
-- release gating: run `pnpm backup:verify` before promoting a build that changes migrations or persistent storage layout
+
+`pnpm backup:verify` proves the repo's recovery tooling still works in representative fixtures. It is not the production release record for a real `single_org` environment.
+
+## `single_org` Release Gate
+
+Use the operator-side release-proof flow for production-changing `single_org` builds.
+
+- restore drill:
+  - `pnpm restore:drill:single-org -- --environment <label> --operator "<name>"`
+- release proof:
+  - `pnpm release:proof:single-org -- --environment <label> --operator "<name>" --checklist-kind <first_customer_deployment|routine_upgrade> --change-scope <app_only|migration|storage_layout|migration_and_storage> --restore-drill <restore-drill-json-path> ...`
+
+Release-gate rules:
+
+- `app_only` releases still require a release-proof record that references the latest successful restore drill for the same environment
+- `migration`, `storage_layout`, and `migration_and_storage` releases require a fresh backup plus clean temporary restore verification during `pnpm release:proof:single-org`
+- keep the generated JSON and Markdown records as operator evidence
+
+Minimum documented operator responsibilities for `single_org`:
+
+- secret storage owner
+- secret rotation owner
+- TLS termination expectation
+- storage encryption expectation
+- backup encryption expectation
+- alert-webhook owner
+- incident contact
 
 ## Observability And Incident Response
 
@@ -85,6 +111,9 @@ Runbooks:
 - `apps/web/docs/runbooks/backup-restore-failures.md`
 - `apps/web/docs/runbooks/hosted-operations.md`
 - `apps/web/docs/runbooks/onprem-operations.md`
+- `apps/web/docs/runbooks/single-org-restore-drill.md`
+- `apps/web/docs/runbooks/single-org-first-deployment.md`
+- `apps/web/docs/runbooks/single-org-routine-upgrade.md`
 
 ## Retention
 

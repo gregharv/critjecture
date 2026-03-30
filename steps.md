@@ -2,37 +2,12 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 26 finished the governed SMB access-control pass. The remaining work is now split into two tracks:
+Step 27 finished the release-gated `single_org` operations pass. The remaining work is now split into two tracks:
 
 1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
 2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
 
 ## Phase 1: `single_org` Production Readiness
-
-## Step 27: Release-Gated Operations and Deployment Proof
-
-### Goal
-
-Turn the existing backup, restore, runbook, and security guidance into enforced operator practice for `single_org`.
-
-### What Should Be Implemented
-
-- add a release-gated verification path for production-changing builds:
-  - backup verification after migration or storage-layout changes
-  - a documented restore-drill checklist with required sign-off fields
-  - a simple operator release record or artifact proving the checks were run
-- document the minimum operator responsibilities for `single_org`:
-  - secret storage and rotation ownership
-  - TLS termination expectations
-  - storage and backup encryption expectations
-  - alert-webhook setup and incident contact ownership
-- add one clear operational checklist for first customer deployment and one for routine upgrades
-
-### Acceptance Criteria
-
-- production-changing releases have a concrete required verification path, not just optional commands
-- `single_org` operators can demonstrate backup verification and restore readiness without tribal knowledge
-- secret-handling, encryption, and incident-ownership expectations are explicit
 
 ## Step 28: Stronger `single_org` Sandbox Boundary
 
@@ -167,6 +142,11 @@ Finish the remaining platform, product, and documentation work required to descr
   - capability-driven gating across answer tools, knowledge, audit, operations, settings, and governance routes
   - restricted-workspace UX and suspension-specific login failures
   - docs aligned to the shipped RBAC model instead of the older `Owner` / `Intern` split
+- Step 27 is complete:
+  - operator-side `single_org` restore-drill and release-proof commands
+  - JSON and Markdown release records with required sign-off fields
+  - documented `single_org` operator responsibilities for secrets, TLS, encryption, alerting, and incident ownership
+  - first-deployment and routine-upgrade runbooks aligned to the shipped commands
 - The main near-term goal is not more surface area:
   - it is converting the current governed SMB system into a defensible `single_org` production deployment and then raising `hosted` to a higher bar
 - `hosted` should be treated as a separate bar:

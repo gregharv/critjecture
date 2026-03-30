@@ -2,7 +2,7 @@
 
 This document states what Critjecture is ready for now, what still blocks a production claim, and how that answer changes between `single_org` and `hosted` deployments.
 
-It reflects the repo after Step 24. It is intentionally specific to the current codebase, docs, and operator tooling.
+It reflects the repo after Step 27. It is intentionally specific to the current codebase, docs, and operator tooling.
 
 ## Readiness Call
 
@@ -12,7 +12,7 @@ Current call by deployment target:
 
 - `single_org`
   - close to production-ready for controlled customer-managed deployments
-  - reasonable for a serious on-prem or single-customer rollout if the operator accepts the current sandbox boundary and follows the documented security, backup, and runbook requirements
+  - reasonable for a serious on-prem or single-customer rollout if the operator accepts the current sandbox boundary and follows the documented security, backup, restore-drill, and release-proof requirements
 - `hosted`
   - not yet a comfortable broad-production target
   - usable only for teams willing to accept the current shared-infrastructure boundary and the dedicated sandbox-supervisor dependency
@@ -53,20 +53,15 @@ Why this is still a blocker:
 - code execution is the highest-risk feature in the product
 - the current boundary is good for a controlled pilot, but it is still the weakest part of the production story
 
-### 2. Operational Proof, Not Just Tooling
+### 2. Operational Proof Now Exists For `single_org`
 
-The repo now has backup, restore, alerting, and runbook tooling. What is still missing is proof that operators will actually run it as part of production change management.
+The repo now includes the missing `single_org` operator workflow:
 
-Still needed:
+- `pnpm restore:drill:single-org` for real environment restore drills
+- `pnpm release:proof:single-org` for release-gated operator sign-off
+- dedicated first-deployment and routine-upgrade runbooks
 
-- a real release gate that requires backup verification after migration or storage-layout changes
-- an executed restore drill for each production environment, not just the scripted capability in the repo
-- explicit operator ownership for secret rotation, encrypted backup storage, and alert delivery setup
-
-Why this is still a blocker:
-
-- production readiness depends on practiced operations, not only documented commands
-- the current repo proves feasibility, but not yet ongoing operational discipline
+That closes the earlier repo-level gap around release-gated operations. The remaining work is execution per environment, not missing product or tooling surface.
 
 ### 3. Hosted Deployment Hardening
 
@@ -98,9 +93,9 @@ These are real gaps, but they are not the reason the repo is still short of a pr
 
 If the goal is a real customer-managed deployment on their own hardware, the remaining list is relatively short.
 
-Before calling that mode production-ready, we should have:
+Before calling that mode production-ready, operators should execute:
 
-- an explicit operator sign-off on secret storage, TLS termination, storage encryption, and backup retention
+- an explicit release-proof record covering secret storage, TLS termination, storage encryption, backup encryption, alert ownership, and incident ownership
 - at least one successful restore drill against the exact environment shape that will be deployed
 - a conscious decision that the current sandbox boundary is acceptable for that customer and workload
 
@@ -125,7 +120,6 @@ Yes, there is still more to do before Critjecture should be described as product
 The remaining must-do items are:
 
 1. strengthen the sandbox isolation boundary
-2. turn backup/recovery/security procedures into enforced production operations
-3. raise the hosted deployment story to a higher tenant-isolation and infrastructure-hardening standard
+2. raise the hosted deployment story to a higher tenant-isolation and infrastructure-hardening standard
 
-If the target is a controlled `single_org` rollout, the remaining gap is relatively small and mostly operational. If the target is broadly offered `hosted` multi-tenant production, the remaining gap is still material.
+If the target is a controlled `single_org` rollout, the remaining repo gap is now mostly the sandbox boundary and final supported-envelope packaging. If the target is broadly offered `hosted` multi-tenant production, the remaining gap is still material.

@@ -46,6 +46,7 @@ Current expectations:
 - limit access to deployment secrets to operators with production responsibility
 - rotate secrets through operator processes when staff or infrastructure boundaries change
 - avoid sharing seeded pilot credentials outside controlled `single_org` environments
+- for `single_org` production changes, capture the named secret-storage owner and secret-rotation owner in the release-proof record
 
 The app does not currently provide an in-product secret vault, bring-your-own-key workflow, or customer-managed encryption-key system.
 
@@ -59,8 +60,21 @@ Current assumptions:
 - disk or volume encryption is handled by the host, cloud provider, or customer-managed hardware
 - backup archives should be stored only in encrypted operator-controlled locations
 - operator access to raw storage and backup artifacts must be restricted because those artifacts can contain customer uploads, audit history, export bundles, and generated files
+- `single_org` production changes should record the TLS, storage-encryption, and backup-encryption expectations in the release-proof artifact
 
 Critjecture does not currently claim end-to-end encryption, client-side encryption, or app-managed encryption of SQLite rows and storage artifacts.
+
+## Operator Responsibilities For `single_org`
+
+For controlled customer-managed deployments, the operator is responsible for:
+
+- secret storage and rotation ownership
+- TLS termination in front of the app
+- storage and backup encryption posture
+- `CRITJECTURE_ALERT_WEBHOOK_URL` configuration and delivery ownership
+- incident contact ownership for the environment
+
+The repo now includes `pnpm restore:drill:single-org` and `pnpm release:proof:single-org` so those responsibilities are captured as release evidence instead of left to tribal knowledge.
 
 ## Tenant Isolation And Trust Boundaries
 
@@ -111,6 +125,7 @@ Current controls and expectations:
 - `single_org` uses local `bubblewrap` + `prlimit`
 - `hosted` requires a dedicated remote sandbox supervisor and should be reviewed as a separate operational dependency
 - operators should run the documented backup and restore verification flow after storage-layout or migration changes
+- `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover
 - operators should capture `x-critjecture-request-id` together with sandbox, governance, and import identifiers during incident response
 
 See the deployment guide and runbooks for the exact operator procedures.

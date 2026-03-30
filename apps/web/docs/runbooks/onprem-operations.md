@@ -6,6 +6,7 @@
 - writable `CRITJECTURE_STORAGE_ROOT`
 - `/api/health`
 - recent verified backup artifacts
+- latest `single_org` restore-drill and release-proof records
 
 ## Required Incident Data
 
@@ -13,6 +14,7 @@
 - `sandboxRunId`
 - failing host path or process dependency
 - current backup location and timestamp
+- current release-proof record path
 
 ## First Response
 

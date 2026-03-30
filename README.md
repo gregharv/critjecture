@@ -287,11 +287,14 @@ Recovery tooling is available from the repo root:
 - `pnpm backup:create -- --output-dir ./backups`
 - `pnpm backup:restore -- --backup ./backups/<timestamped-backup-dir> --database-path ./restore/storage/critjecture.sqlite --storage-root ./restore/storage`
 - `pnpm backup:verify -- --deployment-mode both`
+- `pnpm restore:drill:single-org -- --environment <label> --operator "<name>"`
+- `pnpm release:proof:single-org -- --environment <label> --operator "<name>" --checklist-kind <first_customer_deployment|routine_upgrade> --change-scope <app_only|migration|storage_layout|migration_and_storage> --restore-drill <restore-drill-json-path> ...`
 
 Read [security_review.md](/home/hard2vary/projects/critjecture/apps/web/docs/security_review.md) for the current security, privacy, and deployment boundary summary.
 Read [deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/deployment.md) for exact storage, backup, restore, and hosted/on-prem guidance.
 Read [compliance_controls.md](/home/hard2vary/projects/critjecture/apps/web/docs/compliance_controls.md) for the shipped governance and retention controls.
 Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/apps/web/docs/hosted_provisioning.md) for the hosted multi-org provisioning flow.
+Read the `apps/web/docs/runbooks/single-org-*.md` runbooks for the required first-deployment and routine-upgrade release gate in `single_org`.
 
 ## Demo Data
 

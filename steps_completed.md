@@ -1928,3 +1928,79 @@ Step 26 was implemented as a fixed-role RBAC pass that replaces the earlier `Own
 - `pnpm --filter web test`
 - `pnpm --filter web exec tsc --noEmit`
 - `pnpm --filter web build`
+
+## Step 27: Release-Gated Operations and Deployment Proof
+
+### What Was Implemented
+
+Step 27 was implemented as an operator-side `single_org` release gate that turns the existing recovery tooling and security assumptions into required release evidence.
+
+- Added shared release-proof tooling:
+  - `apps/web/scripts/lib/release-proof.mjs`
+  - implements:
+    - real `single_org` backup plus clean temporary restore verification against the configured runtime
+    - restore-drill JSON and Markdown record generation
+    - release-proof JSON and Markdown record generation
+    - required capture of operator responsibilities for secrets, TLS, encryption, alerting, and incident ownership
+- Added operator-facing CLI entry points:
+  - `apps/web/scripts/restore-drill-single-org.mjs`
+  - `apps/web/scripts/release-proof-single-org.mjs`
+  - `package.json`
+  - `apps/web/package.json`
+  - adds:
+    - `pnpm restore:drill:single-org`
+    - `pnpm release:proof:single-org`
+- Added targeted test coverage:
+  - `apps/web/tests/release-proof.test.ts`
+  - covers:
+    - restore-drill artifact generation
+    - rejection of missing restore-drill references
+    - rejection of incomplete operator responsibility metadata
+    - `app_only` release proofs without fresh backup verification
+    - migration-scoped release proofs with fresh backup and restore validation
+- Updated operator-facing docs:
+  - `README.md`
+  - `release_checklist.md`
+  - `production_readiness.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/runbooks/single-org-restore-drill.md`
+  - `apps/web/docs/runbooks/single-org-first-deployment.md`
+  - `apps/web/docs/runbooks/single-org-routine-upgrade.md`
+  - now documents:
+    - the concrete `single_org` release gate
+    - restore-drill and release-proof artifact expectations
+    - explicit operator ownership expectations
+    - first customer deployment and routine upgrade checklists
+
+### Current Step 27 Behavior
+
+- `pnpm restore:drill:single-org -- --environment <label> --operator "<name>"`
+  - creates a real backup from the configured `single_org` runtime
+  - restores it into a clean temporary target
+  - validates backup checksums and restored migrations
+  - writes JSON and Markdown restore-drill records
+- `pnpm release:proof:single-org -- --environment <label> --operator "<name>" --checklist-kind <...> --change-scope <...> --restore-drill <...> ...`
+  - requires a referenced successful restore-drill record for the same environment
+  - requires explicit responsibility fields for secrets, TLS, storage encryption, backup encryption, alert-webhook ownership, and incident ownership
+  - reruns fresh backup plus clean restore verification when the change scope includes migrations or storage-layout changes
+  - writes JSON and Markdown release-proof records
+
+### Important Implementation Details
+
+- Step 27 intentionally stays operator-side:
+  - no new SQLite schema
+  - no new admin UI
+  - no release-proof persistence inside the product
+- `pnpm backup:verify` remains the repo-level regression drill for the recovery tooling itself.
+- `single_org` release-proof commands fail closed when:
+  - the runtime is not `single_org`
+  - a required restore-drill record is missing
+  - required responsibility fields are missing
+  - `CRITJECTURE_ALERT_WEBHOOK_URL` is not configured
+- Release records default to `./release-records`, while real backup artifacts default to `./backups`.
+
+### Verification
+
+- `pnpm --filter web test -- tests/release-proof.test.ts tests/backup-recovery.test.ts`
+- `pnpm --filter web lint`

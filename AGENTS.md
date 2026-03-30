@@ -31,4 +31,7 @@ This file indexes the project documents that live in the repository root and in 
 - [Migration Failures](./apps/web/docs/runbooks/migration-failures.md)
 - [On-Prem Operations](./apps/web/docs/runbooks/onprem-operations.md)
 - [Sandbox Failures](./apps/web/docs/runbooks/sandbox-failures.md)
+- [Single-Org First Deployment](./apps/web/docs/runbooks/single-org-first-deployment.md)
+- [Single-Org Restore Drill](./apps/web/docs/runbooks/single-org-restore-drill.md)
+- [Single-Org Routine Upgrade](./apps/web/docs/runbooks/single-org-routine-upgrade.md)
 - [Storage Failures](./apps/web/docs/runbooks/storage-failures.md)

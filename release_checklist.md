@@ -24,6 +24,21 @@ pnpm db:migrate
 pnpm backup:verify
 ```
 
+`pnpm backup:verify` is the repo regression check for recovery tooling. It does not replace the production release-proof flow for a real `single_org` environment.
+
+## Single-Org Production Proof
+
+For a real `single_org` deployment, follow the dedicated runbooks in `apps/web/docs/runbooks/`:
+
+- `single-org-restore-drill.md`
+- `single-org-first-deployment.md`
+- `single-org-routine-upgrade.md`
+
+Production-changing `single_org` releases should retain:
+
+- one restore-drill JSON and Markdown record for the environment
+- one release-proof JSON and Markdown record per first deployment or routine upgrade
+
 ## Deployment Smoke Checks
 
 - Boot in `single_org` mode and verify owner and intern sign-in both work.
@@ -38,3 +53,4 @@ pnpm backup:verify
 - Confirm any new migrations are present and applied.
 - Confirm customer-facing docs are updated for admin, compliance, or deployment behavior changes.
 - Confirm the mocked Playwright suite is still intercepting all network-dependent browser flows.
+- Confirm the correct `single_org` release-proof command was run when the target build changes migrations or persistent storage layout.
