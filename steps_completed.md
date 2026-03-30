@@ -1713,3 +1713,78 @@ Step 23 was implemented as a durable chart-intermediate layer on top of the exis
 - Verification completed for this implementation:
   - `pnpm --filter web test -- tests/analysis-results.integration.test.ts tests/data-analysis-route.test.ts tests/visual-graph-route.test.ts tests/python-sandbox-validation.test.ts`
   - `pnpm --filter web exec tsc --noEmit`
+
+## Step 24: Security and Deployment Review Package
+
+### What Was Implemented
+
+Step 24 was implemented as a customer-review packaging pass for the post-Step-23 system, adding a canonical security review pack, reconciling deployment/compliance/provisioning docs, and removing the separate future-steps tracker now that the remaining packaging milestone is complete.
+
+- Added a canonical customer-review document catalog:
+  - `apps/web/lib/customer-review-docs.ts`
+  - centralizes:
+    - owner-facing review doc labels
+    - stable customer-review slugs
+    - canonical markdown filenames under `apps/web/docs`
+- Expanded the owner review-doc surface:
+  - `apps/web/app/api/admin/customer-review/[doc]/route.ts`
+  - `apps/web/components/admin-settings-page-client.tsx`
+  - adds:
+    - the new `security-review` customer-review endpoint
+    - one shared catalog for the route and the settings UI
+    - updated owner-facing review links for the consolidated pack plus supporting docs
+- Added and refreshed the canonical review docs:
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/compliance_controls.md`
+  - `apps/web/docs/hosted_provisioning.md`
+  - now documents:
+    - secrets-management expectations
+    - encryption assumptions for runtime storage and backups
+    - hosted tenant-isolation boundaries and shared-infrastructure caveats
+    - privacy posture for uploads, audit records, chat history, and generated artifacts
+    - the supported deployment envelope for `single_org` and `hosted`
+    - explicit non-goals beyond the current pilot-oriented scope
+- Reconciled root-level and operator-facing documentation:
+  - `README.md`
+  - `production_readiness.md`
+  - `deployment.md`
+  - `compliance_controls.md`
+  - `hosted_provisioning.md`
+  - `steps.md`
+  - now:
+    - points repo-root compatibility docs at the canonical `apps/web/docs` copies
+    - describes `single_org` as the intended first production path
+    - describes `hosted` as supported with a higher security/operational review bar
+    - removes the now-completed `steps.md` tracker
+- Added verification coverage for the review package:
+  - `apps/web/tests/customer-review-route.test.ts`
+  - `apps/web/tests/customer-review-docs.test.ts`
+  - covers:
+    - `401`, `403`, `404`, and `200` behavior for owner review-doc access
+    - catalog integrity for the configured markdown files and slugs
+
+### Current Step 24 Behavior
+
+- Owner review package
+  - `/admin/settings` now exposes a consolidated security review pack alongside deployment, compliance, and hosted provisioning docs
+  - `/api/admin/customer-review/security-review` serves the new markdown review pack
+- Documentation source of truth
+  - `apps/web/docs` is now the canonical location for customer-review documentation
+  - repo-root deployment/compliance/provisioning files remain only as compatibility pointers
+- Production envelope
+  - `single_org` is documented as the lower-risk first pilot path
+  - `hosted` remains supported, but the docs now make its shared operator-managed boundary and dedicated sandbox-supervisor dependency explicit
+
+### Important Implementation Details
+
+- Step 24 is a packaging and documentation step:
+  - it does not add new runtime isolation or encryption features
+  - it documents the current shipped behavior and operator assumptions without overstating guarantees
+- Customer-review doc routing is now centralized:
+  - the settings UI and route handler use the same catalog so slugs and filenames cannot drift independently
+- The future-step tracker is intentionally removed:
+  - `steps_completed.md` is now the authoritative milestone history
+- Verification completed for this implementation:
+  - `pnpm --filter web exec vitest run tests/customer-review-route.test.ts tests/customer-review-docs.test.ts`
+  - `pnpm --filter web test`

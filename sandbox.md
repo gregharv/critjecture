@@ -191,4 +191,3 @@ Related project docs:
 - [`README.md`](/home/hard2vary/projects/critjecture/README.md)
 - [`deployment.md`](/home/hard2vary/projects/critjecture/deployment.md)
 - [`steps_completed.md`](/home/hard2vary/projects/critjecture/steps_completed.md)
-- [`steps.md`](/home/hard2vary/projects/critjecture/steps.md)

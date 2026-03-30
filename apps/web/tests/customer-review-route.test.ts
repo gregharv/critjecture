@@ -1,0 +1,59 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createSessionUser } from "@/tests/helpers/route-test-utils";
+
+const mocks = vi.hoisted(() => ({
+  getSessionUser: vi.fn(),
+}));
+
+vi.mock("@/lib/auth-state", () => ({
+  getSessionUser: mocks.getSessionUser,
+}));
+
+import { GET } from "@/app/api/admin/customer-review/[doc]/route";
+
+describe("GET /api/admin/customer-review/[doc]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getSessionUser.mockResolvedValue(createSessionUser());
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mocks.getSessionUser.mockResolvedValue(null);
+
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
+      params: Promise.resolve({ doc: "security-review" }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 403 for intern users", async () => {
+    mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "intern" }));
+
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
+      params: Promise.resolve({ doc: "security-review" }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns 404 for unknown document slugs", async () => {
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/unknown"), {
+      params: Promise.resolve({ doc: "unknown" }),
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it("serves markdown for known review documents", async () => {
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
+      params: Promise.resolve({ doc: "security-review" }),
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/markdown");
+    expect(body).toContain("# Security Review Pack");
+  });
+});

@@ -8,6 +8,7 @@ import type {
   OrganizationComplianceSettings,
   OrganizationAdminSummary,
 } from "@/lib/admin-types";
+import { CUSTOMER_REVIEW_DOCS } from "@/lib/customer-review-docs";
 
 type AdminSettingsState = {
   error: string | null;
@@ -635,19 +636,20 @@ export function AdminSettingsPageClient() {
             <div className="settings-panel__header">
               <div>
                 <div className="settings-panel__eyebrow">Customer Review</div>
-                <h2>Operational reference docs</h2>
+                <h2>Review package and operational docs</h2>
               </div>
             </div>
             <div className="settings-docs">
-              <a className="settings-link" href="/api/admin/customer-review/deployment" target="_blank">
-                Deployment modes
-              </a>
-              <a className="settings-link" href="/api/admin/customer-review/compliance" target="_blank">
-                Compliance controls
-              </a>
-              <a className="settings-link" href="/api/admin/customer-review/hosted-provisioning" target="_blank">
-                Hosted provisioning
-              </a>
+              {CUSTOMER_REVIEW_DOCS.map((doc) => (
+                <a
+                  key={doc.slug}
+                  className="settings-link"
+                  href={`/api/admin/customer-review/${doc.slug}`}
+                  target="_blank"
+                >
+                  {doc.label}
+                </a>
+              ))}
             </div>
           </section>
         </div>

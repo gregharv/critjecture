@@ -91,7 +91,7 @@ It adds:
 - retention settings for logs, usage, alerts, chat history, and import metadata
 - full-organization export jobs
 - export-gated purge jobs for chat history, import metadata, and managed knowledge files
-- customer-review links for deployment and compliance docs
+- customer-review links for the security review pack plus deployment, compliance, and hosted provisioning docs
 
 ### Knowledge Library
 
@@ -156,8 +156,9 @@ Installed Python tooling includes:
 
 ```text
 apps/web                  Next.js app, API routes, audit UI, chat UI
+apps/web/docs             Canonical customer-review, deployment, and runbook documentation
 sample_company_data       Bundled sample company data copied into org storage on first boot
-deployment.md             Deployment and backup guidance for local, hardware, and Railway
+deployment.md             Compatibility wrapper pointing at the canonical deployment guide
 packages/python-sandbox   Isolated Python runtime managed by uv
 steps_completed.md        Implementation history by milestone
 storage/                  Default local runtime storage root (gitignored)
@@ -235,11 +236,12 @@ If `CRITJECTURE_DEPLOYMENT_MODE=hosted`, tenant orgs and users should be created
 
 ## Deployment
 
-The supported primary deployment path is SQLite-backed in all current environments:
+The supported current deployment envelope is SQLite-backed in both current modes:
 
-- local machine
-- customer-managed hardware
-- Railway with an attached volume
+- `single_org` for local development, customer-managed hardware, and controlled on-prem pilots
+- `hosted` for Railway-style centrally operated deployments with a dedicated sandbox supervisor service
+
+The intended first production path is a controlled `single_org` pilot. `hosted` remains supported, but it carries a higher operational and security-review bar because tenant isolation is enforced in shared operator-managed infrastructure.
 
 Start with:
 
@@ -253,8 +255,10 @@ Recovery tooling is available from the repo root:
 - `pnpm backup:restore -- --backup ./backups/<timestamped-backup-dir> --database-path ./restore/storage/critjecture.sqlite --storage-root ./restore/storage`
 - `pnpm backup:verify -- --deployment-mode both`
 
-Read [deployment.md](/home/hard2vary/projects/critjecture/deployment.md) for the exact storage, backup, restore, and Railway guidance.
-Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/hosted_provisioning.md) for the hosted multi-org provisioning flow.
+Read [security_review.md](/home/hard2vary/projects/critjecture/apps/web/docs/security_review.md) for the current security, privacy, and deployment boundary summary.
+Read [deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/deployment.md) for exact storage, backup, restore, and hosted/on-prem guidance.
+Read [compliance_controls.md](/home/hard2vary/projects/critjecture/apps/web/docs/compliance_controls.md) for the shipped governance and retention controls.
+Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/apps/web/docs/hosted_provisioning.md) for the hosted multi-org provisioning flow.
 
 ## Demo Data
 

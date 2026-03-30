@@ -1,30 +1,47 @@
 # Deployment Modes
 
-Critjecture supports a SQLite-first runtime in both `single_org` and `hosted` deployment modes.
+Critjecture's current supported deployment envelope is SQLite-first in both `single_org` and `hosted` modes. The intended first production path is a controlled `single_org` pilot or customer-managed on-prem deployment. `hosted` is supported for Railway-style operation, but it has a higher review and operational bar because it depends on shared operator-managed infrastructure and a dedicated sandbox supervisor service.
+
+For a concise review summary of deployment and security boundaries, start with `security_review.md`.
 
 ## `single_org`
 
-- intended for local development and on-prem/customer-managed hardware
-- keeps the env-seeded default organization flow
-- seeds pilot owner/intern users from environment variables
+Use `single_org` for:
+
+- local development
+- customer-managed hardware
+- tightly controlled on-prem or single-customer pilot environments
+
+Current characteristics:
+
+- seeds the default organization and pilot `Owner` / `Intern` users from environment variables
+- keeps storage, logs, and operations under one customer-managed deployment footprint
 - runs sandbox jobs through the in-app local supervisor using host `bubblewrap` + `prlimit`
 
 ## `hosted`
 
-- intended for centrally operated Railway-style deployments
-- allows multiple organizations in one deployment
-- keeps tenant UX scoped to one primary organization membership
-- organization creation is handled by the provisioning script, not tenant self-service
-- must point the web app at a dedicated sandbox supervisor service via `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
+Use `hosted` for centrally operated multi-organization deployments.
 
-## Shared Requirements
+Current characteristics:
+
+- one deployment can contain multiple organizations
+- tenant creation is operator-managed through the provisioning script, not tenant self-service
+- the web app must be configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
+- the sandbox path depends on a dedicated remote supervisor service and should be treated as a required production dependency
+
+Hosted-mode review note:
+
+- tenant separation is enforced by authenticated organization scoping and storage-path boundaries inside shared operator-managed infrastructure
+
+## Shared Runtime Requirements
 
 - persistent SQLite storage
 - persistent organization storage roots
 - `pdftotext` on the host for PDF ingestion
 - explicit backups for both the database and tenant storage
+- operator-managed secrets for auth, model access, and hosted sandbox connectivity
 
-## Backup Artifacts
+## Backup And Restore
 
 Use the built-in scripts from the repo root:
 
@@ -40,23 +57,23 @@ pnpm backup:verify -- --deployment-mode both
 - `database.sqlite`
 - `storage.tar.gz`
 
-The database snapshot is taken with SQLite's backup API. The storage archive covers the full resolved `CRITJECTURE_STORAGE_ROOT`, including organization `company_data`, `generated_assets`, `knowledge_staging`, and `governance` directories. `/tmp/workspace` is not part of backup scope.
+The database snapshot is taken with SQLite's backup API. The storage archive covers the full resolved `CRITJECTURE_STORAGE_ROOT`, including organization `company_data`, `generated_assets`, `knowledge_staging`, and `governance` directories. `/tmp/workspace` is out of backup scope.
 
-## Restore Guidance
+Restore expectations:
 
-- Restore only into clean target paths. The restore script rejects non-empty storage roots and existing database files.
-- After restore, Critjecture validates the restored database against current migrations before reporting success.
-- For default layouts where the live database sits under `CRITJECTURE_STORAGE_ROOT`, the storage archive excludes that live database file because it is already captured as `database.sqlite`.
+- restore only into clean target paths
+- validate the restored database against current migrations before reopening traffic
+- protect backup artifacts as sensitive customer data because they can contain uploads, generated files, audit history, and governance artifacts
 
 ## Recovery Drills
 
-- `single_org`: run `pnpm backup:verify -- --deployment-mode single_org` after schema or storage-layout changes.
-- `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for Railway-style deploys.
-- release gating: run `pnpm backup:verify` before promoting a build that changes migrations or persistent storage layout.
+- `single_org`: run `pnpm backup:verify -- --deployment-mode single_org` after schema or storage-layout changes
+- `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for Railway-style deploys
+- release gating: run `pnpm backup:verify` before promoting a build that changes migrations or persistent storage layout
 
 ## Observability And Incident Response
 
-Critjecture writes structured JSON application logs to stdout/stderr and propagates `x-critjecture-request-id` on observed API responses. Hosted and on-prem operators should capture that request id together with any `sandboxRunId`, `governanceJobId`, or `knowledgeImportJobId` shown in the operations surface.
+Critjecture writes structured JSON application logs to stdout/stderr and propagates `x-critjecture-request-id` on observed API responses. Operators should capture that request id together with any `sandboxRunId`, `governanceJobId`, or `knowledgeImportJobId` shown in the operations surface.
 
 Use `CRITJECTURE_ALERT_WEBHOOK_URL` to deliver critical operational alerts outside the app UI.
 

@@ -1,66 +1,161 @@
 # Future Steps
 
-This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
+This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 23 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, tested recovery tooling, production observability/runbooks, and durable chart intermediates. The remaining gaps are narrower and more packaging-oriented.
+Step 24 finished the security/deployment review package. The remaining work is now split into two tracks:
 
-## Step 24: Security and Deployment Review Package
+1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
+2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
+
+## Phase 1: `single_org` Production Readiness
+
+## Step 25: Release-Gated Operations and Deployment Proof
 
 ### Goal
 
-Package Critjecture for real customer security review and repeatable deployment approval.
+Turn the existing backup, restore, runbook, and security guidance into enforced operator practice for `single_org`.
 
 ### What Should Be Implemented
 
-- document:
-  - secrets management expectations
-  - encryption assumptions for storage and backups
-  - tenant-isolation boundaries in hosted mode
-  - privacy posture for uploaded customer data and audit records
-- add a concise security review pack for customer or internal review
-- reconcile `production_readiness.md`, `README.md`, deployment docs, and admin/compliance docs so they reflect the post-Step-20 system accurately
-- define the supported production envelope clearly:
-  - on-prem single-org
-  - hosted Railway multi-org
-  - non-goals beyond that envelope
+- add a release-gated verification path for production-changing builds:
+  - backup verification after migration or storage-layout changes
+  - a documented restore-drill checklist with required sign-off fields
+  - a simple operator release record or artifact proving the checks were run
+- document the minimum operator responsibilities for `single_org`:
+  - secret storage and rotation ownership
+  - TLS termination expectations
+  - storage and backup encryption expectations
+  - alert-webhook setup and incident contact ownership
+- add one clear operational checklist for first customer deployment and one for routine upgrades
 
 ### Acceptance Criteria
 
-- deployment/security documentation matches the real shipped system
-- customer review of data handling and deployment boundaries no longer depends on tribal knowledge
-- the supported production modes and their limits are explicit
+- production-changing releases have a concrete required verification path, not just optional commands
+- `single_org` operators can demonstrate backup verification and restore readiness without tribal knowledge
+- secret-handling, encryption, and incident-ownership expectations are explicit
+
+## Step 26: Stronger `single_org` Sandbox Boundary
+
+### Goal
+
+Raise the Python execution boundary from a hardened same-host namespace sandbox toward something that is easier to defend as production-ready for customer-managed deployments.
+
+### What Should Be Implemented
+
+- choose and implement a stronger execution boundary for `single_org`:
+  - container-backed isolation
+  - lightweight VM-backed isolation
+  - or another clearly stronger boundary than the current host-local `bubblewrap` model
+- preserve the current tool contracts for analysis, charts, and documents
+- keep fail-closed behavior when the stronger sandbox backend is unavailable or unhealthy
+- update health, operations, deployment, and runbook surfaces for the new backend model
+
+### Acceptance Criteria
+
+- `single_org` no longer depends on the current same-host sandbox story alone
+- sandbox failures remain observable and fail closed
+- deployment docs and runbooks describe the new production boundary clearly
+
+## Step 27: `single_org` Production Cutover Package
+
+### Goal
+
+Package the final minimum set of product and operational checks needed to call controlled `single_org` deployments production-ready.
+
+### What Should Be Implemented
+
+- validate the exact supported `single_org` production envelope:
+  - customer-managed hardware
+  - required host dependencies
+  - supported backup and recovery posture
+  - supported workload limits
+- add any missing small but necessary polish for real production use:
+  - safer initial credential handling or first-login rotation guidance
+  - final deployment checklist cleanup
+  - final doc reconciliation across README, deployment, security, and runbooks
+- explicitly mark which remaining items are postponed because they are `hosted` concerns rather than `single_org` blockers
+
+### Acceptance Criteria
+
+- the repo can honestly describe controlled `single_org` deployments as production-ready
+- there is one clear supported envelope and one clear operator checklist
+- remaining gaps are clearly identified as outside the `single_org` production claim
+
+## Phase 2: `hosted` Production Readiness
+
+## Step 28: Hosted Isolation and Supervisor Hardening
+
+### Goal
+
+Raise the hosted deployment boundary above application-level tenant separation and make the dedicated sandbox supervisor a production-grade dependency.
+
+### What Should Be Implemented
+
+- strengthen hosted tenant isolation beyond the current shared-infrastructure posture
+- harden the hosted sandbox supervisor contract and operations:
+  - deployment requirements
+  - authn/authz between web app and supervisor
+  - failure drills
+  - monitoring and ownership expectations
+- document the hosted trust boundary in production terms rather than pilot terms
+
+### Acceptance Criteria
+
+- hosted deployment has a materially stronger isolation story than the current review-pack caveat
+- the supervisor dependency is treated as a first-class production service
+- hosted failure and recovery procedures are explicit and tested
+
+## Step 29: Hosted Persistence and Scale Envelope
+
+### Goal
+
+Decide and implement the persistence model that will support centrally operated hosted production as concurrency and tenant count grow.
+
+### What Should Be Implemented
+
+- evaluate whether the current SQLite-first runtime remains acceptable for hosted production
+- if not, introduce the next persistence path with a migration plan that preserves current product behavior
+- define hosted limits for:
+  - tenant count
+  - concurrency
+  - backup and restore expectations
+  - operational recovery objectives
+
+### Acceptance Criteria
+
+- hosted persistence and recovery strategy matches expected production load
+- the repo no longer depends on an ambiguous “SQLite-first unless traffic grows” answer
+- production docs state the supported hosted operating envelope concretely
+
+## Step 30: Hosted Production Launch Package
+
+### Goal
+
+Finish the remaining platform, product, and documentation work required to describe `hosted` as broadly production-ready.
+
+### What Should Be Implemented
+
+- close the remaining hosted-only launch gaps:
+  - final tenant onboarding flow expectations
+  - final compliance/security packaging needed for hosted customers
+  - final operational ownership and escalation paths
+- reconcile all hosted deployment, provisioning, security, and readiness docs
+- produce one final hosted launch checklist with explicit go/no-go criteria
+
+### Acceptance Criteria
+
+- the repo can honestly describe `hosted` as production-ready rather than limited-availability or carefully reviewed
+- hosted launch no longer depends on implicit operator knowledge
+- deployment boundaries, recovery posture, and customer-facing claims are aligned across the docs
 
 ## Roadmap Notes
 
-- Step 18 is complete:
-  - reusable test reset hooks
-  - route/integration coverage for critical server flows
-  - mocked Playwright coverage for login, history, and owner-admin access
-  - release checklist and full test scripts
-- Step 19 is complete:
-  - owner-managed member administration
-  - compliance settings and governance jobs
-  - export-gated purge flows
-  - hosted multi-org support for Railway
-- Step 20 is complete:
-  - supervisor-backed sandbox lifecycle and reconciliation
-  - fail-closed hosted sandbox backend expectations
-  - sandbox capacity and recovery metrics in health/operations surfaces
-- Step 21 is complete:
-  - scripted SQLite and storage-root backup flows
-  - checksum-verified clean-environment restore tooling
-  - repeatable `single_org` and `hosted` recovery drills
-  - release-gated backup verification guidance and retention expectations
-- Step 22 is complete:
-  - structured application logs with stable request/job correlation
-  - webhook-delivered external operational alerts
-  - observed admin/governance/health routes with propagated request ids
-  - runbooks for sandbox, storage, migration, backup/restore, hosted, and on-prem incidents
-- Step 23 is complete:
-  - durable SQLite-backed `analysisResultId` storage with TTL cleanup and org/user/turn binding
-  - chart rendering from server-staged structured payload files instead of JSON embedded back into Python source
-  - explicit chart-ready point-count and payload-byte limits for synchronous rendering
-  - documented boundary that larger chart/document workloads remain future async-job work
-- The main remaining blocker is now deployment/security packaging, not core product surface area.
-- A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
-- Hosted production still has a higher bar than on-prem because the web app expects a dedicated sandbox supervisor service and the remaining work is concentrated in security/deployment review packaging plus any later async-job expansion.
+- Step 24 is complete:
+  - canonical customer-review docs under `apps/web/docs`
+  - consolidated security review pack
+  - aligned README, deployment, compliance, hosted provisioning, and readiness docs
+  - owner-facing customer-review links served from one shared catalog
+- The main near-term goal is not more surface area:
+  - it is converting the current pilot-ready system into a defensible `single_org` production deployment
+- `hosted` should be treated as a separate bar:
+  - stronger isolation, stronger supervisor operations, and a clearer persistence strategy are still required before calling it broadly production-ready

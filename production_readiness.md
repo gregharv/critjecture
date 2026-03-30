@@ -1,158 +1,131 @@
 # Production Readiness
 
-This document captures the main capabilities still missing before Critjecture should be treated as production-ready. It is based on the current repo as it exists today, not on a generic SaaS checklist.
+This document states what Critjecture is ready for now, what still blocks a production claim, and how that answer changes between `single_org` and `hosted` deployments.
 
-## Current State
+It reflects the repo after Step 24. It is intentionally specific to the current codebase, docs, and operator tooling.
 
-Critjecture already has a strong foundation:
+## Readiness Call
 
-- a Next.js chat app with real authentication and server-enforced RBAC
-- organizations plus organization memberships
-- SQLite-backed durable app state with repeatable migrations
-- role-aware organization-scoped company-data search
-- sandboxed Python analysis with staged inputs
-- generated PNG and PDF outputs
-- owner-facing audit logs
-- per-route rate limits, usage budgets, and an operations dashboard
-- server-backed conversation persistence and history loading
-- knowledge uploads, ingestion jobs, and searchable managed files
-- owner-managed member administration, retention settings, exports, and purge jobs
-- automated route, policy, and end-to-end test coverage
+Critjecture is not yet broadly production-ready across all deployment modes.
 
-That is enough to demonstrate the workflow and validate the product shape. It is not yet enough for a real production rollout without stronger isolation, recovery validation, and security posture work.
+Current call by deployment target:
 
-## Launch Blockers
+- `single_org`
+  - close to production-ready for controlled customer-managed deployments
+  - reasonable for a serious on-prem or single-customer rollout if the operator accepts the current sandbox boundary and follows the documented security, backup, and runbook requirements
+- `hosted`
+  - not yet a comfortable broad-production target
+  - usable only for teams willing to accept the current shared-infrastructure boundary and the dedicated sandbox-supervisor dependency
 
-These are the biggest gaps that should be addressed before treating the product as production-ready for real customers.
+The main point is this: the product surface is no longer the blocker. The remaining work is mostly platform hardening and operational proof.
 
-### 1. Stronger Sandbox Isolation Boundary
+## What Already Exists
 
-The Python sandbox is much better than a naive subprocess model. It uses `bubblewrap`, resource limits, concurrency admission controls, staged inputs, and workspace cleanup. That is still not the same as a stronger production isolation boundary.
+The repo already includes the foundations you would expect before a serious deployment:
 
-What is missing:
+- authenticated users, organizations, and server-enforced RBAC
+- durable SQLite-backed app state with repeatable migrations
+- organization-scoped company-data search, uploads, and generated-file handling
+- constrained Python analysis/chart/document tooling
+- owner-visible audit logs, governance controls, exports, and purge flows
+- route health checks, usage/rate-limit controls, and operational alerts
+- scripted backup creation, clean restore tooling, and repeatable recovery drills
+- customer-review deployment, compliance, provisioning, and security docs
+- automated route, integration, and end-to-end test coverage
 
-- stronger isolation, likely container or VM backed, beyond the current same-host sandbox model
-- clearer guarantees against hostile code escaping or materially impacting the host
+Those are real production foundations. They are no longer hypothetical roadmap items.
 
-Why it matters:
+## Required Before We Should Call It Production-Ready
 
-- model-generated code is inherently high risk
-- a production rollout needs stronger guarantees than a same-host namespace sandbox
+These are the remaining items that still look like true production blockers rather than optional polish.
 
-### 2. Backup Verification and Restore Drills
+### 1. Stronger Sandbox Isolation
 
-The repo now has a real SQLite-backed persistence model, documented storage layout, export jobs, retention controls, and restore guidance. What is still missing is proof that recovery works under pressure.
+The current sandbox is hardened for the MVP, but it is still a same-host execution boundary in `single_org` and a supervisor-mediated remote boundary in `hosted`.
 
-What is missing:
+Still needed:
 
-- regular backup verification
-- restore drills for both the SQLite database file and tenant storage root
+- a stronger isolation story for model-generated code, likely container- or VM-backed
+- a deployment stance that can defend against sandbox escape or host-impact concerns with more than namespace/process limits alone
 
-Why it matters:
+Why this is still a blocker:
 
-- production systems need proven recoverable state
-- a documented backup policy is not the same as a tested restore path
+- code execution is the highest-risk feature in the product
+- the current boundary is good for a controlled pilot, but it is still the weakest part of the production story
 
-### 3. Compliance, Privacy, and Security Posture
+### 2. Operational Proof, Not Just Tooling
 
-The current repo is still not packaged for security review or compliance-heavy customers.
+The repo now has backup, restore, alerting, and runbook tooling. What is still missing is proof that operators will actually run it as part of production change management.
 
-What is missing:
+Still needed:
 
-- documented encryption approach
-- secrets management expectations
-- privacy posture for customer data
-- incident response and operational runbooks
+- a real release gate that requires backup verification after migration or storage-layout changes
+- an executed restore drill for each production environment, not just the scripted capability in the repo
+- explicit operator ownership for secret rotation, encrypted backup storage, and alert delivery setup
 
-Why it matters:
+Why this is still a blocker:
 
-- production customers will ask how data is protected, handled, and recovered
-- security review requires more than implementation alone
+- production readiness depends on practiced operations, not only documented commands
+- the current repo proves feasibility, but not yet ongoing operational discipline
 
-## Important But Not First-Wave Blockers
+### 3. Hosted Deployment Hardening
 
-These are important production capabilities, but they come after platform hardening and recovery confidence.
+`hosted` has a meaningfully higher bar than `single_org`.
 
-### 1. Invite and Onboarding Workflow
+Still needed:
 
-The product now has owner-managed membership creation, role assignment, suspension, and password resets. What it does not have is a smoother invite-based onboarding flow.
+- a stronger answer for tenant isolation inside shared operator-managed infrastructure
+- production validation of the dedicated sandbox supervisor as a first-class dependency
+- a decision on whether the SQLite-first envelope is still acceptable as hosted concurrency grows
 
-What is missing:
+Why this is still a blocker:
 
-- user invite flow instead of manual account creation and credential handoff
+- hosted mode places multiple organizations inside one deployment footprint
+- application-level org scoping is necessary, but many production customers will want stronger infrastructure guarantees
 
-Why it matters:
+## Things That Matter, But Are Not The Main Blockers
 
-- manual account provisioning is workable for a pilot
-- a broader rollout benefits from safer and more polished onboarding
+These are real gaps, but they are not the reason the repo is still short of a production claim.
 
-### 2. Richer Conversation Management
+- invite-based onboarding instead of manual account creation and credential handoff
+- richer conversation lifecycle tools such as search, rename, archive, or delete
+- broader compliance packaging or formal attestations if a customer requires them
+- async heavy-job support for workloads that exceed the current synchronous sandbox envelope
 
-Server-backed conversation persistence and history loading now exist, but conversation management is still basic.
+## Deployment-Specific Guidance
 
-What is missing:
+### `single_org`
 
-- searchable history
-- richer conversation management such as rename, archive, or delete workflows
+If the goal is a real customer-managed deployment on their own hardware, the remaining list is relatively short.
 
-Why it matters:
+Before calling that mode production-ready, we should have:
 
-- durable history exists now, but larger real-world usage needs stronger organization and retrieval
+- an explicit operator sign-off on secret storage, TLS termination, storage encryption, and backup retention
+- at least one successful restore drill against the exact environment shape that will be deployed
+- a conscious decision that the current sandbox boundary is acceptable for that customer and workload
 
-## Deployment Mode Matters
+If those are satisfied, `single_org` is much closer to a production decision than it was earlier in the roadmap.
 
-The severity of some gaps depends on how Critjecture is deployed.
+### `hosted`
 
-### On-Prem or Single-Customer Pilot
+If the goal is a broadly offered centrally managed multi-tenant deployment, more work is still needed.
 
-For a controlled on-prem deployment or a tightly managed single-customer pilot:
+Before calling that mode production-ready, we should have:
 
-- the current SQLite-first deployment model may already be appropriate
-- the current admin, upload, governance, observability, and testing foundations may already be enough for a serious pilot
+- stronger sandbox and infrastructure isolation than the current shared deployment story
+- production operations around the hosted sandbox supervisor, including failure drills and monitoring ownership
+- confidence that the SQLite-first runtime is still the right fit for the concurrency and recovery expectations of hosted customers
 
-Even in that model, stronger sandbox isolation and verified recovery drills still need real attention before a serious rollout.
-
-### Multi-Tenant Cloud SaaS
-
-For a real multi-tenant cloud deployment, the standard is much higher.
-
-Before that kind of launch, Critjecture should still have:
-
-- stronger execution isolation
-- verified backup and restore practice
-- a clearer compliance and security posture
-- likely a higher-concurrency database path once usage grows past the SQLite-first operational envelope
-
-Those are not optional polish items in a multi-tenant SaaS setting. They are launch requirements.
-
-## Recommended Rollout Order
-
-### Before First External Pilot
-
-- stronger sandbox isolation
-- at least one tested restore drill covering the database and tenant storage
-
-### Before Multi-Tenant Production
-
-- recurring backup verification and restore drills
-- documented compliance, privacy, and security posture
-- stronger tenant onboarding flow
-- a higher-concurrency database path if usage exceeds the SQLite-first envelope
-
-### Second Wave After Launch
-
-- searchable conversation history
-- richer conversation lifecycle tools
-- broader compliance packaging and customer-facing operational docs
+Without those, `hosted` should still be described as carefully reviewed or limited-availability, not broadly production-ready.
 
 ## Bottom Line
 
-Chat history, uploads, admin controls, governance controls, operations dashboards, rate limits, and automated tests are no longer missing. Those foundations now exist in the repo.
+Yes, there is still more to do before Critjecture should be described as production-ready in the broad sense.
 
-The top remaining production priorities are:
+The remaining must-do items are:
 
-1. stronger sandbox isolation
-2. proven backup verification and restore drills
-3. clearer compliance, privacy, and security posture
+1. strengthen the sandbox isolation boundary
+2. turn backup/recovery/security procedures into enforced production operations
+3. raise the hosted deployment story to a higher tenant-isolation and infrastructure-hardening standard
 
-Once those gaps are addressed, Critjecture is much closer to being ready for a serious pilot and can be hardened further for multi-tenant production.
+If the target is a controlled `single_org` rollout, the remaining gap is relatively small and mostly operational. If the target is broadly offered `hosted` multi-tenant production, the remaining gap is still material.

@@ -2,14 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getSessionUser } from "@/lib/auth-state";
+import { getCustomerReviewDoc } from "@/lib/customer-review-docs";
 
 export const runtime = "nodejs";
-
-const DOC_FILES = {
-  compliance: "compliance_controls.md",
-  deployment: "deployment.md",
-  "hosted-provisioning": "hosted_provisioning.md",
-} as const;
 
 export async function GET(
   _request: Request,
@@ -26,15 +21,16 @@ export async function GET(
   }
 
   const { doc } = await context.params;
+  const reviewDoc = getCustomerReviewDoc(doc);
 
-  if (!(doc in DOC_FILES)) {
+  if (!reviewDoc) {
     return Response.json({ error: "Document not found." }, { status: 404 });
   }
 
   const filePath = path.join(
     /* turbopackIgnore: true */ process.cwd(),
     "docs",
-    DOC_FILES[doc as keyof typeof DOC_FILES],
+    reviewDoc.fileName,
   );
   const content = await readFile(filePath, "utf8");
 
