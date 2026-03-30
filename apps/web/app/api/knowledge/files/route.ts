@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   const user = await getSessionUser();
   const observed = beginObservedRequest({
     method: "POST",
-    routeGroup: "knowledge_import",
+    routeGroup: "knowledge_upload",
     routeKey: "knowledge.files.upload_async",
     user,
   });
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
   }
 
   const rateLimitDecision = await enforceRateLimitPolicy({
-    routeGroup: "knowledge_import",
+    routeGroup: "knowledge_upload",
     user,
   });
 
@@ -133,6 +133,7 @@ export async function POST(request: Request) {
       ],
       requestedScope: typeof scope === "string" ? scope : "public",
       sourceKind: "single_file",
+      triggerRequestId: observed.requestId,
       user,
     });
 
@@ -143,6 +144,7 @@ export async function POST(request: Request) {
         jobId: job.id,
         totalFileCount: job.totalFileCount,
       },
+      knowledgeImportJobId: job.id,
       outcome: "ok",
       response,
       usageEvents: [

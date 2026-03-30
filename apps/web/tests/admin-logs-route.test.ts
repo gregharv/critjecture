@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSessionUser, readJson } from "@/tests/helpers/route-test-utils";
 
 const mocks = vi.hoisted(() => ({
+  beginObservedRequest: vi.fn(() => ({ requestId: "obs-1" })),
+  finalizeObservedRequest: vi.fn((_: unknown, payload: { response: Response }) => payload.response),
   getSessionUser: vi.fn(),
   listRecentChatTurnLogs: vi.fn(),
 }));
@@ -14,6 +16,17 @@ vi.mock("@/lib/auth-state", () => ({
 vi.mock("@/lib/audit-log", () => ({
   listRecentChatTurnLogs: mocks.listRecentChatTurnLogs,
 }));
+
+vi.mock("@/lib/operations", async () => {
+  const { NextResponse } = await import("next/server");
+
+  return {
+    beginObservedRequest: mocks.beginObservedRequest,
+    buildObservedErrorResponse: (message: string, status: number) =>
+      NextResponse.json({ error: message }, { status }),
+    finalizeObservedRequest: mocks.finalizeObservedRequest,
+  };
+});
 
 import { GET } from "@/app/api/admin/logs/route";
 

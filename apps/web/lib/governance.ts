@@ -50,6 +50,11 @@ import {
 import type { SessionUser } from "@/lib/auth-state";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import {
+  asErrorMessage,
+  logStructuredError,
+  logStructuredEvent,
+} from "@/lib/observability";
+import {
   getRetentionWindowMs,
   OPERATIONS_ALERT_RETENTION_DAYS,
   OPERATIONS_REQUEST_LOG_RETENTION_DAYS,
@@ -125,6 +130,7 @@ function mapGovernanceJobRow(
     startedAt: row.startedAt,
     status: row.status,
     targetLabel: row.targetLabel,
+    triggerRequestId: row.triggerRequestId ?? null,
     triggerKind: row.triggerKind,
     updatedAt: row.updatedAt,
   };
@@ -257,6 +263,7 @@ async function listGovernanceJobRows(organizationId: string) {
       requestedByUserId: governanceJobs.requestedByUserId,
       jobType: governanceJobs.jobType,
       status: governanceJobs.status,
+      triggerRequestId: governanceJobs.triggerRequestId,
       triggerKind: governanceJobs.triggerKind,
       targetLabel: governanceJobs.targetLabel,
       cutoffTimestamp: governanceJobs.cutoffTimestamp,
@@ -310,6 +317,7 @@ async function createGovernanceJob(input: {
   organizationId: string;
   requestedByUserId: string | null;
   targetLabel: string;
+  triggerRequestId?: string | null;
   triggerKind?: "manual" | "automatic";
 }) {
   const db = await getAppDatabase();
@@ -331,22 +339,36 @@ async function createGovernanceJob(input: {
     startedAt: null,
     status: "queued" as const,
     targetLabel: input.targetLabel,
+    triggerRequestId: input.triggerRequestId ?? null,
     triggerKind: input.triggerKind ?? "manual",
     updatedAt: now,
   };
 
   await db.insert(governanceJobs).values(row);
+  logStructuredEvent("governance.job_queued", {
+    governanceJobId: row.id,
+    jobType: row.jobType,
+    organizationId: row.organizationId,
+    requestId: row.triggerRequestId ?? null,
+    targetLabel: row.targetLabel,
+    triggerKind: row.triggerKind,
+    userId: row.requestedByUserId ?? null,
+  });
   wakeGovernanceWorker();
 
   return row.id;
 }
 
-export async function queueOrganizationExportJob(user: SessionUser) {
+export async function queueOrganizationExportJob(
+  user: SessionUser,
+  triggerRequestId?: string | null,
+) {
   return createGovernanceJob({
     jobType: "organization_export",
     organizationId: user.organizationId,
     requestedByUserId: user.id,
     targetLabel: "full_organization",
+    triggerRequestId,
   });
 }
 
@@ -379,6 +401,7 @@ export function isRecentCompletedExport(
 export async function queueHistoryPurgeJob(input: {
   cutoffTimestamp: number;
   exportJobId: string;
+  triggerRequestId?: string | null;
   user: SessionUser;
 }) {
   await assertRecentCompletedExportJob({
@@ -395,12 +418,14 @@ export async function queueHistoryPurgeJob(input: {
     organizationId: input.user.organizationId,
     requestedByUserId: input.user.id,
     targetLabel: "chat_history",
+    triggerRequestId: input.triggerRequestId ?? null,
   });
 }
 
 export async function queueImportMetadataPurgeJob(input: {
   cutoffTimestamp: number;
   exportJobId: string;
+  triggerRequestId?: string | null;
   user: SessionUser;
 }) {
   await assertRecentCompletedExportJob({
@@ -417,12 +442,14 @@ export async function queueImportMetadataPurgeJob(input: {
     organizationId: input.user.organizationId,
     requestedByUserId: input.user.id,
     targetLabel: "knowledge_import_metadata",
+    triggerRequestId: input.triggerRequestId ?? null,
   });
 }
 
 export async function queueKnowledgeDeletionJob(input: {
   cutoffTimestamp: number;
   exportJobId: string;
+  triggerRequestId?: string | null;
   user: SessionUser;
 }) {
   await assertRecentCompletedExportJob({
@@ -439,6 +466,7 @@ export async function queueKnowledgeDeletionJob(input: {
     organizationId: input.user.organizationId,
     requestedByUserId: input.user.id,
     targetLabel: "managed_knowledge_files",
+    triggerRequestId: input.triggerRequestId ?? null,
   });
 }
 
@@ -446,9 +474,13 @@ function wakeGovernanceWorker() {
   governanceWorkerWakeRequested = true;
 
   if (!governanceWorkerPromise) {
-    governanceWorkerPromise = runGovernanceWorker().finally(() => {
-      governanceWorkerPromise = null;
-    });
+    governanceWorkerPromise = runGovernanceWorker()
+      .catch((caughtError) => {
+        logStructuredError("governance.worker_loop_failed", caughtError);
+      })
+      .finally(() => {
+        governanceWorkerPromise = null;
+      });
   }
 }
 
@@ -477,6 +509,15 @@ async function claimNextGovernanceJob() {
       updatedAt: now,
     })
     .where(eq(governanceJobs.id, queuedJob.id));
+
+  logStructuredEvent("governance.job_started", {
+    governanceJobId: queuedJob.id,
+    jobType: queuedJob.jobType,
+    organizationId: queuedJob.organizationId,
+    requestId: queuedJob.triggerRequestId ?? null,
+    targetLabel: queuedJob.targetLabel,
+    userId: queuedJob.requestedByUserId ?? null,
+  });
 
   return {
     ...queuedJob,
@@ -508,6 +549,19 @@ async function updateGovernanceJobSuccess(input: {
       updatedAt: now,
     })
     .where(eq(governanceJobs.id, input.jobId));
+
+  const job = await db.query.governanceJobs.findFirst({
+    where: eq(governanceJobs.id, input.jobId),
+  });
+
+  logStructuredEvent("governance.job_completed", {
+    governanceJobId: input.jobId,
+    jobType: job?.jobType ?? null,
+    organizationId: job?.organizationId ?? null,
+    requestId: job?.triggerRequestId ?? null,
+    targetLabel: job?.targetLabel ?? null,
+    userId: job?.requestedByUserId ?? null,
+  });
 }
 
 async function updateGovernanceJobFailure(jobId: string, errorMessage: string) {
@@ -523,6 +577,20 @@ async function updateGovernanceJobFailure(jobId: string, errorMessage: string) {
       updatedAt: now,
     })
     .where(eq(governanceJobs.id, jobId));
+
+  const job = await db.query.governanceJobs.findFirst({
+    where: eq(governanceJobs.id, jobId),
+  });
+
+  logStructuredEvent("governance.job_failed", {
+    error: errorMessage,
+    governanceJobId: jobId,
+    jobType: job?.jobType ?? null,
+    organizationId: job?.organizationId ?? null,
+    requestId: job?.triggerRequestId ?? null,
+    targetLabel: job?.targetLabel ?? null,
+    userId: job?.requestedByUserId ?? null,
+  });
 }
 
 async function buildExportBundle(job: GovernanceJobRow) {
@@ -857,36 +925,41 @@ async function processGovernanceJob(job: GovernanceJobRow) {
 }
 
 async function runGovernanceWorker() {
-  while (true) {
-    governanceWorkerWakeRequested = false;
-    const nextJob = await claimNextGovernanceJob();
+  try {
+    while (true) {
+      governanceWorkerWakeRequested = false;
+      const nextJob = await claimNextGovernanceJob();
 
-    if (!nextJob) {
-      if (!governanceWorkerWakeRequested) {
-        break;
+      if (!nextJob) {
+        if (!governanceWorkerWakeRequested) {
+          break;
+        }
+
+        continue;
       }
 
-      continue;
+      try {
+        const outcome = await processGovernanceJob(nextJob);
+        await updateGovernanceJobSuccess({
+          artifactByteSize:
+            "artifactByteSize" in outcome ? outcome.artifactByteSize : null,
+          artifactFileName:
+            "artifactFileName" in outcome ? outcome.artifactFileName : null,
+          artifactStoragePath:
+            "artifactStoragePath" in outcome ? outcome.artifactStoragePath : null,
+          jobId: nextJob.id,
+          result: outcome.result ?? {},
+        });
+      } catch (caughtError) {
+        await updateGovernanceJobFailure(
+          nextJob.id,
+          asErrorMessage(caughtError, "Governance job failed."),
+        );
+      }
     }
-
-    try {
-      const outcome = await processGovernanceJob(nextJob);
-      await updateGovernanceJobSuccess({
-        artifactByteSize:
-          "artifactByteSize" in outcome ? outcome.artifactByteSize : null,
-        artifactFileName:
-          "artifactFileName" in outcome ? outcome.artifactFileName : null,
-        artifactStoragePath:
-          "artifactStoragePath" in outcome ? outcome.artifactStoragePath : null,
-        jobId: nextJob.id,
-        result: outcome.result ?? {},
-      });
-    } catch (caughtError) {
-      await updateGovernanceJobFailure(
-        nextJob.id,
-        caughtError instanceof Error ? caughtError.message : "Governance job failed.",
-      );
-    }
+  } catch (caughtError) {
+    logStructuredError("governance.worker_failed", caughtError);
+    throw caughtError;
   }
 }
 

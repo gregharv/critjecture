@@ -77,6 +77,8 @@ It adds:
 
 There is also a public `GET /api/health` endpoint for liveness/readiness checks.
 
+Observed API routes attach `x-critjecture-request-id` so production failures can be correlated across request logs, sandbox runs, knowledge imports, and governance jobs. Critical operational alerts can also be delivered to an external webhook via `CRITJECTURE_ALERT_WEBHOOK_URL`.
+
 ### Settings
 
 The owner settings dashboard lives at `http://localhost:3000/admin/settings`.
@@ -223,6 +225,8 @@ CRITJECTURE_SANDBOX_SUPERVISOR_TIMEOUT_MS=15000
 CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
 CRITJECTURE_ALERT_WEBHOOK_URL=
 ```
+
+Operator incident runbooks live under `apps/web/docs/runbooks/` and cover sandbox, storage, migration, backup/restore, hosted, and on-prem response paths.
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
 If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, missing seeded user env vars mean login will not succeed because no pilot accounts will be available.

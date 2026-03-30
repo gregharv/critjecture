@@ -5,6 +5,16 @@ export type OperationsRouteGroup =
   | "search"
   | "sandbox"
   | "knowledge_upload"
+  | "knowledge_import"
+  | "governance"
+  | "admin"
+  | "health";
+
+export type RateLimitedRouteGroup =
+  | "chat"
+  | "search"
+  | "sandbox"
+  | "knowledge_upload"
   | "knowledge_import";
 
 export type RouteRateLimitPolicy = {
@@ -14,7 +24,7 @@ export type RouteRateLimitPolicy = {
 };
 
 export type RouteGroupPolicy = {
-  group: OperationsRouteGroup;
+  group: RateLimitedRouteGroup;
   rateLimits: RouteRateLimitPolicy[];
 };
 
@@ -90,7 +100,7 @@ export const DAILY_SANDBOX_RUN_CAP_ORGANIZATION = Math.trunc(
 
 export const BUDGET_WARNING_RATIO = 0.8;
 
-export const OPERATIONS_ROUTE_POLICIES: Record<OperationsRouteGroup, RouteGroupPolicy> = {
+export const OPERATIONS_ROUTE_POLICIES: Record<RateLimitedRouteGroup, RouteGroupPolicy> = {
   chat: {
     group: "chat",
     rateLimits: [
@@ -128,7 +138,7 @@ export const OPERATIONS_ROUTE_POLICIES: Record<OperationsRouteGroup, RouteGroupP
   },
 };
 
-export function getRouteGroupPolicy(group: OperationsRouteGroup) {
+export function getRouteGroupPolicy(group: RateLimitedRouteGroup) {
   return OPERATIONS_ROUTE_POLICIES[group];
 }
 

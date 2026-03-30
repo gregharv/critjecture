@@ -442,6 +442,13 @@ export function OperationsPageClient() {
                       <span>{failure.errorCode ?? failure.outcome}</span>
                     </div>
                     <code>{failure.requestId}</code>
+                    {failure.sandboxRunId ? <code>{failure.sandboxRunId}</code> : null}
+                    {failure.governanceJobId ? <code>{failure.governanceJobId}</code> : null}
+                    {failure.knowledgeImportJobId ? (
+                      <code>{failure.knowledgeImportJobId}</code>
+                    ) : null}
+                    {failure.turnId ? <code>{failure.turnId}</code> : null}
+                    {failure.runtimeToolCallId ? <code>{failure.runtimeToolCallId}</code> : null}
                   </article>
                 ))}
               </div>

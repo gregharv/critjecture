@@ -369,6 +369,7 @@ export const knowledgeImportJobs = sqliteTable(
     status: text("status", {
       enum: ["queued", "running", "completed", "completed_with_errors", "failed"],
     }).notNull(),
+    triggerRequestId: text("trigger_request_id"),
     totalFileCount: integer("total_file_count").notNull().default(0),
     queuedFileCount: integer("queued_file_count").notNull().default(0),
     runningFileCount: integer("running_file_count").notNull().default(0),
@@ -397,6 +398,7 @@ export const knowledgeImportJobs = sqliteTable(
       table.updatedAt,
     ),
     index("knowledge_import_jobs_created_by_user_id_idx").on(table.createdByUserId),
+    index("knowledge_import_jobs_trigger_request_id_idx").on(table.triggerRequestId),
   ],
 );
 
@@ -597,7 +599,11 @@ export const requestLogs = sqliteTable(
     errorCode: text("error_code"),
     modelName: text("model_name"),
     toolName: text("tool_name"),
+    turnId: text("turn_id"),
+    runtimeToolCallId: text("runtime_tool_call_id"),
     sandboxRunId: text("sandbox_run_id"),
+    governanceJobId: text("governance_job_id"),
+    knowledgeImportJobId: text("knowledge_import_job_id"),
     totalTokens: integer("total_tokens"),
     totalCostUsd: real("total_cost_usd"),
     durationMs: integer("duration_ms").notNull(),
@@ -610,6 +616,15 @@ export const requestLogs = sqliteTable(
     index("request_logs_organization_id_started_at_idx").on(table.organizationId, table.startedAt),
     index("request_logs_user_id_started_at_idx").on(table.userId, table.startedAt),
     index("request_logs_status_code_started_at_idx").on(table.statusCode, table.startedAt),
+    index("request_logs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
+    index("request_logs_governance_job_id_started_at_idx").on(
+      table.governanceJobId,
+      table.startedAt,
+    ),
+    index("request_logs_knowledge_import_job_id_started_at_idx").on(
+      table.knowledgeImportJobId,
+      table.startedAt,
+    ),
   ],
 );
 
@@ -747,6 +762,7 @@ export const governanceJobs = sqliteTable(
     status: text("status", {
       enum: ["queued", "running", "completed", "failed"],
     }).notNull(),
+    triggerRequestId: text("trigger_request_id"),
     triggerKind: text("trigger_kind", { enum: ["manual", "automatic"] })
       .notNull()
       .default("manual"),
@@ -784,5 +800,6 @@ export const governanceJobs = sqliteTable(
     ),
     index("governance_jobs_requested_by_user_id_idx").on(table.requestedByUserId),
     index("governance_jobs_type_completed_at_idx").on(table.jobType, table.completedAt),
+    index("governance_jobs_trigger_request_id_idx").on(table.triggerRequestId),
   ],
 );

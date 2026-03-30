@@ -38,6 +38,10 @@ import {
   waitForSandboxRunTerminal,
 } from "@/lib/sandbox-runs";
 import {
+  logStructuredError,
+  logStructuredEvent,
+} from "@/lib/observability";
+import {
   getSandboxExecutionBackend,
   SANDBOX_ARTIFACT_MAX_BYTES,
   SANDBOX_ARTIFACT_TTL_MS,
@@ -1082,7 +1086,9 @@ async function withSandboxHeartbeat<T>(runId: string, operation: () => Promise<T
   await heartbeatSandboxRun(runId);
   const intervalId = setInterval(() => {
     void heartbeatSandboxRun(runId).catch((caughtError) => {
-      console.error("sandbox-supervisor.heartbeat_failed", caughtError);
+      logStructuredError("sandbox-supervisor.heartbeat_failed", caughtError, {
+        sandboxRunId: runId,
+      });
     });
   }, SANDBOX_SUPERVISOR_HEARTBEAT_MS);
 
@@ -1258,6 +1264,13 @@ async function processClaimedLocalSandboxRun(runId: string) {
     return;
   }
 
+  logStructuredEvent("sandbox-supervisor.run_started", {
+    requestId: null,
+    runtimeToolCallId: executionPayload.runtimeToolCallId ?? null,
+    sandboxRunId: runId,
+    turnId: executionPayload.turnId ?? null,
+  });
+
   await runLocalSandboxExecution({
     code: executionPayload.code,
     inputFiles: executionPayload.inputFiles,
@@ -1286,7 +1299,7 @@ async function runLocalSupervisorLoop() {
       try {
         await reconcileStaleSandboxRuns();
       } catch (caughtError) {
-        console.error("sandbox-supervisor.reconcile_failed", caughtError);
+        logStructuredError("sandbox-supervisor.reconcile_failed", caughtError);
       }
 
       let claimedRun = null;
@@ -1297,7 +1310,7 @@ async function runLocalSupervisorLoop() {
           supervisorId: LOCAL_SUPERVISOR_ID,
         });
       } catch (caughtError) {
-        console.error("sandbox-supervisor.claim_failed", caughtError);
+        logStructuredError("sandbox-supervisor.claim_failed", caughtError);
       }
 
       if (!claimedRun) {
@@ -1307,7 +1320,9 @@ async function runLocalSupervisorLoop() {
       try {
         await processClaimedLocalSandboxRun(claimedRun.runId);
       } catch (caughtError) {
-        console.error("sandbox-supervisor.process_failed", caughtError);
+        logStructuredError("sandbox-supervisor.process_failed", caughtError, {
+          sandboxRunId: claimedRun.runId,
+        });
       }
     }
   } finally {
@@ -1326,7 +1341,7 @@ function ensureLocalSandboxSupervisorRunning() {
 
   if (!localSupervisorPromise) {
     localSupervisorPromise = runLocalSupervisorLoop().catch((caughtError) => {
-      console.error("sandbox-supervisor.worker_failed", caughtError);
+      logStructuredError("sandbox-supervisor.worker_failed", caughtError);
     });
   }
 }
@@ -1553,6 +1568,14 @@ export async function executeSandboxedCommand(options: {
     userId: options.userId,
   });
 
+  logStructuredEvent("sandbox-supervisor.run_queued", {
+    organizationId: options.organizationId,
+    runtimeToolCallId: options.runtimeToolCallId ?? null,
+    sandboxRunId: queuedRun.runId,
+    turnId: options.turnId ?? null,
+    userId: options.userId,
+  });
+
   if (options.runtimeToolCallId && options.turnId) {
     await attachSandboxRunToToolCall({
       runtimeToolCallId: options.runtimeToolCallId,
@@ -1569,6 +1592,14 @@ export async function executeSandboxedCommand(options: {
         failureReason: "backend-unavailable",
         runId: queuedRun.runId,
         stderrText: health.detail,
+      });
+      logStructuredEvent("sandbox-supervisor.run_rejected", {
+        error: health.detail,
+        organizationId: options.organizationId,
+        runtimeToolCallId: options.runtimeToolCallId ?? null,
+        sandboxRunId: queuedRun.runId,
+        turnId: options.turnId ?? null,
+        userId: options.userId,
       });
       throw new SandboxUnavailableError(health.detail, queuedRun.runId);
     }
@@ -1590,7 +1621,19 @@ export async function executeSandboxedCommand(options: {
     });
   }
 
-  return finalizeSandboxRunResult(queuedRun.runId, queuedRun.limits);
+  const result = await finalizeSandboxRunResult(queuedRun.runId, queuedRun.limits);
+  logStructuredEvent(
+    result.status === "completed" ? "sandbox-supervisor.run_completed" : "sandbox-supervisor.run_failed",
+    {
+      error: result.status === "completed" ? null : result.stderr || result.stdout || "sandbox-run-failed",
+      organizationId: options.organizationId,
+      runtimeToolCallId: options.runtimeToolCallId ?? null,
+      sandboxRunId: result.sandboxRunId,
+      turnId: options.turnId ?? null,
+      userId: options.userId,
+    },
+  );
+  return result;
 }
 
 export function assertValidSandboxRunId(runId: string) {

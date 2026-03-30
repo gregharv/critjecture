@@ -258,6 +258,76 @@ Step 4 was finished as an RBAC-aware search and analysis workflow that can disco
 - File previews are intentionally shallow: CSV header plus 3 rows, or 3 non-empty text lines.
 - The clickable picker is implemented as a custom message renderer rather than a tool-card hack so the app can inject a normal user prompt after selection.
 - The memory-safety rule is enforced both by prompt guidance and by backend validation for CSV-backed analysis calls.
+
+## Step 22: Production Observability and Incident Response
+
+### What Was Implemented
+
+Step 22 was implemented as an extension of the existing operations layer so production failures can be traced across requests, sandbox runs, knowledge imports, and governance jobs without introducing a separate observability stack.
+
+- Added structured observability helpers in `apps/web/lib/observability.ts`.
+  - Standardizes JSON log envelopes to stdout/stderr
+  - Normalizes correlation fields and structured error logging
+- Added persistent correlation fields with a new migration:
+  - `apps/web/drizzle/0008_step22_observability.sql`
+  - request-log fields for `turnId`, `runtimeToolCallId`, `governanceJobId`, and `knowledgeImportJobId`
+  - job fields for `triggerRequestId` on governance and knowledge-import jobs
+- Expanded `apps/web/lib/operations.ts`.
+  - Persists the new correlation identifiers in `request_logs`
+  - Propagates `x-critjecture-request-id` on observed responses
+  - Extends recent failure summaries with sandbox/job/tool-call correlation
+  - Standardizes webhook payloads for opened, reopened, and resolved operational alerts
+- Instrumented owner/admin and governance routes.
+  - Added observed request handling to:
+    - `apps/web/app/api/admin/operations/summary/route.ts`
+    - `apps/web/app/api/admin/logs/route.ts`
+    - `apps/web/app/api/admin/governance-jobs/route.ts`
+    - `apps/web/app/api/admin/governance-jobs/[jobId]/route.ts`
+    - `apps/web/app/api/admin/governance-jobs/[jobId]/download/route.ts`
+    - `apps/web/app/api/health/route.ts`
+- Wired request-to-job correlation through async flows.
+  - Knowledge import creation now stores the triggering request id on the job
+  - Governance job creation now stores the triggering request id on the job
+  - Sandbox-backed routes now persist `turnId` and `runtimeToolCallId` into request logs when present
+- Reworked background-worker logging.
+  - Knowledge import worker now emits structured lifecycle events instead of raw `console.error(...)`
+  - Governance worker now emits queue/start/complete/failure events
+  - Sandbox supervisor loop now emits structured queue/start/failure/completion events
+- Extended the owner operations UI in `apps/web/components/operations-page-client.tsx`.
+  - Recent failures now show request, sandbox, governance, import, turn, and runtime tool-call identifiers when available
+- Added operator runbooks under `apps/web/docs/runbooks/`.
+  - `sandbox-failures.md`
+  - `storage-failures.md`
+  - `migration-failures.md`
+  - `backup-restore-failures.md`
+  - `hosted-operations.md`
+  - `onprem-operations.md`
+- Updated operator-facing documentation in:
+  - `README.md`
+  - `apps/web/docs/deployment.md`
+- Added test coverage for Step 22.
+  - new direct observability persistence test in `apps/web/tests/operations.test.ts`
+  - updated admin logs route test for observed request mocking
+
+### Current Step 22 Behavior
+
+- Observed API routes now attach `x-critjecture-request-id`.
+- Request logs can be correlated directly with:
+  - sandbox runs
+  - governance jobs
+  - knowledge import jobs
+  - chat turns
+  - runtime tool call ids
+- Critical operational alerts can surface outside the app through `CRITJECTURE_ALERT_WEBHOOK_URL`.
+- The operations dashboard now exposes the identifiers operators need to move from a failing request to the underlying job or sandbox run.
+- Hosted and on-prem incident response now has written runbooks instead of relying on tribal knowledge.
+
+### Important Implementation Details
+
+- Step 22 keeps alert delivery webhook-first. It does not add a provider abstraction or third-party error-tracking SDK.
+- Correlation identifiers were added as first-class schema fields instead of being left only in metadata JSON.
+- Existing rate-limit and budget policy behavior was preserved; Step 22 broadens observability coverage without changing those enforcement rules.
+- The in-app operations view remains the main operator surface. Step 22 extends it rather than introducing a separate incident UI.
 - The sandbox still uses the fixed `packages/python-sandbox/.venv/bin/python` interpreter and a stripped environment.
 
 ## Step 5: Visuals & Documents (The UI Handlers)

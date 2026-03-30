@@ -65,12 +65,17 @@ export type UsageActorSummary = {
 export type RecentFailureSummary = {
   completedAt: number;
   errorCode: string | null;
+  governanceJobId: string | null;
+  knowledgeImportJobId: string | null;
   outcome: string;
   requestId: string;
+  runtimeToolCallId: string | null;
   routeGroup: OperationsRouteGroup;
   routeKey: string;
+  sandboxRunId: string | null;
   statusCode: number;
   toolName: string | null;
+  turnId: string | null;
   userEmail: string | null;
 };
 

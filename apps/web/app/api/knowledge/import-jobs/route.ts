@@ -103,6 +103,7 @@ export async function POST(request: Request) {
       job = await createKnowledgeImportJobFromArchive({
         archive,
         requestedScope: scope,
+        triggerRequestId: observed.requestId,
         user,
       });
     } else {
@@ -130,6 +131,7 @@ export async function POST(request: Request) {
         files,
         requestedScope: scope,
         sourceKind: mode === "single_file" ? "single_file" : "directory",
+        triggerRequestId: observed.requestId,
         user,
       });
     }
@@ -142,6 +144,7 @@ export async function POST(request: Request) {
         sourceKind: job.sourceKind,
         totalFileCount: job.totalFileCount,
       },
+      knowledgeImportJobId: job.id,
       outcome: "ok",
       response,
       usageEvents: [

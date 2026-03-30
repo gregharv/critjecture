@@ -45,6 +45,7 @@ export type KnowledgeImportJobRecord = {
   startedAt: number | null;
   status: KnowledgeImportJobStatus;
   totalFileCount: number;
+  triggerRequestId: string | null;
   updatedAt: number;
 };
 

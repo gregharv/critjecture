@@ -46,6 +46,7 @@ import {
   getOperationsPoliciesSnapshot,
   getRetentionWindowMs,
   getRouteGroupPolicy,
+  type RateLimitedRouteGroup,
   type OperationsRouteGroup,
 } from "@/lib/operations-policy";
 import type {
@@ -54,6 +55,12 @@ import type {
   OperationsSummaryResponse,
   UsageActorSummary,
 } from "@/lib/operations-types";
+import {
+  logStructuredError,
+  logStructuredEvent,
+  mergeCorrelationFields,
+  type CorrelationFields,
+} from "@/lib/observability";
 import { getSandboxBackendHealth } from "@/lib/python-sandbox";
 import { getSandboxHealthSnapshot } from "@/lib/sandbox-runs";
 
@@ -75,6 +82,7 @@ type UsageEventInput = {
 };
 
 type ObservedRequestContext = {
+  correlation: CorrelationFields;
   method: string;
   requestId: string;
   routeGroup: OperationsRouteGroup;
@@ -89,8 +97,12 @@ type FinalizeObservedRequestInput = {
   modelName?: string | null;
   outcome: RequestOutcome;
   response: Response;
+  governanceJobId?: string | null;
+  knowledgeImportJobId?: string | null;
+  runtimeToolCallId?: string | null;
   sandboxRunId?: string | null;
   toolName?: string | null;
+  turnId?: string | null;
   totalCostUsd?: number | null;
   totalTokens?: number | null;
   usageEvents?: UsageEventInput[];
@@ -114,32 +126,25 @@ const TWENTY_FOUR_HOURS_MS = 24 * 60 * ONE_MINUTE_MS;
 
 let lastMaintenanceAt = 0;
 
-function safeJsonStringify(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return JSON.stringify({ error: "failed-to-serialize" });
-  }
-}
-
 function roundCurrency(value: number) {
   return Number(value.toFixed(6));
 }
 
-function buildLogEnvelope(event: string, fields: Record<string, unknown>) {
-  return {
-    ...fields,
-    event,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-function logStructured(event: string, fields: Record<string, unknown>) {
-  console.info(safeJsonStringify(buildLogEnvelope(event, fields)));
-}
-
 function parseWindowParam(value: string | null | undefined): "24h" | "7d" {
   return value === "7d" ? "7d" : "24h";
+}
+
+function parseMetadataJson(value: string | null | undefined) {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function getWindowMs(window: "24h" | "7d") {
@@ -166,13 +171,43 @@ async function sendAlertWebhook(payload: Record<string, unknown>) {
       method: "POST",
     });
   } catch (caughtError) {
-    logStructured("operations.alert_webhook_failed", {
-      error: caughtError instanceof Error ? caughtError.message : "alert-webhook-failed",
-    });
+    logStructuredError("operations.alert_webhook_failed", caughtError);
   }
 }
 
-async function upsertOperationalAlert(input: {
+function getAlertWebhookPayload(input: {
+  action: "opened" | "reopened" | "resolved";
+  alertType: string;
+  dedupeKey: string;
+  message: string;
+  metadata?: RequestMetadata;
+  organizationId?: string | null;
+  severity: "warning" | "critical";
+  title: string;
+  userId?: string | null;
+}) {
+  const correlation = mergeCorrelationFields(
+    input.metadata as CorrelationFields | undefined,
+    {
+      organizationId: input.organizationId ?? null,
+      userId: input.userId ?? null,
+    },
+  );
+
+  return {
+    action: input.action,
+    alertType: input.alertType,
+    dedupeKey: input.dedupeKey,
+    message: input.message,
+    metadata: input.metadata ?? {},
+    severity: input.severity,
+    timestamp: new Date().toISOString(),
+    title: input.title,
+    ...correlation,
+  };
+}
+
+export async function upsertOperationalAlert(input: {
   alertType: string;
   dedupeKey: string;
   message: string;
@@ -208,10 +243,12 @@ async function upsertOperationalAlert(input: {
     };
 
     await db.insert(operationalAlerts).values(nextAlert);
-    await sendAlertWebhook({
-      action: "opened",
-      alert: nextAlert,
-    });
+    await sendAlertWebhook(
+      getAlertWebhookPayload({
+        action: "opened",
+        ...input,
+      }),
+    );
     return;
   }
 
@@ -235,20 +272,19 @@ async function upsertOperationalAlert(input: {
     .where(eq(operationalAlerts.id, existing.id));
 
   if (shouldNotify) {
-    await sendAlertWebhook({
-      action: "reopened",
-      alertType: input.alertType,
-      dedupeKey: input.dedupeKey,
-      message: input.message,
-      organizationId: input.organizationId ?? null,
-      severity: input.severity,
-      title: input.title,
-      userId: input.userId ?? null,
-    });
+    await sendAlertWebhook(
+      getAlertWebhookPayload({
+        action: "reopened",
+        ...input,
+      }),
+    );
   }
 }
 
-async function resolveOperationalAlert(dedupeKey: string) {
+export async function resolveOperationalAlert(
+  dedupeKey: string,
+  metadata?: RequestMetadata,
+) {
   const db = await getAppDatabase();
   const existing = await db.query.operationalAlerts.findFirst({
     where: eq(operationalAlerts.dedupeKey, dedupeKey),
@@ -265,11 +301,25 @@ async function resolveOperationalAlert(dedupeKey: string) {
       status: "resolved",
     })
     .where(eq(operationalAlerts.id, existing.id));
+
+  await sendAlertWebhook(
+    getAlertWebhookPayload({
+      action: "resolved",
+      alertType: existing.alertType,
+      dedupeKey,
+      message: existing.message,
+      metadata: metadata ?? parseMetadataJson(existing.metadataJson),
+      organizationId: existing.organizationId ?? null,
+      severity: existing.severity as "warning" | "critical",
+      title: existing.title,
+      userId: existing.userId ?? null,
+    }),
+  );
 }
 
 async function createRateLimitBucketRecord(input: {
   bucketStartAt: number;
-  routeGroup: OperationsRouteGroup;
+  routeGroup: RateLimitedRouteGroup;
   scopeId: string;
   scopeType: "organization" | "user";
 }) {
@@ -309,7 +359,7 @@ async function createRateLimitBucketRecord(input: {
 }
 
 async function sumRateLimitRequests(input: {
-  routeGroup: OperationsRouteGroup;
+  routeGroup: RateLimitedRouteGroup;
   scopeId: string;
   scopeType: "organization" | "user";
   windowMs: number;
@@ -558,7 +608,11 @@ async function evaluateBudgetAlerts(user: SessionUser) {
 
 async function evaluateDynamicAlerts(input: {
   errorCode: string | null;
+  metadata?: RequestMetadata;
+  requestId: string;
+  routeKey: string;
   routeGroup: OperationsRouteGroup;
+  sandboxRunId?: string | null;
   user: SessionUser | null;
 }) {
   const db = await getAppDatabase();
@@ -588,6 +642,13 @@ async function evaluateDynamicAlerts(input: {
       alertType: "error-burst",
       dedupeKey: fiveHundredAlertKey,
       message: `${fiveHundredCount} server failures were recorded for ${input.routeGroup} in the last 10 minutes.`,
+      metadata: {
+        requestId: input.requestId,
+        routeGroup: input.routeGroup,
+        routeKey: input.routeKey,
+        sandboxRunId: input.sandboxRunId ?? null,
+        ...(input.metadata ?? {}),
+      },
       organizationId,
       severity: "critical",
       title: "Server Error Burst",
@@ -620,6 +681,13 @@ async function evaluateDynamicAlerts(input: {
       alertType: "rate-limit-burst",
       dedupeKey: rateLimitedAlertKey,
       message: `${rateLimitedCount} rate-limited requests were recorded for ${input.routeGroup} in the last 10 minutes.`,
+      metadata: {
+        requestId: input.requestId,
+        routeGroup: input.routeGroup,
+        routeKey: input.routeKey,
+        sandboxRunId: input.sandboxRunId ?? null,
+        ...(input.metadata ?? {}),
+      },
       organizationId,
       severity: "warning",
       title: "Rate Limit Burst",
@@ -659,6 +727,13 @@ async function evaluateDynamicAlerts(input: {
       alertType: "sandbox-burst",
       dedupeKey: sandboxAlertKey,
       message: `${sandboxBurstCount} sandbox timeout or rejection events were recorded in the last 10 minutes.`,
+      metadata: {
+        requestId: input.requestId,
+        routeGroup: input.routeGroup,
+        routeKey: input.routeKey,
+        sandboxRunId: input.sandboxRunId ?? null,
+        ...(input.metadata ?? {}),
+      },
       organizationId,
       severity: "critical",
       title: "Sandbox Failure Burst",
@@ -798,20 +873,25 @@ export async function runOperationsMaintenance() {
   ]);
 
   await evaluateSandboxOperationalAlerts().catch((caughtError) => {
-    logStructured("operations.sandbox_alert_evaluation_failed", {
-      error: caughtError instanceof Error ? caughtError.message : "sandbox-alert-evaluation-failed",
-    });
+    logStructuredError("operations.sandbox_alert_evaluation_failed", caughtError);
   });
   await runGovernanceMaintenance();
 }
 
 export function beginObservedRequest(input: {
+  correlation?: CorrelationFields;
   method: string;
   routeGroup: OperationsRouteGroup;
   routeKey: string;
   user: SessionUser | null;
 }) {
   const context: ObservedRequestContext = {
+    correlation: mergeCorrelationFields(input.correlation, {
+      organizationId: input.user?.organizationId ?? null,
+      routeGroup: input.routeGroup,
+      routeKey: input.routeKey,
+      userId: input.user?.id ?? null,
+    }),
     method: input.method,
     requestId: randomUUID(),
     routeGroup: input.routeGroup,
@@ -820,13 +900,10 @@ export function beginObservedRequest(input: {
     user: input.user,
   };
 
-  logStructured("operations.request_start", {
+  logStructuredEvent("operations.request_start", {
     method: context.method,
-    organizationId: context.user?.organizationId ?? null,
     requestId: context.requestId,
-    routeGroup: context.routeGroup,
-    routeKey: context.routeKey,
-    userId: context.user?.id ?? null,
+    ...context.correlation,
   });
 
   return context;
@@ -846,6 +923,16 @@ export async function finalizeObservedRequest(
   const durationMs = completedAt - context.startedAt;
   const metadataJson = JSON.stringify(input.metadata ?? {});
   const requestLogId = randomUUID();
+  const correlation = mergeCorrelationFields(context.correlation, {
+    governanceJobId: input.governanceJobId ?? null,
+    knowledgeImportJobId: input.knowledgeImportJobId ?? null,
+    requestId: context.requestId,
+    routeGroup: context.routeGroup,
+    routeKey: context.routeKey,
+    runtimeToolCallId: input.runtimeToolCallId ?? null,
+    sandboxRunId: input.sandboxRunId ?? null,
+    turnId: input.turnId ?? null,
+  });
 
   await db.insert(requestLogs).values({
     completedAt,
@@ -860,12 +947,16 @@ export async function finalizeObservedRequest(
     requestId: context.requestId,
     routeGroup: context.routeGroup,
     routeKey: context.routeKey,
+    runtimeToolCallId: correlation.runtimeToolCallId ?? null,
     sandboxRunId: input.sandboxRunId ?? null,
+    governanceJobId: correlation.governanceJobId ?? null,
+    knowledgeImportJobId: correlation.knowledgeImportJobId ?? null,
     startedAt: context.startedAt,
     statusCode: input.response.status,
     toolName: input.toolName ?? null,
     totalCostUsd: input.totalCostUsd ?? null,
     totalTokens: input.totalTokens ?? null,
+    turnId: correlation.turnId ?? null,
     userId: context.user?.id ?? null,
   });
 
@@ -891,22 +982,17 @@ export async function finalizeObservedRequest(
     });
   }
 
-  logStructured("operations.request_finish", {
+  logStructuredEvent("operations.request_finish", {
     durationMs,
     errorCode: input.errorCode ?? null,
     method: context.method,
     modelName: input.modelName ?? null,
-    organizationId: context.user?.organizationId ?? null,
     outcome: input.outcome,
-    requestId: context.requestId,
-    routeGroup: context.routeGroup,
-    routeKey: context.routeKey,
-    sandboxRunId: input.sandboxRunId ?? null,
     statusCode: input.response.status,
     toolName: input.toolName ?? null,
     totalCostUsd: input.totalCostUsd ?? null,
     totalTokens: input.totalTokens ?? null,
-    userId: context.user?.id ?? null,
+    ...correlation,
   });
 
   if (context.user) {
@@ -915,7 +1001,11 @@ export async function finalizeObservedRequest(
 
   await evaluateDynamicAlerts({
     errorCode: input.errorCode ?? null,
+    metadata: input.metadata,
+    requestId: context.requestId,
+    routeKey: context.routeKey,
     routeGroup: context.routeGroup,
+    sandboxRunId: input.sandboxRunId ?? null,
     user: context.user,
   });
 
@@ -925,7 +1015,7 @@ export async function finalizeObservedRequest(
 }
 
 export async function enforceRateLimitPolicy(input: {
-  routeGroup: OperationsRouteGroup;
+  routeGroup: RateLimitedRouteGroup;
   user: SessionUser;
 }) {
   const policy = getRouteGroupPolicy(input.routeGroup);
@@ -972,7 +1062,7 @@ export async function enforceRateLimitPolicy(input: {
 }
 
 export async function enforceBudgetPolicy(input: {
-  routeGroup: OperationsRouteGroup;
+  routeGroup: RateLimitedRouteGroup;
   user: SessionUser;
 }) {
   if (input.routeGroup === "chat") {
@@ -1346,12 +1436,17 @@ export async function getOperationsSummary(input: {
         .select({
           completedAt: requestLogs.completedAt,
           errorCode: requestLogs.errorCode,
+          governanceJobId: requestLogs.governanceJobId,
+          knowledgeImportJobId: requestLogs.knowledgeImportJobId,
           outcome: requestLogs.outcome,
           requestId: requestLogs.requestId,
+          runtimeToolCallId: requestLogs.runtimeToolCallId,
           routeGroup: requestLogs.routeGroup,
           routeKey: requestLogs.routeKey,
+          sandboxRunId: requestLogs.sandboxRunId,
           statusCode: requestLogs.statusCode,
           toolName: requestLogs.toolName,
+          turnId: requestLogs.turnId,
           userEmail: users.email,
         })
         .from(requestLogs)
@@ -1414,12 +1509,17 @@ export async function getOperationsSummary(input: {
     recentFailures: recentFailures.map((row) => ({
       completedAt: row.completedAt,
       errorCode: row.errorCode,
+      governanceJobId: row.governanceJobId,
+      knowledgeImportJobId: row.knowledgeImportJobId,
       outcome: row.outcome,
       requestId: row.requestId,
+      runtimeToolCallId: row.runtimeToolCallId,
       routeGroup: row.routeGroup as OperationsRouteGroup,
       routeKey: row.routeKey,
+      sandboxRunId: row.sandboxRunId,
       statusCode: row.statusCode,
       toolName: row.toolName,
+      turnId: row.turnId,
       userEmail: row.userEmail,
     })),
     routeMetrics: routeMetrics.map((row) => ({

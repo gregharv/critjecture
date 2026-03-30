@@ -2,35 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 21 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, and tested recovery tooling. The remaining gaps are narrower and more operational.
-
-## Step 22: Production Observability and Incident Response
-
-### Goal
-
-Close the gap between product auditability and real production operations.
-
-### What Should Be Implemented
-
-- add structured application logs that correlate:
-  - chat requests
-  - tool routes
-  - sandbox runs
-  - governance jobs
-- add error tracking and operator alert delivery beyond the in-app owner dashboard
-- propagate stable request/run identifiers through logs and operational views
-- document incident response expectations for:
-  - sandbox failures
-  - storage failures
-  - migration failures
-  - backup/restore failures
-- add a small operator runbook set for hosted and on-prem environments
-
-### Acceptance Criteria
-
-- production failures can be traced across the main request and job flows
-- critical failures surface outside the app UI
-- operators have written runbooks for the most important incident classes
+Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 22 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, tested recovery tooling, and production observability/runbooks. The remaining gaps are narrower and more packaging-oriented.
 
 ## Step 23: Durable Analysis Results and Chart Pipeline Scaling
 
@@ -99,6 +71,11 @@ Package Critjecture for real customer security review and repeatable deployment 
   - checksum-verified clean-environment restore tooling
   - repeatable `single_org` and `hosted` recovery drills
   - release-gated backup verification guidance and retention expectations
-- The main remaining blockers are now operational hardening, not core product surface area.
+- Step 22 is complete:
+  - structured application logs with stable request/job correlation
+  - webhook-delivered external operational alerts
+  - observed admin/governance/health routes with propagated request ids
+  - runbooks for sandbox, storage, migration, backup/restore, hosted, and on-prem incidents
+- The main remaining blockers are now durable intermediate storage and deployment/security packaging, not core product surface area.
 - A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
-- Hosted production still has a higher bar than on-prem because the web app now expects a dedicated sandbox supervisor service and broader incident/runbook work remains.
+- Hosted production still has a higher bar than on-prem because the web app expects a dedicated sandbox supervisor service and the remaining work is concentrated in durable chart intermediates plus security/deployment review packaging.

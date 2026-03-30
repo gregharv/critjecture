@@ -1,23 +1,38 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
-import { getOperationsSummary } from "@/lib/operations";
+import {
+  beginObservedRequest,
+  buildObservedErrorResponse,
+  finalizeObservedRequest,
+  getOperationsSummary,
+} from "@/lib/operations";
 
 export const runtime = "nodejs";
 
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ error: message }, { status });
-}
-
 export async function GET(request: Request) {
   const user = await getSessionUser();
+  const observed = beginObservedRequest({
+    method: "GET",
+    routeGroup: "admin",
+    routeKey: "admin.operations.summary",
+    user,
+  });
 
   if (!user) {
-    return jsonError("Authentication required.", 401);
+    return finalizeObservedRequest(observed, {
+      errorCode: "auth_required",
+      outcome: "error",
+      response: buildObservedErrorResponse("Authentication required.", 401),
+    });
   }
 
   if (user.role !== "owner") {
-    return jsonError("Only Owner can view operations.", 403);
+    return finalizeObservedRequest(observed, {
+      errorCode: "admin_forbidden",
+      outcome: "error",
+      response: buildObservedErrorResponse("Only Owner can view operations.", 403),
+    });
   }
 
   try {
@@ -27,11 +42,18 @@ export async function GET(request: Request) {
       windowParam: searchParams.get("window"),
     });
 
-    return NextResponse.json(summary);
+    return finalizeObservedRequest(observed, {
+      outcome: "ok",
+      response: NextResponse.json(summary),
+    });
   } catch (caughtError) {
     const message =
       caughtError instanceof Error ? caughtError.message : "Failed to load operations summary.";
 
-    return jsonError(message, 500);
+    return finalizeObservedRequest(observed, {
+      errorCode: "operations_summary_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(message, 500),
+    });
   }
 }

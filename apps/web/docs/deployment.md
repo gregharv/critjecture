@@ -54,6 +54,21 @@ The database snapshot is taken with SQLite's backup API. The storage archive cov
 - `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for Railway-style deploys.
 - release gating: run `pnpm backup:verify` before promoting a build that changes migrations or persistent storage layout.
 
+## Observability And Incident Response
+
+Critjecture writes structured JSON application logs to stdout/stderr and propagates `x-critjecture-request-id` on observed API responses. Hosted and on-prem operators should capture that request id together with any `sandboxRunId`, `governanceJobId`, or `knowledgeImportJobId` shown in the operations surface.
+
+Use `CRITJECTURE_ALERT_WEBHOOK_URL` to deliver critical operational alerts outside the app UI.
+
+Runbooks:
+
+- `apps/web/docs/runbooks/sandbox-failures.md`
+- `apps/web/docs/runbooks/storage-failures.md`
+- `apps/web/docs/runbooks/migration-failures.md`
+- `apps/web/docs/runbooks/backup-restore-failures.md`
+- `apps/web/docs/runbooks/hosted-operations.md`
+- `apps/web/docs/runbooks/onprem-operations.md`
+
 ## Retention
 
 Backup retention is operator-managed and separate from in-app retention controls.

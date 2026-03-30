@@ -9,6 +9,11 @@ import {
   queueKnowledgeDeletionJob,
   queueOrganizationExportJob,
 } from "@/lib/governance";
+import {
+  beginObservedRequest,
+  buildObservedErrorResponse,
+  finalizeObservedRequest,
+} from "@/lib/operations";
 
 export const runtime = "nodejs";
 
@@ -32,19 +37,42 @@ async function requireOwnerUser() {
 
 export async function GET() {
   const { error, user } = await requireOwnerUser();
+  const observed = beginObservedRequest({
+    method: "GET",
+    routeGroup: "governance",
+    routeKey: "governance.jobs.list",
+    user,
+  });
 
   if (error || !user) {
-    return error;
+    return finalizeObservedRequest(observed, {
+      errorCode: "governance_forbidden",
+      outcome: "error",
+      response: error ?? jsonError("Authentication required.", 401),
+    });
   }
 
-  return NextResponse.json(await listGovernanceJobs(user.organizationId));
+  return finalizeObservedRequest(observed, {
+    outcome: "ok",
+    response: NextResponse.json(await listGovernanceJobs(user.organizationId)),
+  });
 }
 
 export async function POST(request: Request) {
   const { error, user } = await requireOwnerUser();
+  const observed = beginObservedRequest({
+    method: "POST",
+    routeGroup: "governance",
+    routeKey: "governance.jobs.create",
+    user,
+  });
 
   if (error || !user) {
-    return error;
+    return finalizeObservedRequest(observed, {
+      errorCode: "governance_forbidden",
+      outcome: "error",
+      response: error ?? jsonError("Authentication required.", 401),
+    });
   }
 
   let body: {
@@ -56,14 +84,18 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as typeof body;
   } catch {
-    return jsonError("Request body must be valid JSON.", 400);
+    return finalizeObservedRequest(observed, {
+      errorCode: "invalid_json",
+      outcome: "error",
+      response: buildObservedErrorResponse("Request body must be valid JSON.", 400),
+    });
   }
 
   try {
     let jobId: string;
 
     if (body.jobType === "organization_export") {
-      jobId = await queueOrganizationExportJob(user);
+      jobId = await queueOrganizationExportJob(user, observed.requestId);
     } else if (
       typeof body.cutoffTimestamp === "number" &&
       typeof body.exportJobId === "string" &&
@@ -72,6 +104,7 @@ export async function POST(request: Request) {
       jobId = await queueHistoryPurgeJob({
         cutoffTimestamp: body.cutoffTimestamp,
         exportJobId: body.exportJobId,
+        triggerRequestId: observed.requestId,
         user,
       });
     } else if (
@@ -82,6 +115,7 @@ export async function POST(request: Request) {
       jobId = await queueImportMetadataPurgeJob({
         cutoffTimestamp: body.cutoffTimestamp,
         exportJobId: body.exportJobId,
+        triggerRequestId: observed.requestId,
         user,
       });
     } else if (
@@ -92,19 +126,36 @@ export async function POST(request: Request) {
       jobId = await queueKnowledgeDeletionJob({
         cutoffTimestamp: body.cutoffTimestamp,
         exportJobId: body.exportJobId,
+        triggerRequestId: observed.requestId,
         user,
       });
     } else {
-      return jsonError("Invalid governance job request.", 400);
+      return finalizeObservedRequest(observed, {
+        errorCode: "invalid_governance_request",
+        governanceJobId: null,
+        outcome: "error",
+        response: buildObservedErrorResponse("Invalid governance job request.", 400),
+      });
     }
 
-    return NextResponse.json(await getGovernanceJob(user.organizationId, jobId), {
-      status: 202,
+    return finalizeObservedRequest(observed, {
+      governanceJobId: jobId,
+      metadata: {
+        governanceJobId: jobId,
+      },
+      outcome: "ok",
+      response: NextResponse.json(await getGovernanceJob(user.organizationId, jobId), {
+        status: 202,
+      }),
     });
   } catch (caughtError) {
-    return jsonError(
-      caughtError instanceof Error ? caughtError.message : "Failed to queue governance job.",
-      400,
-    );
+    return finalizeObservedRequest(observed, {
+      errorCode: "governance_job_failed",
+      outcome: "error",
+      response: buildObservedErrorResponse(
+        caughtError instanceof Error ? caughtError.message : "Failed to queue governance job.",
+        400,
+      ),
+    });
   }
 }

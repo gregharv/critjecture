@@ -61,6 +61,7 @@ export type GovernanceJobRecord = {
   startedAt: number | null;
   status: GovernanceJobStatus;
   targetLabel: string;
+  triggerRequestId: string | null;
   triggerKind: GovernanceTriggerKind;
   updatedAt: number;
 };

@@ -172,8 +172,10 @@ export async function POST(request: Request) {
       },
       outcome: "ok",
       response,
+      runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
       sandboxRunId: result.sandboxRunId,
       toolName: "run_data_analysis",
+      turnId: parsedRequest.turnId ?? null,
       usageEvents: [
         {
           durationMs: result.limits.timeoutMs,
@@ -201,8 +203,10 @@ export async function POST(request: Request) {
           sandboxRunId: caughtError.sandboxRunId ?? undefined,
           status: "rejected",
         }),
+        runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
         sandboxRunId: caughtError.sandboxRunId ?? null,
         toolName: "run_data_analysis",
+        turnId: parsedRequest.turnId ?? null,
       });
     }
 
@@ -218,6 +222,8 @@ export async function POST(request: Request) {
           sandboxRunId: caughtError.sandboxRunId,
           status: "rejected",
         }),
+        runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
+        turnId: parsedRequest.turnId ?? null,
       });
     }
 
@@ -233,8 +239,10 @@ export async function POST(request: Request) {
           sandboxRunId: caughtError.sandboxRunId ?? undefined,
           status: "failed",
         }),
+        runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
         sandboxRunId: caughtError.sandboxRunId ?? null,
         toolName: "run_data_analysis",
+        turnId: parsedRequest.turnId ?? null,
         usageEvents:
           caughtError.sandboxRunId
             ? [
@@ -275,8 +283,10 @@ export async function POST(request: Request) {
             stdout: caughtError.stdout,
           },
         ),
+        runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
         sandboxRunId: caughtError.sandboxRunId,
         toolName: "run_data_analysis",
+        turnId: parsedRequest.turnId ?? null,
         usageEvents: [
           {
             eventType: "sandbox_run",
@@ -300,6 +310,8 @@ export async function POST(request: Request) {
       errorCode: "sandbox_route_failed",
       outcome: "error",
       response: buildObservedErrorResponse(message, 500),
+      runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
+      turnId: parsedRequest.turnId ?? null,
     });
   }
 }

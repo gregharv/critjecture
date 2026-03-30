@@ -21,7 +21,6 @@ import {
   documentChunks,
   knowledgeImportJobFiles,
   knowledgeImportJobs,
-  operationalAlerts,
   organizations,
   usageEvents,
   users,
@@ -43,6 +42,11 @@ import {
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   type KnowledgeAccessScope,
 } from "@/lib/knowledge-types";
+import {
+  logStructuredError,
+  logStructuredEvent,
+} from "@/lib/observability";
+import { resolveOperationalAlert, upsertOperationalAlert } from "@/lib/operations";
 import { listZipEntries, extractZipEntry } from "@/lib/zip-reader";
 
 const ALLOWED_UPLOAD_TYPES = {
@@ -315,6 +319,7 @@ function mapJobRow(row: {
   startedAt: number | null;
   status: KnowledgeImportJobStatus;
   totalFileCount: number;
+  triggerRequestId: string | null;
   updatedAt: number;
 }) {
   return {
@@ -334,6 +339,7 @@ function mapJobRow(row: {
     startedAt: row.startedAt,
     status: row.status,
     totalFileCount: row.totalFileCount,
+    triggerRequestId: row.triggerRequestId,
     updatedAt: row.updatedAt,
   } satisfies KnowledgeImportJobRecord;
 }
@@ -377,6 +383,7 @@ async function loadJobRecord(jobId: string) {
       startedAt: knowledgeImportJobs.startedAt,
       status: knowledgeImportJobs.status,
       totalFileCount: knowledgeImportJobs.totalFileCount,
+      triggerRequestId: knowledgeImportJobs.triggerRequestId,
       updatedAt: knowledgeImportJobs.updatedAt,
     })
     .from(knowledgeImportJobs)
@@ -487,75 +494,6 @@ async function updateImportFileStage(input: {
     .where(eq(knowledgeImportJobFiles.id, input.id));
 }
 
-async function upsertOperationalAlert(input: {
-  alertType: string;
-  dedupeKey: string;
-  message: string;
-  organizationId: string;
-  severity: "warning" | "critical";
-  title: string;
-}) {
-  const db = await getAppDatabase();
-  const now = Date.now();
-  const existing = await db.query.operationalAlerts.findFirst({
-    where: eq(operationalAlerts.dedupeKey, input.dedupeKey),
-  });
-
-  if (!existing) {
-    await db.insert(operationalAlerts).values({
-      alertType: input.alertType,
-      dedupeKey: input.dedupeKey,
-      firstSeenAt: now,
-      id: randomUUID(),
-      lastSeenAt: now,
-      message: input.message,
-      metadataJson: "{}",
-      occurrenceCount: 1,
-      organizationId: input.organizationId,
-      resolvedAt: null,
-      severity: input.severity,
-      status: "open",
-      title: input.title,
-      userId: null,
-    });
-    return;
-  }
-
-  await db
-    .update(operationalAlerts)
-    .set({
-      alertType: input.alertType,
-      lastSeenAt: now,
-      message: input.message,
-      occurrenceCount: existing.occurrenceCount + 1,
-      organizationId: input.organizationId,
-      resolvedAt: null,
-      severity: input.severity,
-      status: "open",
-      title: input.title,
-    })
-    .where(eq(operationalAlerts.id, existing.id));
-}
-
-async function resolveOperationalAlert(dedupeKey: string) {
-  const db = await getAppDatabase();
-  const existing = await db.query.operationalAlerts.findFirst({
-    where: eq(operationalAlerts.dedupeKey, dedupeKey),
-  });
-
-  if (!existing || existing.status === "resolved") {
-    return;
-  }
-
-  await db
-    .update(operationalAlerts)
-    .set({
-      resolvedAt: Date.now(),
-      status: "resolved",
-    })
-    .where(eq(operationalAlerts.id, existing.id));
-}
-
 async function updateImportAlerts(organizationId: string) {
   const db = await getAppDatabase();
   const staleCutoff = Date.now() - IMPORT_STALE_MS;
@@ -594,6 +532,11 @@ async function updateImportAlerts(organizationId: string) {
       alertType: "knowledge-import-failures",
       dedupeKey: `knowledge-import-failures:${organizationId}`,
       message: `${repeatedFailureCount} knowledge import files failed in the last 10 minutes.`,
+      metadata: {
+        knowledgeImportJobId: null,
+        organizationId,
+        routeGroup: "knowledge_import",
+      },
       organizationId,
       severity: "warning",
       title: "Knowledge Import Failures",
@@ -607,6 +550,11 @@ async function updateImportAlerts(organizationId: string) {
       alertType: "knowledge-import-stale",
       dedupeKey: `knowledge-import-stale:${organizationId}`,
       message: `${staleCount} knowledge import file${staleCount === 1 ? "" : "s"} appear stalled.`,
+      metadata: {
+        knowledgeImportJobId: null,
+        organizationId,
+        routeGroup: "knowledge_import",
+      },
       organizationId,
       severity: "warning",
       title: "Knowledge Import Stale Work",
@@ -821,6 +769,7 @@ async function insertImportJob(input: {
   fileRows: PreflightImportJobFile[];
   organizationId: string;
   sourceKind: KnowledgeImportSourceKind;
+  triggerRequestId?: string | null;
 }) {
   const now = Date.now();
   const db = await getAppDatabase();
@@ -842,6 +791,7 @@ async function insertImportJob(input: {
     startedAt: null,
     status: "queued",
     totalFileCount: 0,
+    triggerRequestId: input.triggerRequestId ?? null,
     updatedAt: now,
   });
 
@@ -873,6 +823,13 @@ async function insertImportJob(input: {
 
   const job = await updateJobAggregates(jobId);
   await updateImportAlerts(input.organizationId);
+  logStructuredEvent("knowledge-import.job_created", {
+    knowledgeImportJobId: job.id,
+    organizationId: input.organizationId,
+    requestId: input.triggerRequestId ?? null,
+    totalFileCount: job.totalFileCount,
+    userId: input.createdByUserId,
+  });
   return job;
 }
 
@@ -880,6 +837,7 @@ export async function createKnowledgeImportJobFromFiles(input: {
   files: DirectImportFileInput[];
   requestedScope: string;
   sourceKind: "directory" | "single_file";
+  triggerRequestId?: string | null;
   user: SessionUser;
 }) {
   if (input.files.length === 0) {
@@ -911,6 +869,7 @@ export async function createKnowledgeImportJobFromFiles(input: {
     fileRows,
     organizationId: input.user.organizationId,
     sourceKind: input.sourceKind,
+    triggerRequestId: input.triggerRequestId ?? null,
   });
   ensureKnowledgeImportWorkerRunning();
   return job;
@@ -919,6 +878,7 @@ export async function createKnowledgeImportJobFromFiles(input: {
 export async function createKnowledgeImportJobFromArchive(input: {
   archive: File;
   requestedScope: string;
+  triggerRequestId?: string | null;
   user: SessionUser;
 }) {
   const accessScope = normalizeRequestedScope(
@@ -948,6 +908,7 @@ export async function createKnowledgeImportJobFromArchive(input: {
     fileRows,
     organizationId: input.user.organizationId,
     sourceKind: "zip",
+    triggerRequestId: input.triggerRequestId ?? null,
   });
   ensureKnowledgeImportWorkerRunning();
   return job;
@@ -979,6 +940,7 @@ export async function listKnowledgeImportJobs(user: SessionUser) {
       startedAt: knowledgeImportJobs.startedAt,
       status: knowledgeImportJobs.status,
       totalFileCount: knowledgeImportJobs.totalFileCount,
+      triggerRequestId: knowledgeImportJobs.triggerRequestId,
       updatedAt: knowledgeImportJobs.updatedAt,
     })
     .from(knowledgeImportJobs)
@@ -1112,6 +1074,10 @@ async function reclaimStaleKnowledgeImportWork() {
 
     await updateJobAggregates(staleFile.jobId);
     await updateImportAlerts(staleFile.organizationId);
+    logStructuredEvent("knowledge-import.stale_reclaimed", {
+      knowledgeImportJobId: staleFile.jobId,
+      organizationId: staleFile.organizationId,
+    });
   }
 }
 
@@ -1159,6 +1125,11 @@ async function claimNextKnowledgeImportFile() {
     .where(eq(knowledgeImportJobFiles.id, candidate.fileId));
 
   await updateJobAggregates(candidate.jobId);
+  logStructuredEvent("knowledge-import.file_claimed", {
+    knowledgeImportJobId: candidate.jobId,
+    organizationId: candidate.organizationId,
+    userId: candidate.createdByUserId ?? null,
+  });
 
   return {
     accessScope: candidate.accessScope,
@@ -1451,6 +1422,11 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
     });
     await updateJobAggregates(file.jobId);
     await updateImportAlerts(file.organizationId);
+    logStructuredEvent("knowledge-import.file_processed", {
+      knowledgeImportJobId: file.jobId,
+      organizationId: file.organizationId,
+      userId: file.createdByUserId ?? null,
+    });
   } catch (caughtError) {
     const error =
       caughtError instanceof KnowledgeImportProcessingError
@@ -1480,6 +1456,12 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
     });
     await updateJobAggregates(file.jobId);
     await updateImportAlerts(file.organizationId);
+    logStructuredEvent("knowledge-import.file_failed", {
+      error: error.message,
+      knowledgeImportJobId: file.jobId,
+      organizationId: file.organizationId,
+      userId: file.createdByUserId ?? null,
+    });
   }
 }
 
@@ -1490,14 +1472,14 @@ async function runKnowledgeImportWorkerLoop() {
       try {
         await reclaimStaleKnowledgeImportWork();
       } catch (caughtError) {
-        console.error("knowledge-import.reclaim_failed", caughtError);
+        logStructuredError("knowledge-import.reclaim_failed", caughtError);
       }
       let claimed: ClaimedImportJobFile | null = null;
 
       try {
         claimed = await claimNextKnowledgeImportFile();
       } catch (caughtError) {
-        console.error("knowledge-import.claim_failed", caughtError);
+        logStructuredError("knowledge-import.claim_failed", caughtError);
       }
 
       if (!claimed) {
@@ -1507,7 +1489,11 @@ async function runKnowledgeImportWorkerLoop() {
       try {
         await processClaimedImportJobFile(claimed);
       } catch (caughtError) {
-        console.error("knowledge-import.process_failed", caughtError);
+        logStructuredError("knowledge-import.process_failed", caughtError, {
+          knowledgeImportJobId: claimed.jobId,
+          organizationId: claimed.organizationId,
+          userId: claimed.createdByUserId ?? null,
+        });
       }
     }
   } finally {
@@ -1526,7 +1512,7 @@ export function ensureKnowledgeImportWorkerRunning() {
 
   if (!importWorkerPromise) {
     importWorkerPromise = runKnowledgeImportWorkerLoop().catch((caughtError) => {
-      console.error("knowledge-import.worker_failed", caughtError);
+      logStructuredError("knowledge-import.worker_failed", caughtError);
     });
   }
 }
