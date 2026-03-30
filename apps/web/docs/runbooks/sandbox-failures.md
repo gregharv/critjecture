@@ -14,13 +14,13 @@
 
 ## Immediate Actions
 
-- if the backend is unavailable, restore the hosted supervisor service or local `bubblewrap` / `prlimit` dependencies first
+- if the backend is unavailable, restore the dedicated supervisor service first
 - if capacity is exhausted, pause new high-volume sandbox usage and let active runs drain
 - if stale or abandoned runs are accumulating, review supervisor worker logs before restarting the web process
 
 ## Recovery
 
-- `single_org`: confirm `bubblewrap` and `prlimit` exist on the host, then restart the web app
+- `single_org`: confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, Docker Engine, and the configured sandbox image, then retry a single request
 - `hosted`: confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL` and `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, then restore the supervisor service and retry a single request
 - verify `/api/health` returns sandbox availability and that queued runs clear
 

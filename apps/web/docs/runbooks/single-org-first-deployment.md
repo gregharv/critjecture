@@ -16,7 +16,10 @@ pnpm backup:verify -- --deployment-mode single_org
 - confirm `CRITJECTURE_DEPLOYMENT_MODE=single_org`
 - confirm `DATABASE_URL` and `CRITJECTURE_STORAGE_ROOT` point to persistent customer-managed storage
 - confirm `CRITJECTURE_ALERT_WEBHOOK_URL` is configured for the target environment
-- confirm `bubblewrap`, `prlimit`, and `pdftotext` are installed on the host
+- confirm `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=container_supervisor`
+- confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, and `CRITJECTURE_SANDBOX_CONTAINER_IMAGE`
+- confirm the sandbox supervisor service is running and Docker can start the configured image
+- confirm `pdftotext` is installed on the web-app host
 
 ## Required Operator Responsibilities
 

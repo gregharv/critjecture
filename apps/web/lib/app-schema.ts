@@ -290,10 +290,12 @@ export const sandboxRuns = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     runtimeToolCallId: text("runtime_tool_call_id"),
     toolName: text("tool_name").notNull(),
-    backend: text("backend", { enum: ["local_supervisor", "hosted_supervisor"] })
+    backend: text("backend", {
+      enum: ["container_supervisor", "local_supervisor", "hosted_supervisor"],
+    })
       .notNull()
-      .default("local_supervisor"),
-    runner: text("runner").notNull().default("bubblewrap"),
+      .default("container_supervisor"),
+    runner: text("runner").notNull().default("oci-container"),
     status: text("status", {
       enum: [
         "queued",
@@ -344,7 +346,7 @@ export const sandboxRuns = sqliteTable(
   (table) => [
     check(
       "sandbox_runs_backend_check",
-      sql`${table.backend} in ('local_supervisor', 'hosted_supervisor')`,
+      sql`${table.backend} in ('container_supervisor', 'local_supervisor', 'hosted_supervisor')`,
     ),
     check(
       "sandbox_runs_status_check",

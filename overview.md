@@ -22,7 +22,7 @@ This is the core distinction in the product: Critjecture is not just a chat work
 * **Frontend Interface:** A Next.js web application with chat, audit, operations, settings, and knowledge-management surfaces.
 * **Backend Engine:** Next.js Route Handlers powered by `@mariozechner/pi-ai` to manage the ReAct-style tool loop and model routing.
 * **Role-Based Access Control:** The app enforces organization and role scope on the server. The current product exposes fixed `owner`, `admin`, and `member` roles plus `active`, `restricted`, and `suspended` membership states.
-* **Execution Sandbox:** Python runs inside a hardened sandbox using `bubblewrap` and `prlimit` on top of the local `uv` environment. Environment variables are stripped, network access is disabled, outputs are validated, and temporary workspaces are cleaned up.
+* **Execution Sandbox:** Python runs through a dedicated sandbox supervisor. In production `single_org`, each run executes inside a fresh OCI container built from the repo-owned sandbox image; `local_supervisor` remains available only as a deliberate `bubblewrap` dev/test fallback. Environment variables are stripped, network access is disabled, outputs are validated, and temporary workspaces are cleaned up.
 * **Auditability:** Chat turns, tool calls, accessed files, generated assets, and assistant responses are persisted for privileged review.
 * **Recovery Tooling:** The SQLite-first runtime has scripted backup creation, clean-environment restore tooling, and repeatable recovery drills for both `single_org` and hosted deployments.
 * **Deployment Flexibility:** The system is designed for `single_org` customer-managed operation as well as centrally hosted multi-organization deployments.

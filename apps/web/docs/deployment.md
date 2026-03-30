@@ -16,7 +16,13 @@ Current characteristics:
 
 - seeds the default organization and pilot `Owner` / `Member` users from environment variables
 - keeps storage, logs, and operations under one customer-managed deployment footprint
-- runs sandbox jobs through the in-app local supervisor using host `bubblewrap` + `prlimit`
+- defaults sandbox jobs to a dedicated container supervisor service configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
+- expects `CRITJECTURE_SANDBOX_CONTAINER_IMAGE` to point at the repo-owned sandbox runner image
+- keeps `local_supervisor` (`bubblewrap` + `prlimit`) only as an explicit local-dev/test override
+
+Local development note:
+
+- if the dedicated supervisor service is not running, set `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=local_supervisor` intentionally instead of expecting an implicit fallback
 
 ## `hosted`
 
@@ -37,6 +43,7 @@ Hosted-mode review note:
 
 - persistent SQLite storage
 - persistent organization storage roots
+- Docker Engine plus the dedicated sandbox supervisor service for production `single_org`
 - `pdftotext` on the host for PDF ingestion
 - explicit backups for both the database and tenant storage
 - operator-managed secrets for auth, model access, and hosted sandbox connectivity

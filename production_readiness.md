@@ -12,7 +12,7 @@ Current call by deployment target:
 
 - `single_org`
   - close to production-ready for controlled customer-managed deployments
-  - reasonable for a serious on-prem or single-customer rollout if the operator accepts the current sandbox boundary and follows the documented security, backup, restore-drill, and release-proof requirements
+  - reasonable for a serious on-prem or single-customer rollout once the dedicated container supervisor is deployed and the operator follows the documented security, backup, restore-drill, and release-proof requirements
 - `hosted`
   - not yet a comfortable broad-production target
   - usable only for teams willing to accept the current shared-infrastructure boundary and the dedicated sandbox-supervisor dependency
@@ -41,17 +41,20 @@ These are the remaining items that still look like true production blockers rath
 
 ### 1. Stronger Sandbox Isolation
 
-The current sandbox is hardened for the MVP, but it is still a same-host execution boundary in `single_org` and a supervisor-mediated remote boundary in `hosted`.
+The sandbox boundary is now split more clearly by deployment:
 
-Still needed:
+- `single_org` uses a dedicated container-backed supervisor service
+- `hosted` still uses a supervisor-mediated remote boundary that needs more production hardening
 
-- a stronger isolation story for model-generated code, likely container- or VM-backed
-- a deployment stance that can defend against sandbox escape or host-impact concerns with more than namespace/process limits alone
+Still needed for the broader platform story:
+
+- finish the hosted-side hardening and operating model
+- prove the new boundary in real `single_org` environments through deployment and runbook evidence
 
 Why this is still a blocker:
 
 - code execution is the highest-risk feature in the product
-- the current boundary is good for a controlled pilot, but it is still the weakest part of the production story
+- model-generated code is still the highest-risk feature, so the new boundary has to be operated deliberately and fail closed
 
 ### 2. Operational Proof Now Exists For `single_org`
 
@@ -97,7 +100,7 @@ Before calling that mode production-ready, operators should execute:
 
 - an explicit release-proof record covering secret storage, TLS termination, storage encryption, backup encryption, alert ownership, and incident ownership
 - at least one successful restore drill against the exact environment shape that will be deployed
-- a conscious decision that the current sandbox boundary is acceptable for that customer and workload
+- the container supervisor is deployed, healthy, and using the intended sandbox image
 
 If those are satisfied, `single_org` is much closer to a production decision than it was earlier in the roadmap.
 

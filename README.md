@@ -155,7 +155,8 @@ The Python execution environment is isolated under `packages/python-sandbox`.
 Key properties:
 
 - interpreter is fixed to the project sandbox `.venv`
-- `single_org` runs through a local supervisor that launches Linux `bubblewrap`
+- `single_org` now defaults to a dedicated container-backed sandbox supervisor service
+- `local_supervisor` remains available only as an explicit dev/test override using Linux `bubblewrap`
 - `hosted` must use a dedicated remote sandbox supervisor service
 - execution uses a fresh workspace under `/tmp/workspace/<run-id>` with immediate cleanup after finalization
 - inherited environment variables are stripped before Python runs
@@ -177,6 +178,7 @@ apps/web/docs             Canonical customer-review, deployment, and runbook doc
 sample_company_data       Bundled sample company data copied into org storage on first boot
 deployment.md             Compatibility wrapper pointing at the canonical deployment guide
 packages/python-sandbox   Isolated Python runtime managed by uv
+packages/sandbox-supervisor Dedicated container-backed sandbox supervisor service
 steps_completed.md        Implementation history by milestone
 storage/                  Default local runtime storage root (gitignored)
 ```
@@ -186,7 +188,8 @@ storage/                  Default local runtime storage root (gitignored)
 - Node.js 20.9 or newer
 - `pnpm` 10.x
 - `uv` 0.11 or newer
-- `single_org`: Linux host with `bubblewrap` and `prlimit`
+- `single_org`: Docker Engine plus the dedicated sandbox supervisor service
+- `single_org` local-dev/test fallback: Linux host with `bubblewrap` and `prlimit`
 - `hosted`: `CRITJECTURE_SANDBOX_SUPERVISOR_URL` pointing at the dedicated sandbox supervisor
 - `pdftotext` available on the host for uploaded PDF ingestion
 - `OPENAI_API_KEY` for live chat
@@ -231,15 +234,19 @@ CRITJECTURE_INTERN_PASSWORD=change-me-intern
 CRITJECTURE_INTERN_NAME=Intern Demo
 CRITJECTURE_REQUEST_LOG_RETENTION_DAYS=14
 CRITJECTURE_USAGE_RETENTION_DAYS=30
+CRITJECTURE_SANDBOX_EXECUTION_BACKEND=container_supervisor
+CRITJECTURE_SANDBOX_CONTAINER_IMAGE=critjecture/sandbox-runner:latest
 CRITJECTURE_SANDBOX_SUPERVISOR_HEARTBEAT_MS=1000
 CRITJECTURE_SANDBOX_SUPERVISOR_LEASE_MS=25000
 CRITJECTURE_SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS=30000
-CRITJECTURE_SANDBOX_SUPERVISOR_URL=
-CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN=
+CRITJECTURE_SANDBOX_SUPERVISOR_URL=http://127.0.0.1:4100
+CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN=replace-me
 CRITJECTURE_SANDBOX_SUPERVISOR_TIMEOUT_MS=15000
 CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
 CRITJECTURE_ALERT_WEBHOOK_URL=
 ```
+
+For local development without the dedicated supervisor service, set `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=local_supervisor` and keep the existing `bubblewrap` / `prlimit` host dependencies installed.
 
 ## Workspace Credits
 
@@ -272,6 +279,7 @@ If `CRITJECTURE_DEPLOYMENT_MODE=hosted`, tenant orgs and users should be created
 The supported current deployment envelope is SQLite-backed in both current modes:
 
 - `single_org` for local development, customer-managed hardware, and controlled on-prem pilots
+- `single_org` production should point at the repo-owned supervisor in `packages/sandbox-supervisor`
 - `hosted` for Railway-style centrally operated deployments with a dedicated sandbox supervisor service
 
 The intended first production path is a controlled `single_org` pilot. `hosted` remains supported, but it carries a higher operational and security-review bar because tenant isolation is enforced in shared operator-managed infrastructure.

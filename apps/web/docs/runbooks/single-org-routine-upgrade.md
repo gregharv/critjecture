@@ -20,6 +20,7 @@ Use this checklist for every production-changing `single_org` upgrade after init
 - the operator approving the release
 - the most recent successful restore-drill JSON for the same environment
 - documented secret, TLS, encryption, alerting, and incident ownership
+- any sandbox supervisor or sandbox image change that must ship with the release
 
 ## Upgrade Gate
 

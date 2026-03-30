@@ -2,34 +2,12 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 27 finished the release-gated `single_org` operations pass. The remaining work is now split into two tracks:
+Step 28 finished the stronger `single_org` sandbox-boundary pass. The remaining work is now split into two tracks:
 
 1. get `single_org` to a defensible production-ready state for controlled customer-managed deployments
 2. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
 
 ## Phase 1: `single_org` Production Readiness
-
-## Step 28: Stronger `single_org` Sandbox Boundary
-
-### Goal
-
-Raise the Python execution boundary from a hardened same-host namespace sandbox toward something that is easier to defend as production-ready for customer-managed deployments.
-
-### What Should Be Implemented
-
-- choose and implement a stronger execution boundary for `single_org`:
-  - container-backed isolation
-  - lightweight VM-backed isolation
-  - or another clearly stronger boundary than the current host-local `bubblewrap` model
-- preserve the current tool contracts for analysis, charts, and documents
-- keep fail-closed behavior when the stronger sandbox backend is unavailable or unhealthy
-- update health, operations, deployment, and runbook surfaces for the new backend model
-
-### Acceptance Criteria
-
-- `single_org` no longer depends on the current same-host sandbox story alone
-- sandbox failures remain observable and fail closed
-- deployment docs and runbooks describe the new production boundary clearly
 
 ## Step 29: `single_org` Production Cutover Package
 
@@ -147,6 +125,12 @@ Finish the remaining platform, product, and documentation work required to descr
   - JSON and Markdown release records with required sign-off fields
   - documented `single_org` operator responsibilities for secrets, TLS, encryption, alerting, and incident ownership
   - first-deployment and routine-upgrade runbooks aligned to the shipped commands
+- Step 28 is complete:
+  - `single_org` now defaults to a dedicated container-backed sandbox supervisor service
+  - remote/container-backed sandbox execution preserves the existing synchronous tool contracts
+  - sandbox backend selection is explicit and fail closed instead of silently falling back to local `bubblewrap`
+  - a repo-owned sandbox supervisor package and runner image definition now exist for customer-managed deployment
+  - deployment, readiness, security, and runbook docs now describe the new production boundary clearly
 - The main near-term goal is not more surface area:
   - it is converting the current governed SMB system into a defensible `single_org` production deployment and then raising `hosted` to a higher bar
 - `hosted` should be treated as a separate bar:

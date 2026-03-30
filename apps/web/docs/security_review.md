@@ -122,7 +122,8 @@ Current controls and expectations:
 - approved files are staged into fresh per-run workspaces
 - inherited environment variables are stripped before Python execution
 - execution is bounded by timeout, memory, process, and output validation rules
-- `single_org` uses local `bubblewrap` + `prlimit`
+- `single_org` production uses a dedicated container supervisor service and per-run OCI containers
+- `local_supervisor` keeps `bubblewrap` + `prlimit` only as an explicit dev/test fallback
 - `hosted` requires a dedicated remote sandbox supervisor and should be reviewed as a separate operational dependency
 - operators should run the documented backup and restore verification flow after storage-layout or migration changes
 - `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover

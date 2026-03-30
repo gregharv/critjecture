@@ -43,18 +43,19 @@ import {
   logStructuredEvent,
 } from "@/lib/observability";
 import {
+  getSandboxContainerImage,
   getSandboxExecutionBackend,
+  getSandboxRunnerForBackend,
+  getSandboxSupervisorToken,
+  getSandboxSupervisorUrl,
   SANDBOX_ARTIFACT_MAX_BYTES,
   SANDBOX_ARTIFACT_TTL_MS,
   SANDBOX_BWRAP_PATH,
-  SANDBOX_HOSTED_RUNNER,
   SANDBOX_HOSTED_SUPERVISOR_TIMEOUT_MS,
-  SANDBOX_HOSTED_SUPERVISOR_TOKEN,
-  SANDBOX_HOSTED_SUPERVISOR_URL,
+  SANDBOX_LOCAL_RUNNER,
   SANDBOX_MAX_BUFFER,
   SANDBOX_OUTPUTS_DIR,
   SANDBOX_PRLIMIT_PATH,
-  SANDBOX_RUNNER,
   SANDBOX_SUPERVISOR_HEARTBEAT_MS,
   SANDBOX_TIMEOUT_MS,
   SANDBOX_WAIT_FOR_RESULT_TIMEOUT_MS,
@@ -106,6 +107,12 @@ type HostedGeneratedAssetPayload = {
   relativePath: string;
 };
 
+type RemoteSupervisorStagedInputFile = {
+  base64Data: string;
+  relativePath: string;
+  sourcePath: string;
+};
+
 type HostedSupervisorExecutionResponse = {
   exitCode?: number | null;
   failureReason?: string | null;
@@ -114,6 +121,7 @@ type HostedSupervisorExecutionResponse = {
   stagedFiles?: StagedSandboxFile[];
   status: "completed" | "failed" | "timed_out" | "rejected";
   stderr?: string;
+  detail?: string;
   stdout?: string;
 };
 
@@ -150,6 +158,11 @@ export type SandboxBackendHealth = {
   available: boolean;
   backend: SandboxExecutionBackend;
   detail: string;
+};
+
+type RemoteSupervisorHealthPayload = {
+  available?: boolean;
+  detail?: string;
 };
 
 export class SandboxAdmissionError extends Error {
@@ -402,13 +415,49 @@ async function validateLocalSandboxDependencies() {
   }
 }
 
-async function fetchHostedSupervisor(
+function getSandboxBackendLabel(backend: SandboxExecutionBackend) {
+  if (backend === "container_supervisor") {
+    return "Container sandbox supervisor";
+  }
+
+  if (backend === "hosted_supervisor") {
+    return "Hosted sandbox supervisor";
+  }
+
+  return "Local sandbox supervisor";
+}
+
+function buildMissingRemoteSupervisorConfigMessage(backend: SandboxExecutionBackend) {
+  const label = getSandboxBackendLabel(backend);
+  const missing: string[] = [];
+
+  if (backend === "container_supervisor" && !getSandboxContainerImage()) {
+    missing.push("CRITJECTURE_SANDBOX_CONTAINER_IMAGE");
+  }
+
+  if (!getSandboxSupervisorUrl()) {
+    missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_URL");
+  }
+
+  if (!getSandboxSupervisorToken()) {
+    missing.push("CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN");
+  }
+
+  return missing.length > 0
+    ? `${label} configuration is incomplete: ${missing.join(", ")}.`
+    : `${label} configuration is incomplete.`;
+}
+
+async function fetchRemoteSupervisor(
+  backend: SandboxExecutionBackend,
   endpoint: string,
   init: RequestInit,
   timeoutMs = SANDBOX_HOSTED_SUPERVISOR_TIMEOUT_MS,
 ) {
-  if (!SANDBOX_HOSTED_SUPERVISOR_URL) {
-    throw new Error("Hosted sandbox supervisor URL is not configured.");
+  const supervisorUrl = getSandboxSupervisorUrl();
+
+  if (!supervisorUrl || !getSandboxSupervisorToken()) {
+    throw new Error(buildMissingRemoteSupervisorConfigMessage(backend));
   }
 
   const controller = new AbortController();
@@ -417,13 +466,11 @@ async function fetchHostedSupervisor(
   }, timeoutMs);
 
   try {
-    return await fetch(new URL(endpoint, SANDBOX_HOSTED_SUPERVISOR_URL).toString(), {
+    return await fetch(new URL(endpoint, supervisorUrl).toString(), {
       ...init,
       headers: {
         ...(init.headers ?? {}),
-        ...(SANDBOX_HOSTED_SUPERVISOR_TOKEN
-          ? { Authorization: `Bearer ${SANDBOX_HOSTED_SUPERVISOR_TOKEN}` }
-          : {}),
+        Authorization: `Bearer ${getSandboxSupervisorToken()}`,
       },
       signal: controller.signal,
     });
@@ -454,24 +501,37 @@ export async function getSandboxBackendHealth(): Promise<SandboxBackendHealth> {
   }
 
   try {
-    const response = await fetchHostedSupervisor("/health", {
+    const response = await fetchRemoteSupervisor(backend, "/health", {
       method: "GET",
     });
+    const payload = (await response.json().catch(() => null)) as RemoteSupervisorHealthPayload | null;
 
     if (!response.ok) {
-      throw new Error(`Hosted sandbox supervisor health check failed with HTTP ${response.status}.`);
+      throw new Error(
+        payload?.detail ||
+          `${getSandboxBackendLabel(backend)} health check failed with HTTP ${response.status}.`,
+      );
     }
 
     return {
       available: true,
       backend,
-      detail: "Hosted sandbox supervisor is reachable.",
+      detail:
+        payload?.detail ||
+        (backend === "container_supervisor"
+          ? "Container sandbox supervisor is reachable."
+          : "Hosted sandbox supervisor is reachable."),
     };
   } catch (caughtError) {
     return {
       available: false,
       backend,
-      detail: asErrorMessage(caughtError, "Hosted sandbox supervisor is unreachable."),
+      detail: asErrorMessage(
+        caughtError,
+        backend === "container_supervisor"
+          ? "Container sandbox supervisor is unreachable."
+          : "Hosted sandbox supervisor is unreachable.",
+      ),
     };
   }
 }
@@ -661,6 +721,33 @@ async function stageInputFiles(
     stagedFiles.push({
       sourcePath: resolvedFile.relativePath,
       stagedPath,
+    });
+  }
+
+  return stagedFiles;
+}
+
+async function collectRemoteInputFiles(
+  inputFiles: string[],
+  organizationId: string,
+  organizationSlug: string,
+  role: UserRole,
+): Promise<RemoteSupervisorStagedInputFile[]> {
+  const uniquePaths = [...new Set(inputFiles.map((filePath) => filePath.trim()).filter(Boolean))];
+  const stagedFiles: RemoteSupervisorStagedInputFile[] = [];
+
+  for (const requestedPath of uniquePaths) {
+    const resolvedFile = await resolveAuthorizedCompanyDataFile(
+      requestedPath,
+      organizationSlug,
+      role,
+      organizationId,
+    );
+
+    stagedFiles.push({
+      base64Data: (await readFile(resolvedFile.absolutePath)).toString("base64"),
+      relativePath: path.posix.join("inputs", resolvedFile.relativePath),
+      sourcePath: resolvedFile.relativePath,
     });
   }
 
@@ -1162,7 +1249,7 @@ async function runLocalSandboxExecution(input: {
 
   await markSandboxRunRunning({
     runId: input.runId,
-    runner: SANDBOX_RUNNER,
+    runner: SANDBOX_LOCAL_RUNNER,
     workspacePath: workspaceDir,
   });
   await mkdir(workspaceDir, { recursive: true });
@@ -1198,7 +1285,7 @@ async function runLocalSandboxExecution(input: {
           failureReason: "validation-error",
           generatedAssets: [],
           runId: input.runId,
-          runner: SANDBOX_RUNNER,
+          runner: SANDBOX_LOCAL_RUNNER,
           status: "failed",
           stderrText: message,
           stdoutText: null,
@@ -1227,7 +1314,7 @@ async function runLocalSandboxExecution(input: {
           exitCode: 0,
           generatedAssets,
           runId: input.runId,
-          runner: SANDBOX_RUNNER,
+          runner: SANDBOX_LOCAL_RUNNER,
           status: "completed",
           stderrText: stderr,
           stdoutText: stdout,
@@ -1271,7 +1358,7 @@ async function runLocalSandboxExecution(input: {
           failureReason,
           generatedAssets: [],
           runId: input.runId,
-          runner: SANDBOX_RUNNER,
+          runner: SANDBOX_LOCAL_RUNNER,
           status,
           stderrText: stderr || message,
           stdoutText: stdout,
@@ -1304,7 +1391,7 @@ async function processClaimedLocalSandboxRun(runId: string) {
       failureReason: "sandbox-run-metadata-missing",
       generatedAssets: [],
       runId,
-      runner: SANDBOX_RUNNER,
+      runner: SANDBOX_LOCAL_RUNNER,
       status: "failed",
       stderrText: "Sandbox run metadata could not be loaded.",
       stdoutText: null,
@@ -1395,7 +1482,8 @@ function ensureLocalSandboxSupervisorRunning() {
   }
 }
 
-async function executeHostedSandboxRun(options: {
+async function executeRemoteSandboxRun(options: {
+  backend: Exclude<SandboxExecutionBackend, "local_supervisor">;
   code: string;
   inputFiles: string[];
   inlineWorkspaceFiles: SandboxedInlineWorkspaceFile[];
@@ -1405,21 +1493,24 @@ async function executeHostedSandboxRun(options: {
   role: UserRole;
   runId: string;
   runtimeToolCallId?: string;
+  stagedInputFiles: RemoteSupervisorStagedInputFile[];
   toolName: SandboxToolName;
   turnId?: string;
   userId: string;
 }) {
   let response: Response;
+  const expectedRunner = getSandboxRunnerForBackend(options.backend);
 
   await markSandboxRunRunning({
     runId: options.runId,
-    runner: SANDBOX_HOSTED_RUNNER,
+    runner: expectedRunner,
     workspacePath: null,
   });
 
   try {
-    response = await fetchHostedSupervisor("/runs/execute", {
+    response = await fetchRemoteSupervisor(options.backend, "/runs/execute", {
       body: JSON.stringify({
+        backend: options.backend,
         code: options.code,
         inputFiles: options.inputFiles,
         inlineWorkspaceFiles: options.inlineWorkspaceFiles,
@@ -1429,6 +1520,7 @@ async function executeHostedSandboxRun(options: {
         role: options.role,
         runId: options.runId,
         runtimeToolCallId: options.runtimeToolCallId ?? null,
+        stagedInputFiles: options.stagedInputFiles,
         toolName: options.toolName,
         turnId: options.turnId ?? null,
         userId: options.userId,
@@ -1439,7 +1531,12 @@ async function executeHostedSandboxRun(options: {
       method: "POST",
     });
   } catch (caughtError) {
-    const message = asErrorMessage(caughtError, "Hosted sandbox supervisor is unavailable.");
+    const message = asErrorMessage(
+      caughtError,
+      options.backend === "container_supervisor"
+        ? "Container sandbox supervisor is unavailable."
+        : "Hosted sandbox supervisor is unavailable.",
+    );
     await rejectSandboxRun({
       failureReason: "backend-unavailable",
       runId: options.runId,
@@ -1449,7 +1546,7 @@ async function executeHostedSandboxRun(options: {
   }
 
   if (!response.ok) {
-    const message = `Hosted sandbox supervisor request failed with HTTP ${response.status}.`;
+    const message = `${getSandboxBackendLabel(options.backend)} request failed with HTTP ${response.status}.`;
     await rejectSandboxRun({
       failureReason: "backend-unavailable",
       runId: options.runId,
@@ -1482,7 +1579,7 @@ async function executeHostedSandboxRun(options: {
         exitCode: payload.exitCode ?? 0,
         generatedAssets,
         runId: options.runId,
-        runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+        runner: payload.runner ?? expectedRunner,
         status: "completed",
         stderrText: payload.stderr ?? "",
         stdoutText: payload.stdout ?? "",
@@ -1495,7 +1592,7 @@ async function executeHostedSandboxRun(options: {
         failureReason: "output-validation-error",
         generatedAssets: [],
         runId: options.runId,
-        runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+        runner: payload.runner ?? expectedRunner,
         status: "failed",
         stderrText: message,
         stdoutText: payload.stdout ?? "",
@@ -1511,7 +1608,7 @@ async function executeHostedSandboxRun(options: {
       (payload.status === "timed_out" ? "timeout" : "execution-error"),
     generatedAssets: [],
     runId: options.runId,
-    runner: payload.runner ?? SANDBOX_HOSTED_RUNNER,
+    runner: payload.runner ?? expectedRunner,
     status: payload.status,
     stderrText: payload.stderr ?? "",
     stdoutText: payload.stdout ?? "",
@@ -1674,7 +1771,15 @@ export async function executeSandboxedCommand(options: {
 
     ensureLocalSandboxSupervisorRunning();
   } else {
-    await executeHostedSandboxRun({
+    const stagedInputFiles = await collectRemoteInputFiles(
+      options.inputFiles ?? [],
+      options.organizationId,
+      options.organizationSlug,
+      options.role,
+    );
+
+    await executeRemoteSandboxRun({
+      backend: queuedRun.backend,
       code: normalizedCode,
       inputFiles: options.inputFiles ?? [],
       inlineWorkspaceFiles,
@@ -1684,6 +1789,7 @@ export async function executeSandboxedCommand(options: {
       role: options.role,
       runId: queuedRun.runId,
       runtimeToolCallId: options.runtimeToolCallId,
+      stagedInputFiles,
       toolName: options.toolName,
       turnId: options.turnId,
       userId: options.userId,

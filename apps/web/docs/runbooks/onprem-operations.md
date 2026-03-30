@@ -2,7 +2,9 @@
 
 ## Core Checks
 
-- local `bubblewrap` and `prlimit` availability
+- sandbox supervisor health and reachability
+- Docker Engine availability on the sandbox supervisor host
+- configured sandbox image availability
 - writable `CRITJECTURE_STORAGE_ROOT`
 - `/api/health`
 - recent verified backup artifacts
@@ -19,7 +21,7 @@
 ## First Response
 
 - keep the system in single-user or maintenance mode if storage or migrations are failing
-- fix host dependency issues before retrying sandbox work
+- fix sandbox supervisor, Docker, or image issues before retrying sandbox work
 - do not delete tenant files to free space until a recent verified backup exists
 
 ## Recovery Standard

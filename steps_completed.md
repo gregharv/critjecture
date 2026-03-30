@@ -2004,3 +2004,101 @@ Step 27 was implemented as an operator-side `single_org` release gate that turns
 
 - `pnpm --filter web test -- tests/release-proof.test.ts tests/backup-recovery.test.ts`
 - `pnpm --filter web lint`
+
+## Step 28: Stronger `single_org` Sandbox Boundary
+
+### What Was Implemented
+
+Step 28 was implemented as a stronger production `single_org` execution boundary that moves the default sandbox path off the in-app same-host `bubblewrap` runner and onto a dedicated container-backed supervisor service.
+
+- Reworked sandbox backend selection and runner policy:
+  - `apps/web/lib/sandbox-policy.ts`
+  - `apps/web/lib/app-schema.ts`
+  - `apps/web/drizzle/0012_step28_single_org_container_supervisor.sql`
+  - adds:
+    - `container_supervisor` as the default `single_org` backend
+    - `oci-container` as the recorded production runner
+    - explicit `CRITJECTURE_SANDBOX_EXECUTION_BACKEND`
+    - explicit `CRITJECTURE_SANDBOX_CONTAINER_IMAGE`
+    - fail-closed backend selection rather than implicit fallback to local `bubblewrap`
+- Reworked web-app sandbox execution for remote/container-backed runs:
+  - `apps/web/lib/python-sandbox.ts`
+  - `apps/web/lib/sandbox-runs.ts`
+  - now:
+    - preserves the current synchronous tool contracts for analysis, charts, and documents
+    - stages authorized input files into the remote supervisor request instead of assuming supervisor-side filesystem access
+    - keeps `sandboxRunId`, rejection, timeout, validation, and generated-asset handling aligned with the existing supervisor-owned lifecycle
+    - reports container-supervisor health and configuration failures through the existing fail-closed path
+- Added the repo-owned sandbox supervisor service:
+  - `packages/sandbox-supervisor/package.json`
+  - `packages/sandbox-supervisor/server.mjs`
+  - `packages/sandbox-supervisor/runner.Dockerfile`
+  - `packages/sandbox-supervisor/README.md`
+  - implements:
+    - authenticated `GET /health`
+    - authenticated `POST /runs/execute`
+    - Docker-backed per-run OCI container execution
+    - network-disabled, read-only-root, bounded resource execution
+    - per-run workspace staging and cleanup
+    - stdout/stderr plus generated-output return to the web app
+- Added targeted regression coverage:
+  - `apps/web/tests/sandbox-policy.test.ts`
+  - `apps/web/tests/helpers/test-environment.ts`
+  - covers:
+    - default backend selection for `single_org` and `hosted`
+    - explicit `local_supervisor` override
+    - runner mapping
+    - fail-closed container-supervisor health behavior
+- Updated deployment and operator docs:
+  - `README.md`
+  - `overview.md`
+  - `production_readiness.md`
+  - `sandbox.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/runbooks/onprem-operations.md`
+  - `apps/web/docs/runbooks/sandbox-failures.md`
+  - `apps/web/docs/runbooks/single-org-first-deployment.md`
+  - `apps/web/docs/runbooks/single-org-routine-upgrade.md`
+  - now documents:
+    - the dedicated container-backed `single_org` production boundary
+    - required supervisor, Docker, image, and env configuration
+    - the explicit dev/test-only `local_supervisor` fallback
+
+### Current Step 28 Behavior
+
+- `single_org` defaults to `container_supervisor`
+  - the web app now expects `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
+  - the web app now expects `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`
+  - the web app now expects `CRITJECTURE_SANDBOX_CONTAINER_IMAGE`
+- sandbox-backed routes still preserve the existing product contract:
+  - `run_data_analysis` returns stdout-backed summaries
+  - `generate_visual_graph` still requires exactly one PNG output
+  - `generate_document` still requires exactly one PDF output
+- remote/container-backed execution remains fail closed:
+  - missing config, unreachable supervisor, unhealthy supervisor, Docker failures, and image failures surface as sandbox backend unavailability
+  - no implicit production fallback to in-app `bubblewrap`
+- `local_supervisor` remains available only through explicit override for local development or test environments that do not run the dedicated supervisor service
+
+### Important Implementation Details
+
+- Step 28 intentionally strengthens the `single_org` production boundary without trying to finish hosted hardening:
+  - hosted still uses `hosted_supervisor`
+  - the hosted supervisor remains a separate production-hardening milestone
+- The web app still owns the durable run lifecycle:
+  - queueing
+  - correlation with tool calls
+  - final result persistence
+  - generated-asset validation and storage
+  - stale-run reconciliation
+- The new supervisor service is intentionally narrow:
+  - it does not own SQLite persistence
+  - it does not introduce async job UX
+  - it does not widen the user-facing tool contract
+
+### Verification
+
+- `pnpm --filter web test`
+- `pnpm --filter web lint`
+- `pnpm --filter web build`
+- `node --check packages/sandbox-supervisor/server.mjs`
