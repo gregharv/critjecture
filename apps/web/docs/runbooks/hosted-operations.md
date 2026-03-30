@@ -31,8 +31,11 @@
 
 - name one owner for the hosted app deployment
 - name one owner for the hosted sandbox supervisor deployment
+- name one owner for secret storage
+- name one owner for backup and restore actions
 - name one owner for supervisor credential rotation
 - name one owner for alert delivery and incident paging
+- record the customer administrator contact for incident communication
 
 ## Recovery Standard
 
@@ -42,3 +45,4 @@
 - no growing stale-run or import-stale alerts
 - hosted deployment and sandbox supervisor both report the same bound organization slug
 - latest hosted restore drill record is present for the environment and not older than one quarter
+- latest hosted release-proof record is present for the last production-changing launch or upgrade

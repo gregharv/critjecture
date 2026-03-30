@@ -5,7 +5,7 @@ This is the canonical deployment and cutover guide for Critjecture's currently s
 The current repo claim is intentionally split:
 
 - `single_org` is production-ready for controlled customer-managed deployments inside the envelope documented here
-- `hosted` is supported for careful review and limited operation, but it is not yet broadly production-ready
+- `hosted` is production-ready within the dedicated-customer-cell envelope documented here
 
 For a concise security and trust-boundary summary, pair this document with `security_review.md`.
 
@@ -86,6 +86,7 @@ Current characteristics:
 - hosted supervisor traffic must use signed requests with `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID` and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 - the sandbox path depends on a dedicated remote supervisor service and should be treated as a required production dependency
 - customer isolation is enforced by dedicated app/SQLite/storage/supervisor placement plus authenticated organization scoping inside that dedicated cell
+- customer onboarding remains operator-managed; after first owner handoff, additional users are created through the existing admin settings surface
 
 ## Shared Runtime Requirements
 
@@ -136,6 +137,20 @@ Hosted recovery objectives for the current supported envelope:
 
 `pnpm restore:drill:hosted` is the hosted environment evidence command. It creates a real backup from the configured hosted runtime, restores into a clean temporary target, validates migrations, and emits JSON plus Markdown records.
 
+## `hosted` Release Gate
+
+Use the operator-side hosted release-proof flow for hosted first deployment and later production-changing upgrades.
+
+- release proof:
+  - `pnpm release:proof:hosted -- --environment <label> --operator "<name>" --checklist-kind <first_customer_deployment|routine_upgrade> --change-scope <app_only|migration|storage_layout|migration_and_storage> --restore-drill <restore-drill-json-path> ...`
+
+Hosted release-gate rules:
+
+- every hosted launch and production-changing hosted upgrade should retain a hosted release-proof JSON and Markdown record
+- `app_only` hosted changes still require a hosted release-proof record that references the latest successful hosted restore drill for the same environment
+- `migration`, `storage_layout`, and `migration_and_storage` changes require a fresh backup plus clean temporary restore verification during `pnpm release:proof:hosted`
+- hosted release proof must record named ownership for app deployment, supervisor deployment, secret storage, credential rotation, backup / restore, alert delivery, incident response, and the customer administrator handoff path
+
 ## `single_org` Release Gate
 
 Use the operator-side release-proof flow for production-changing `single_org` builds.
@@ -173,19 +188,22 @@ Runbooks:
 - `apps/web/docs/runbooks/storage-failures.md`
 - `apps/web/docs/runbooks/migration-failures.md`
 - `apps/web/docs/runbooks/backup-restore-failures.md`
+- `apps/web/docs/runbooks/hosted-first-deployment.md`
 - `apps/web/docs/runbooks/hosted-operations.md`
 - `apps/web/docs/runbooks/hosted-restore-drill.md`
+- `apps/web/docs/runbooks/hosted-routine-upgrade.md`
 - `apps/web/docs/runbooks/onprem-operations.md`
 - `apps/web/docs/runbooks/single-org-restore-drill.md`
 - `apps/web/docs/runbooks/single-org-first-deployment.md`
 - `apps/web/docs/runbooks/single-org-routine-upgrade.md`
 
-## Hosted-Only Deferred Work
+## Hosted-Only Future Work
 
-The remaining blockers to a broader production claim are `hosted` concerns, not `single_org` blockers:
+These items are outside the current hosted production-ready claim rather than blockers for it:
 
 - further hosted density or cell-sharing work beyond the current dedicated-customer-cell boundary
-- broader hosted launch packaging, onboarding, and final go/no-go criteria
+- public self-service onboarding or tenant self-service organization creation
+- async heavy-job infrastructure beyond the current synchronous sandbox envelope
 
 ## Retention
 

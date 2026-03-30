@@ -13,6 +13,8 @@ This document summarizes the customer-visible governance and retention controls 
 
 These controls are organization-scoped and available through the privileged settings surface.
 
+For hosted deployments, customer onboarding still remains operator-managed: the operator provisions the bound organization and first owner, then the customer administrator manages additional users through the existing settings surface.
+
 ## Retention And Deletion Model
 
 Current deletion behavior:

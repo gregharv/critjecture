@@ -2353,3 +2353,91 @@ Step 31 was implemented as a conservative hosted persistence and recovery pass: 
 - `pnpm --filter web exec vitest run`
 - `node --check apps/web/scripts/restore-drill-hosted.mjs`
 - `node --check apps/web/scripts/lib/release-proof.mjs`
+
+## Step 32: Hosted Production Launch Package
+
+### What Was Implemented
+
+Step 32 was implemented as the final hosted launch-packaging pass: it added a formal hosted release-proof artifact, canonical hosted cutover and upgrade runbooks, a hosted launch package in the customer-review catalog, and aligned the repo docs on the final hosted production-ready claim within the documented dedicated-customer-cell envelope.
+
+- Added hosted release-proof tooling and artifacts:
+  - `apps/web/scripts/lib/release-proof.mjs`
+  - `apps/web/scripts/release-proof-hosted.mjs`
+  - `apps/web/package.json`
+  - `package.json`
+  - now:
+    - adds `pnpm release:proof:hosted`
+    - requires a hosted restore-drill record reference
+    - records named ownership for app deployment, supervisor deployment, secret storage, credential rotation, backup / restore, alerting, incident contact, and customer administrator handoff
+    - records TLS, storage-encryption, and backup-encryption expectations for hosted environments
+    - emits JSON and Markdown hosted release-proof records for first deployment and routine upgrades
+- Added canonical hosted launch and upgrade runbooks:
+  - `apps/web/docs/runbooks/hosted-first-deployment.md`
+  - `apps/web/docs/runbooks/hosted-routine-upgrade.md`
+  - `apps/web/docs/runbooks/hosted-operations.md`
+  - now:
+    - defines one required hosted first-cutover checklist
+    - defines one required hosted routine-upgrade checklist
+    - makes go/no-go criteria explicit for hosted launches
+    - documents required hosted evidence, smoke checks, ownership, and escalation expectations
+- Added the hosted launch package to the customer-review surface:
+  - `apps/web/docs/hosted_launch.md`
+  - `apps/web/lib/customer-review-docs.ts`
+  - `apps/web/components/admin-settings-page-client.tsx`
+  - now:
+    - exposes a hosted launch package alongside the existing deployment, compliance, hosted provisioning, and security docs
+    - summarizes the production-ready hosted envelope, operator-managed onboarding model, launch evidence, and residual exclusions
+- Reconciled the final hosted production-ready claim across docs:
+  - `README.md`
+  - `production_readiness.md`
+  - `release_checklist.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/compliance_controls.md`
+  - `apps/web/docs/hosted_provisioning.md`
+  - now consistently states:
+    - `hosted` is production-ready within the documented dedicated-customer-cell envelope
+    - onboarding remains operator-managed
+    - shared-cell density, public self-service signup, async heavy-job infrastructure, and broader attestations remain outside the current production claim
+- Added regression coverage:
+  - `apps/web/tests/release-proof.test.ts`
+  - `apps/web/tests/customer-review-docs.test.ts`
+  - `apps/web/tests/customer-review-route.test.ts`
+  - `apps/web/tests/hosted-docs.test.ts`
+  - covers:
+    - hosted release-proof validation failures
+    - hosted release-proof artifact generation
+    - hosted launch doc catalog exposure
+    - final hosted production-ready wording across the hosted docs package
+
+### Current Step 32 Behavior
+
+- `hosted`
+  - now has a formal launch gate based on hosted restore drills plus hosted release-proof records
+  - uses one canonical first-deployment runbook and one canonical routine-upgrade runbook
+  - remains operator-managed for org provisioning and first-owner handoff
+  - is described as production-ready only inside the documented dedicated-customer-cell envelope
+- customer-review docs now include:
+  - security review pack
+  - deployment modes
+  - compliance controls
+  - hosted provisioning
+  - hosted launch package
+
+### Important Implementation Details
+
+- Step 32 did not add self-service SaaS onboarding:
+  - hosted onboarding remains operator-managed, with additional user creation happening through the existing admin settings flows after handoff
+- Step 32 did not expand the hosted runtime envelope:
+  - no shared-cell density work
+  - no new persistence backend
+  - no async heavy-job infrastructure
+- `single_org` remains intact:
+  - its existing release-proof and cutover flows are unchanged aside from shared release-proof infrastructure reuse
+
+### Verification
+
+- `pnpm --filter web exec vitest run`
+- `pnpm --filter web exec tsc --noEmit`
+- `node --check apps/web/scripts/release-proof-hosted.mjs`
+- `node --check apps/web/scripts/lib/release-proof.mjs`

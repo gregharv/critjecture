@@ -66,7 +66,7 @@ Sessions are cookie-based. Backend routes derive permissions and tenant scope fr
 Deployment modes:
 
 - `single_org`: local development and on-prem, with env-seeded bootstrap org and bootstrap users
-- `hosted`: Railway-style centrally managed dedicated customer cell, where one bound organization is provisioned by the operator script
+- `hosted`: Railway-style centrally managed dedicated customer cell, production-ready within the documented envelope, where one bound organization is provisioned by the operator script
 
 ### Audit Logs
 
@@ -145,6 +145,11 @@ Current hosted support keeps that same engine inside a narrower dedicated-cell e
 - no active-active multi-writer replicas sharing one SQLite file
 - current synchronous request model only
 - target hosted recovery objectives of `24`-hour RPO and `2`-hour RTO
+
+Hosted production changes also retain two operator-side evidence artifacts:
+
+- `pnpm restore:drill:hosted`
+- `pnpm release:proof:hosted`
 
 The runtime storage model is:
 
@@ -304,7 +309,12 @@ The supported current deployment envelope is SQLite-backed in both current modes
 - explicit backups plus restore-drill and release-proof records
 - current sandbox envelope of `1` active run per user, `4` globally, `10s` wall time, `8s` CPU, `512 MiB` memory, `64` processes, `1 MiB` stdio capture, `10 MiB` artifact cap, and `24h` artifact retention
 
-`hosted` remains supported, but it is not yet broadly production-ready because hosted supervisor operations and hosted persistence/scale work still carry a higher bar even after the dedicated-customer-cell boundary.
+`hosted` is now production-ready within the documented dedicated-customer-cell envelope:
+
+- one organization/customer per hosted deployment cell
+- one writable app instance per hosted cell
+- signed hosted supervisor auth plus matching bound-organization health
+- operator-managed provisioning, restore-drill evidence, and release-proof evidence
 
 Start with:
 
@@ -317,13 +327,15 @@ Recovery tooling is available from the repo root:
 - `pnpm backup:create -- --output-dir ./backups`
 - `pnpm backup:restore -- --backup ./backups/<timestamped-backup-dir> --database-path ./restore/storage/critjecture.sqlite --storage-root ./restore/storage`
 - `pnpm backup:verify -- --deployment-mode both`
+- `pnpm restore:drill:hosted -- --environment <label> --operator "<name>"`
+- `pnpm release:proof:hosted -- --environment <label> --operator "<name>" --checklist-kind <first_customer_deployment|routine_upgrade> --change-scope <app_only|migration|storage_layout|migration_and_storage> --restore-drill <path> ...`
 - `pnpm restore:drill:single-org -- --environment <label> --operator "<name>"`
 - `pnpm release:proof:single-org -- --environment <label> --operator "<name>" --checklist-kind <first_customer_deployment|routine_upgrade> --change-scope <app_only|migration|storage_layout|migration_and_storage> --restore-drill <restore-drill-json-path> ...`
 
 Read [security_review.md](/home/hard2vary/projects/critjecture/apps/web/docs/security_review.md) for the current security, privacy, and deployment boundary summary.
 Read [deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/deployment.md) for exact storage, backup, restore, and hosted/on-prem guidance.
 Read [compliance_controls.md](/home/hard2vary/projects/critjecture/apps/web/docs/compliance_controls.md) for the shipped governance and retention controls.
-Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/apps/web/docs/hosted_provisioning.md) for the hosted multi-org provisioning flow.
+Read [hosted_provisioning.md](/home/hard2vary/projects/critjecture/apps/web/docs/hosted_provisioning.md) for the hosted provisioning and operator handoff flow.
 Read [single-org-first-deployment.md](/home/hard2vary/projects/critjecture/apps/web/docs/runbooks/single-org-first-deployment.md) for the canonical `single_org` cutover checklist.
 Read [single-org-routine-upgrade.md](/home/hard2vary/projects/critjecture/apps/web/docs/runbooks/single-org-routine-upgrade.md) for the `single_org` routine-upgrade gate.
 

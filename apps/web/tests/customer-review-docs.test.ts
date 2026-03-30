@@ -12,6 +12,7 @@ describe("customer review docs catalog", () => {
       "deployment",
       "compliance",
       "hosted-provisioning",
+      "hosted-launch",
     ]);
   });
 
@@ -28,6 +29,7 @@ describe("customer review docs catalog", () => {
   it("looks up known documents and rejects unknown slugs", () => {
     expect(getCustomerReviewDoc("deployment")?.fileName).toBe("deployment.md");
     expect(getCustomerReviewDoc("security-review")?.fileName).toBe("security_review.md");
+    expect(getCustomerReviewDoc("hosted-launch")?.fileName).toBe("hosted_launch.md");
     expect(getCustomerReviewDoc("not-a-doc")).toBeNull();
   });
 });

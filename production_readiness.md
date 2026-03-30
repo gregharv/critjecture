@@ -2,11 +2,11 @@
 
 This document states what Critjecture is ready for now, what remains out of scope for the current production claim, and how that answer differs between `single_org` and `hosted`.
 
-It reflects the repo after Step 31.
+It reflects the repo after Step 32.
 
 ## Readiness Call
 
-Critjecture is not yet broadly production-ready across all deployment modes.
+Critjecture is production-ready across its supported deployment modes, within the documented envelopes for each mode.
 
 Current call by deployment target:
 
@@ -14,10 +14,10 @@ Current call by deployment target:
   - production-ready for controlled customer-managed deployments inside the documented support envelope
   - intended for customer-managed hardware where the operator follows the documented cutover, backup, restore-drill, and release-proof flows
 - `hosted`
-  - not yet broadly production-ready
-  - still suitable only for carefully reviewed centrally operated dedicated-customer cells
+  - production-ready within the documented dedicated-customer-cell envelope
+  - intended for centrally operated dedicated-customer cells where the operator follows the hosted restore-drill, release-proof, and cutover runbooks
 
-The important distinction is simple: the repo now has a narrower production package for `single_org`, while `hosted` has a clearer but still limited dedicated-cell operating envelope.
+The important distinction is simple: both modes are now production-ready inside their documented envelopes, but those envelopes remain intentionally narrow and operator-driven.
 
 ## What The `single_org` Claim Covers
 
@@ -68,17 +68,17 @@ These items are not blockers for the current `single_org` claim, but they are st
 - broader enterprise attestations beyond the controls documented here
 - richer end-user lifecycle features such as conversation archive/search/delete
 
-## Hosted-Only Remaining Gaps
+## Remaining Exclusions
 
-The remaining production blockers are now primarily `hosted` concerns:
+These items remain outside the current production claim for both modes:
 
-- stronger hosted operating evidence and recovery discipline around the dedicated-customer-cell boundary
-- broader hosted launch packaging, onboarding expectations, and final go/no-go criteria
-
-Those are the next roadmap items because they are required before calling `hosted` broadly production-ready.
+- self-service public SaaS onboarding
+- shared-cell hosted density work
+- async heavy-job handling beyond the current synchronous sandbox envelope
+- broader enterprise attestations beyond the controls documented here
 
 ## Bottom Line
 
 The repo can now honestly describe controlled `single_org` deployments as production-ready within one clear support envelope and one clear operator cutover path.
 
-The repo still cannot honestly describe Critjecture as broadly production-ready across both deployment modes, because `hosted` still has material launch-packaging and operator-readiness work remaining.
+The repo can now honestly describe Critjecture as production-ready across both supported deployment modes, as long as the operator stays inside the documented deployment, recovery, and runbook boundaries.

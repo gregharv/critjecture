@@ -57,13 +57,13 @@ describe("GET /api/admin/customer-review/[doc]", () => {
   });
 
   it("serves markdown for known review documents", async () => {
-    const response = await GET(new Request("http://localhost/api/admin/customer-review/security-review"), {
-      params: Promise.resolve({ doc: "security-review" }),
+    const response = await GET(new Request("http://localhost/api/admin/customer-review/hosted-launch"), {
+      params: Promise.resolve({ doc: "hosted-launch" }),
     });
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/markdown");
-    expect(body).toContain("# Security Review Pack");
+    expect(body).toContain("# Hosted Launch Package");
   });
 });

@@ -16,6 +16,7 @@ const RELEASE_PROOF_FORMAT_VERSION = 1;
 const RESTORE_DRILL_RECORD_TYPE = "single_org_restore_drill";
 const HOSTED_RESTORE_DRILL_RECORD_TYPE = "hosted_restore_drill";
 const RELEASE_PROOF_RECORD_TYPE = "single_org_release_proof";
+const HOSTED_RELEASE_PROOF_RECORD_TYPE = "hosted_release_proof";
 
 function formatRecordTimestamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
@@ -225,7 +226,7 @@ function buildRestoreDrillMarkdown(record, artifactPaths, title) {
   return `${lines.join("\n")}\n`;
 }
 
-function buildReleaseProofMarkdown(record, artifactPaths) {
+function buildSingleOrgReleaseProofMarkdown(record, artifactPaths) {
   const lines = [
     "# Single-Org Release Proof",
     "",
@@ -269,7 +270,56 @@ function buildReleaseProofMarkdown(record, artifactPaths) {
   return `${lines.join("\n")}\n`;
 }
 
-function validateRestoreDrillRecord(record, expectedEnvironmentLabel) {
+function buildHostedReleaseProofMarkdown(record, artifactPaths) {
+  const lines = [
+    "# Hosted Release Proof",
+    "",
+    `- Environment: ${record.environmentLabel}`,
+    `- Operator: ${record.operator.name}`,
+    `- Executed at: ${record.executedAt}`,
+    `- Checklist kind: ${record.checklistKind}`,
+    `- Change scope: ${record.changeScope}`,
+    `- Backup verification required: ${record.verification.backupVerificationRequired ? "yes" : "no"}`,
+    `- Backup verification executed: ${record.verification.backupVerificationExecuted ? "yes" : "no"}`,
+    `- Referenced restore drill: ${record.referencedRestoreDrill.recordPath}`,
+    `- App deployment owner: ${record.operatorResponsibilities.appDeploymentOwner}`,
+    `- Supervisor deployment owner: ${record.operatorResponsibilities.supervisorDeploymentOwner}`,
+    `- Secret storage owner: ${record.operatorResponsibilities.secretStorageOwner}`,
+    `- Credential rotation owner: ${record.operatorResponsibilities.credentialRotationOwner}`,
+    `- Backup / restore owner: ${record.operatorResponsibilities.backupRestoreOwner}`,
+    `- Alert webhook owner: ${record.operatorResponsibilities.alertWebhookOwner}`,
+    `- Incident contact: ${record.operatorResponsibilities.incidentContact}`,
+    `- Customer admin contact: ${record.operatorResponsibilities.customerAdminContact}`,
+    `- Escalation path: ${record.operatorResponsibilities.escalationPath}`,
+    `- TLS termination: ${record.operatorResponsibilities.tlsTermination}`,
+    `- Storage encryption: ${record.operatorResponsibilities.storageEncryption}`,
+    `- Backup encryption: ${record.operatorResponsibilities.backupEncryption}`,
+    `- Notes: ${record.signoff.notes || "None"}`,
+    `- Follow-up items: ${
+      record.signoff.followUpItems.length > 0
+        ? record.signoff.followUpItems.join("; ")
+        : "None"
+    }`,
+    "",
+    `JSON record: ${artifactPaths.jsonPath}`,
+  ];
+
+  if (record.build.gitSha) {
+    lines.splice(7, 0, `- Git SHA: ${record.build.gitSha}`);
+  }
+
+  if (record.build.buildRef) {
+    lines.splice(7, 0, `- Build ref: ${record.build.buildRef}`);
+  }
+
+  if (record.verification.backup) {
+    lines.splice(9, 0, `- Verification backup directory: ${record.verification.backup.backupDir}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function validateSingleOrgRestoreDrillRecord(record, expectedEnvironmentLabel) {
   if (record?.recordType !== RESTORE_DRILL_RECORD_TYPE) {
     throw new Error("Referenced restore drill record is not a single_org restore drill.");
   }
@@ -280,6 +330,24 @@ function validateRestoreDrillRecord(record, expectedEnvironmentLabel) {
 
   if (record.runtime?.deploymentMode !== "single_org") {
     throw new Error("Referenced restore drill was not recorded for a single_org runtime.");
+  }
+
+  if (record.environmentLabel !== expectedEnvironmentLabel) {
+    throw new Error("Referenced restore drill environment does not match the requested environment.");
+  }
+}
+
+function validateHostedRestoreDrillRecord(record, expectedEnvironmentLabel) {
+  if (record?.recordType !== HOSTED_RESTORE_DRILL_RECORD_TYPE) {
+    throw new Error("Referenced restore drill record is not a hosted restore drill.");
+  }
+
+  if (record.formatVersion !== RELEASE_PROOF_FORMAT_VERSION) {
+    throw new Error(`Unsupported restore drill format version: ${String(record?.formatVersion)}`);
+  }
+
+  if (record.runtime?.deploymentMode !== "hosted") {
+    throw new Error("Referenced restore drill was not recorded for a hosted runtime.");
   }
 
   if (record.environmentLabel !== expectedEnvironmentLabel) {
@@ -451,7 +519,7 @@ export async function runHostedRestoreDrill({
   };
 }
 
-function buildOperatorResponsibilities({
+function buildSingleOrgOperatorResponsibilities({
   alertWebhookOwner,
   backupEncryption,
   env,
@@ -477,6 +545,52 @@ function buildOperatorResponsibilities({
     secretRotationOwner: requireNonEmpty(secretRotationOwner, "Secret rotation owner"),
     secretStorageOwner: requireNonEmpty(secretStorageOwner, "Secret storage owner"),
     storageEncryption: requireNonEmpty(storageEncryption, "Storage encryption expectation"),
+    tlsTermination: requireNonEmpty(tlsTermination, "TLS termination expectation"),
+  };
+}
+
+function buildHostedOperatorResponsibilities({
+  alertWebhookOwner,
+  appDeploymentOwner,
+  backupEncryption,
+  backupRestoreOwner,
+  credentialRotationOwner,
+  customerAdminContact,
+  env,
+  escalationPath,
+  incidentContact,
+  secretStorageOwner,
+  storageEncryption,
+  supervisorDeploymentOwner,
+  tlsTermination,
+}) {
+  const configuredAlertWebhook = String(env.CRITJECTURE_ALERT_WEBHOOK_URL ?? "").trim();
+
+  if (!configuredAlertWebhook) {
+    throw new Error(
+      "CRITJECTURE_ALERT_WEBHOOK_URL must be configured before creating a hosted release proof.",
+    );
+  }
+
+  return {
+    alertWebhookConfigured: true,
+    alertWebhookOwner: requireNonEmpty(alertWebhookOwner, "Alert webhook owner"),
+    appDeploymentOwner: requireNonEmpty(appDeploymentOwner, "Hosted app deployment owner"),
+    backupEncryption: requireNonEmpty(backupEncryption, "Backup encryption expectation"),
+    backupRestoreOwner: requireNonEmpty(backupRestoreOwner, "Backup / restore owner"),
+    credentialRotationOwner: requireNonEmpty(
+      credentialRotationOwner,
+      "Credential rotation owner",
+    ),
+    customerAdminContact: requireNonEmpty(customerAdminContact, "Customer admin contact"),
+    escalationPath: requireNonEmpty(escalationPath, "Escalation path"),
+    incidentContact: requireNonEmpty(incidentContact, "Incident contact"),
+    secretStorageOwner: requireNonEmpty(secretStorageOwner, "Secret storage owner"),
+    storageEncryption: requireNonEmpty(storageEncryption, "Storage encryption expectation"),
+    supervisorDeploymentOwner: requireNonEmpty(
+      supervisorDeploymentOwner,
+      "Hosted supervisor deployment owner",
+    ),
     tlsTermination: requireNonEmpty(tlsTermination, "TLS termination expectation"),
   };
 }
@@ -518,9 +632,9 @@ export async function createSingleOrgReleaseProof({
     .filter(Boolean);
   const { path: resolvedRestoreDrillPath, record: restoreDrillRecord } =
     await loadRestoreDrillRecord(restoreDrillPath);
-  validateRestoreDrillRecord(restoreDrillRecord, normalizedEnvironmentLabel);
+  validateSingleOrgRestoreDrillRecord(restoreDrillRecord, normalizedEnvironmentLabel);
 
-  const operatorResponsibilities = buildOperatorResponsibilities({
+  const operatorResponsibilities = buildSingleOrgOperatorResponsibilities({
     alertWebhookOwner,
     backupEncryption,
     env,
@@ -594,7 +708,137 @@ export async function createSingleOrgReleaseProof({
     record,
     suffix: `${normalizedChecklistKind}-${normalizedEnvironmentLabel}`,
   });
-  const markdown = buildReleaseProofMarkdown(record, artifactPaths);
+  const markdown = buildSingleOrgReleaseProofMarkdown(record, artifactPaths);
+  await writeFile(artifactPaths.markdownPath, markdown);
+
+  return {
+    ...artifactPaths,
+    record,
+  };
+}
+
+export async function createHostedReleaseProof({
+  alertWebhookOwner,
+  appDeploymentOwner,
+  backupEncryption,
+  backupOutputDir,
+  backupRestoreOwner,
+  buildRef = "",
+  changeScope,
+  checklistKind,
+  credentialRotationOwner,
+  customerAdminContact,
+  env = process.env,
+  environmentLabel,
+  escalationPath,
+  followUpItems = [],
+  incidentContact,
+  notes = "",
+  operatorName,
+  outputDir,
+  restoreDrillPath,
+  secretStorageOwner,
+  storageEncryption,
+  supervisorDeploymentOwner,
+  tlsTermination,
+}) {
+  const runtimePaths = getDefaultRuntimePaths(env);
+  ensureHostedRuntime(runtimePaths);
+
+  const normalizedEnvironmentLabel = requireNonEmpty(environmentLabel, "Environment label");
+  const normalizedOperatorName = requireNonEmpty(operatorName, "Operator name");
+  const normalizedChecklistKind = normalizeChecklistKind(checklistKind);
+  const normalizedChangeScope = normalizeChangeScope(changeScope);
+  const normalizedNotes = String(notes ?? "").trim();
+  const normalizedFollowUpItems = followUpItems
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+  const { path: resolvedRestoreDrillPath, record: restoreDrillRecord } =
+    await loadRestoreDrillRecord(restoreDrillPath);
+  validateHostedRestoreDrillRecord(restoreDrillRecord, normalizedEnvironmentLabel);
+
+  const operatorResponsibilities = buildHostedOperatorResponsibilities({
+    alertWebhookOwner,
+    appDeploymentOwner,
+    backupEncryption,
+    backupRestoreOwner,
+    credentialRotationOwner,
+    customerAdminContact,
+    env,
+    escalationPath,
+    incidentContact,
+    secretStorageOwner,
+    storageEncryption,
+    supervisorDeploymentOwner,
+    tlsTermination,
+  });
+  const resolvedProofOutputDir = path.resolve(
+    outputDir || getDefaultProofOutputDir(runtimePaths),
+  );
+  const resolvedBackupOutputDir = path.resolve(
+    backupOutputDir || getDefaultBackupOutputDir(runtimePaths),
+  );
+  const requiresBackupVerification = changeScopeRequiresBackupVerification(
+    normalizedChangeScope,
+  );
+  const verification = requiresBackupVerification
+    ? await runRealBackupRestoreVerification({
+        backupOutputDir: resolvedBackupOutputDir,
+        env,
+        runtimePaths,
+      })
+    : null;
+  const executedAt = new Date().toISOString();
+  const record = {
+    build: {
+      buildRef: String(buildRef ?? "").trim() || null,
+      gitSha: await resolveGitSha(runtimePaths.repositoryRoot),
+    },
+    changeScope: normalizedChangeScope,
+    checklistKind: normalizedChecklistKind,
+    environmentLabel: normalizedEnvironmentLabel,
+    executedAt,
+    formatVersion: RELEASE_PROOF_FORMAT_VERSION,
+    operator: {
+      name: normalizedOperatorName,
+    },
+    operatorResponsibilities,
+    recordType: HOSTED_RELEASE_PROOF_RECORD_TYPE,
+    referencedRestoreDrill: {
+      environmentLabel: restoreDrillRecord.environmentLabel,
+      executedAt: restoreDrillRecord.executedAt,
+      operatorName: restoreDrillRecord.operator.name,
+      recordPath: resolvedRestoreDrillPath,
+    },
+    runtime: {
+      databasePath: runtimePaths.databasePath,
+      deploymentMode: runtimePaths.deploymentMode,
+      repositoryRoot: runtimePaths.repositoryRoot,
+      storageRoot: runtimePaths.storageRoot,
+      topology: "single_writer_dedicated_hosted_cell",
+      writableAppInstances: 1,
+    },
+    signoff: {
+      approvedAt: executedAt,
+      approvedBy: normalizedOperatorName,
+      followUpItems: normalizedFollowUpItems,
+      notes: normalizedNotes,
+      status: "approved",
+    },
+    verification: {
+      backup: verification?.backup ?? null,
+      backupVerificationExecuted: verification !== null,
+      backupVerificationRequired: requiresBackupVerification,
+      restoreValidation: verification?.restoreValidation ?? null,
+    },
+  };
+  const artifactPaths = await writeRecordArtifacts({
+    markdown: "",
+    outputDir: resolvedProofOutputDir,
+    record,
+    suffix: `${normalizedChecklistKind}-${normalizedEnvironmentLabel}`,
+  });
+  const markdown = buildHostedReleaseProofMarkdown(record, artifactPaths);
   await writeFile(artifactPaths.markdownPath, markdown);
 
   return {

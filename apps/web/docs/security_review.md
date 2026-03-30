@@ -27,7 +27,7 @@ The current deployment answer is intentionally split:
 - `hosted`
   - centrally operated dedicated customer cells
   - one organization/customer per deployment cell
-  - supported only with a higher review bar and not yet broadly production-ready
+  - production-ready within the documented dedicated-customer-cell envelope
 
 Explicit non-goals for the current envelope:
 
@@ -130,6 +130,7 @@ Current controls and expectations:
 - `local_supervisor` keeps `bubblewrap` + `prlimit` only as an explicit dev/test fallback
 - `hosted` requires a dedicated remote sandbox supervisor, signed app-to-supervisor requests, and matching organization binding on both sides
 - `hosted` recovery discipline now includes `pnpm restore:drill:hosted`, at-least-daily backups, `24`-hour RPO, and `2`-hour RTO expectations for the current envelope
+- `hosted` production changes should produce a hosted release-proof record that captures launch ownership, escalation, and handoff details
 - `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover
 - operators should capture `x-critjecture-request-id` together with sandbox, governance, and import identifiers during incident response
 
@@ -149,10 +150,10 @@ See the deployment guide and runbooks for the exact operator procedures.
 
 ## Remaining Review Notes
 
-The main remaining hardening gap is now primarily a `hosted` bar, not missing `single_org` product surface area.
+The main remaining limitations are now product-scope exclusions rather than missing hosted launch packaging.
 
 Important caveats:
 
 - `single_org` is the lower-risk first deployment path because it is customer-managed and narrower in scope
-- `hosted` still has a higher review bar because it adds centrally operated infrastructure ownership and the dedicated sandbox supervisor dependency
-- future work such as denser hosted placement or a different hosted persistence path would be new hardening steps, not claims of the current production package
+- `hosted` still carries centrally operated infrastructure ownership and the dedicated sandbox supervisor dependency, so operators should keep the documented ownership and escalation package intact
+- future work such as denser hosted placement or a different hosted persistence path would be new hardening steps, not missing pieces of the current production package

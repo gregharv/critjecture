@@ -10,6 +10,44 @@ type RecoveryModule = {
 };
 
 type ReleaseProofModule = {
+  createHostedReleaseProof: (input: {
+    alertWebhookOwner: string;
+    appDeploymentOwner: string;
+    backupEncryption: string;
+    backupOutputDir?: string;
+    backupRestoreOwner: string;
+    buildRef?: string;
+    changeScope: string;
+    checklistKind: string;
+    credentialRotationOwner: string;
+    customerAdminContact: string;
+    env?: NodeJS.ProcessEnv;
+    environmentLabel: string;
+    escalationPath: string;
+    followUpItems?: string[];
+    incidentContact: string;
+    notes?: string;
+    operatorName: string;
+    outputDir?: string;
+    restoreDrillPath: string;
+    secretStorageOwner: string;
+    storageEncryption: string;
+    supervisorDeploymentOwner: string;
+    tlsTermination: string;
+  }) => Promise<{
+    jsonPath: string;
+    markdownPath: string;
+    record: {
+      recordType: string;
+      verification: {
+        backup: {
+          backupDir: string;
+        } | null;
+        backupVerificationExecuted: boolean;
+        backupVerificationRequired: boolean;
+      };
+    };
+  }>;
   createSingleOrgReleaseProof: (input: {
     alertWebhookOwner: string;
     backupEncryption: string;
@@ -209,6 +247,7 @@ function createSingleOrgEnv(fixture: Awaited<ReturnType<typeof seedRuntimeFixtur
 
 function createHostedEnv(fixture: Awaited<ReturnType<typeof seedRuntimeFixture>>) {
   return {
+    CRITJECTURE_ALERT_WEBHOOK_URL: "https://alerts.example.com/critjecture",
     CRITJECTURE_DEPLOYMENT_MODE: "hosted",
     CRITJECTURE_HOSTED_ORGANIZATION_SLUG: fixture.organizationSlug,
     NODE_ENV: "test",
@@ -226,7 +265,7 @@ afterEach(async () => {
   );
 });
 
-describe("single_org release proof", () => {
+describe("release proof", () => {
   it("writes hosted restore drill JSON and Markdown artifacts", async () => {
     const { runHostedRestoreDrill } = await getReleaseProofModule();
     const rootDir = await createTempRoot();
@@ -261,6 +300,171 @@ describe("single_org release proof", () => {
     expect(jsonRecord.recordType).toBe("hosted_restore_drill");
     expect(markdown).toContain("# Hosted Restore Drill");
     expect(markdown).toContain("hosted-prod-east");
+  });
+
+  it("rejects hosted release proofs without a hosted restore drill reference", async () => {
+    const { createHostedReleaseProof } = await getReleaseProofModule();
+    const rootDir = await createTempRoot();
+    const fixture = await seedRuntimeFixture(rootDir);
+    const env = createHostedEnv(fixture);
+
+    await expect(
+      createHostedReleaseProof({
+        alertWebhookOwner: "Ops",
+        appDeploymentOwner: "Hosted Platform",
+        backupEncryption: "Encrypted operator-managed volume",
+        backupRestoreOwner: "Recovery Team",
+        changeScope: "app_only",
+        checklistKind: "routine_upgrade",
+        credentialRotationOwner: "Security",
+        customerAdminContact: "owner@example.com",
+        env,
+        environmentLabel: "hosted-prod-east",
+        escalationPath: "Ops -> Security -> Customer admin",
+        incidentContact: "oncall@example.com",
+        operatorName: "Pat Operator",
+        restoreDrillPath: "",
+        secretStorageOwner: "Platform",
+        storageEncryption: "Encrypted attached disk",
+        supervisorDeploymentOwner: "Sandbox Ops",
+        tlsTermination: "Managed reverse proxy",
+      }),
+    ).rejects.toThrow("Restore drill path is required.");
+  });
+
+  it("rejects hosted release proofs when launch ownership is incomplete", async () => {
+    const { createHostedReleaseProof, runHostedRestoreDrill } = await getReleaseProofModule();
+    const rootDir = await createTempRoot();
+    const fixture = await seedRuntimeFixture(rootDir);
+    const env = createHostedEnv(fixture);
+    const restoreDrill = await runHostedRestoreDrill({
+      backupOutputDir: path.join(rootDir, "backups"),
+      env,
+      environmentLabel: "hosted-prod-east",
+      operatorName: "Pat Operator",
+      outputDir: path.join(rootDir, "release-records"),
+    });
+
+    await expect(
+      createHostedReleaseProof({
+        alertWebhookOwner: "Ops",
+        appDeploymentOwner: "",
+        backupEncryption: "Encrypted operator-managed volume",
+        backupRestoreOwner: "Recovery Team",
+        changeScope: "app_only",
+        checklistKind: "routine_upgrade",
+        credentialRotationOwner: "Security",
+        customerAdminContact: "owner@example.com",
+        env,
+        environmentLabel: "hosted-prod-east",
+        escalationPath: "Ops -> Security -> Customer admin",
+        incidentContact: "oncall@example.com",
+        operatorName: "Pat Operator",
+        restoreDrillPath: restoreDrill.jsonPath,
+        secretStorageOwner: "Platform",
+        storageEncryption: "Encrypted attached disk",
+        supervisorDeploymentOwner: "Sandbox Ops",
+        tlsTermination: "Managed reverse proxy",
+      }),
+    ).rejects.toThrow("Hosted app deployment owner is required.");
+  });
+
+  it("creates a hosted app_only release proof without fresh backup verification", async () => {
+    const { createHostedReleaseProof, runHostedRestoreDrill } = await getReleaseProofModule();
+    const rootDir = await createTempRoot();
+    const fixture = await seedRuntimeFixture(rootDir);
+    const env = createHostedEnv(fixture);
+    const restoreDrill = await runHostedRestoreDrill({
+      backupOutputDir: path.join(rootDir, "restore-drill-backups"),
+      env,
+      environmentLabel: "hosted-prod-east",
+      operatorName: "Pat Operator",
+      outputDir: path.join(rootDir, "restore-drill-records"),
+    });
+    const appOnlyBackupDir = path.join(rootDir, "hosted-app-only-backups");
+    const result = await createHostedReleaseProof({
+      alertWebhookOwner: "Ops",
+      appDeploymentOwner: "Hosted Platform",
+      backupEncryption: "Encrypted operator-managed volume",
+      backupOutputDir: appOnlyBackupDir,
+      backupRestoreOwner: "Recovery Team",
+      buildRef: "2026.03.30.3",
+      changeScope: "app_only",
+      checklistKind: "first_customer_deployment",
+      credentialRotationOwner: "Security",
+      customerAdminContact: "owner@example.com",
+      env,
+      environmentLabel: "hosted-prod-east",
+      escalationPath: "Ops -> Security -> Customer admin",
+      incidentContact: "oncall@example.com",
+      notes: "Hosted launch handoff complete.",
+      operatorName: "Pat Operator",
+      outputDir: path.join(rootDir, "release-proof-records"),
+      restoreDrillPath: restoreDrill.jsonPath,
+      secretStorageOwner: "Platform",
+      storageEncryption: "Encrypted attached disk",
+      supervisorDeploymentOwner: "Sandbox Ops",
+      tlsTermination: "Managed reverse proxy",
+    });
+    const jsonRecord = JSON.parse(await readFile(result.jsonPath, "utf8"));
+    const markdown = await readFile(result.markdownPath, "utf8");
+    const backupDirExists = await stat(appOnlyBackupDir)
+      .then(() => true)
+      .catch(() => false);
+
+    expect(result.record.recordType).toBe("hosted_release_proof");
+    expect(result.record.verification.backupVerificationRequired).toBe(false);
+    expect(result.record.verification.backupVerificationExecuted).toBe(false);
+    expect(result.record.verification.backup).toBeNull();
+    expect(jsonRecord.recordType).toBe("hosted_release_proof");
+    expect(markdown).toContain("# Hosted Release Proof");
+    expect(markdown).toContain("Hosted Platform");
+    expect(backupDirExists).toBe(false);
+  });
+
+  it("creates a hosted migration release proof with fresh backup verification", async () => {
+    const { createHostedReleaseProof, runHostedRestoreDrill } = await getReleaseProofModule();
+    const rootDir = await createTempRoot();
+    const fixture = await seedRuntimeFixture(rootDir);
+    const env = createHostedEnv(fixture);
+    const restoreDrill = await runHostedRestoreDrill({
+      backupOutputDir: path.join(rootDir, "restore-drill-backups"),
+      env,
+      environmentLabel: "hosted-prod-east",
+      operatorName: "Pat Operator",
+      outputDir: path.join(rootDir, "restore-drill-records"),
+    });
+    const verificationBackupDir = path.join(rootDir, "hosted-migration-backups");
+    const result = await createHostedReleaseProof({
+      alertWebhookOwner: "Ops",
+      appDeploymentOwner: "Hosted Platform",
+      backupEncryption: "Encrypted operator-managed volume",
+      backupOutputDir: verificationBackupDir,
+      backupRestoreOwner: "Recovery Team",
+      buildRef: "2026.03.30.4",
+      changeScope: "migration",
+      checklistKind: "routine_upgrade",
+      credentialRotationOwner: "Security",
+      customerAdminContact: "owner@example.com",
+      env,
+      environmentLabel: "hosted-prod-east",
+      escalationPath: "Ops -> Security -> Customer admin",
+      followUpItems: ["confirm hosted alert delivery"],
+      incidentContact: "oncall@example.com",
+      operatorName: "Pat Operator",
+      outputDir: path.join(rootDir, "release-proof-records"),
+      restoreDrillPath: restoreDrill.jsonPath,
+      secretStorageOwner: "Platform",
+      storageEncryption: "Encrypted attached disk",
+      supervisorDeploymentOwner: "Sandbox Ops",
+      tlsTermination: "Managed reverse proxy",
+    });
+    const backupEntries = await readdir(verificationBackupDir);
+
+    expect(result.record.verification.backupVerificationRequired).toBe(true);
+    expect(result.record.verification.backupVerificationExecuted).toBe(true);
+    expect(result.record.verification.backup?.backupDir).toBeTruthy();
+    expect(backupEntries.length).toBeGreaterThan(0);
   });
 
   it("writes restore drill JSON and Markdown artifacts", async () => {

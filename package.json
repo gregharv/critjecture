@@ -20,6 +20,7 @@
     "backup:verify": "pnpm --filter web backup:verify",
     "restore:drill:hosted": "pnpm --filter web restore:drill:hosted",
     "restore:drill:single-org": "pnpm --filter web restore:drill:single-org",
+    "release:proof:hosted": "pnpm --filter web release:proof:hosted",
     "release:proof:single-org": "pnpm --filter web release:proof:single-org"
   }
 }

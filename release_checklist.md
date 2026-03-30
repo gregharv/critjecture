@@ -35,6 +35,7 @@ pnpm backup:verify
 - Log in as an owner and load `/admin/logs`, `/admin/operations`, and `/admin/settings`.
 - Create an organization export job and confirm it appears in Governance jobs.
 - Run `pnpm backup:create -- --output-dir <temp-dir>` and confirm the backup directory contains `manifest.json`, `database.sqlite`, and `storage.tar.gz`.
+- For a real hosted production change, confirm the matching `pnpm restore:drill:hosted` and `pnpm release:proof:hosted` flow exists for the target environment.
 
 ## `single_org` Production Cutover
 

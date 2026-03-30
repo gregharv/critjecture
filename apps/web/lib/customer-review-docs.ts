@@ -19,6 +19,11 @@ export const CUSTOMER_REVIEW_DOCS = [
     label: "Hosted provisioning",
     slug: "hosted-provisioning",
   },
+  {
+    fileName: "hosted_launch.md",
+    label: "Hosted launch package",
+    slug: "hosted-launch",
+  },
 ] as const;
 
 export type CustomerReviewDoc = (typeof CUSTOMER_REVIEW_DOCS)[number];

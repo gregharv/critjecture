@@ -21,14 +21,17 @@ This file indexes the project documents that live in the repository root and in 
 
 - [Compliance Controls](./apps/web/docs/compliance_controls.md)
 - [Deployment Modes](./apps/web/docs/deployment.md)
+- [Hosted Launch Package](./apps/web/docs/hosted_launch.md)
 - [Hosted Provisioning](./apps/web/docs/hosted_provisioning.md)
 - [Security Review Pack](./apps/web/docs/security_review.md)
 
 ## apps/web/docs/runbooks
 
 - [Backup And Restore Failures](./apps/web/docs/runbooks/backup-restore-failures.md)
+- [Hosted First Deployment](./apps/web/docs/runbooks/hosted-first-deployment.md)
 - [Hosted Operations](./apps/web/docs/runbooks/hosted-operations.md)
 - [Hosted Restore Drill](./apps/web/docs/runbooks/hosted-restore-drill.md)
+- [Hosted Routine Upgrade](./apps/web/docs/runbooks/hosted-routine-upgrade.md)
 - [Migration Failures](./apps/web/docs/runbooks/migration-failures.md)
 - [On-Prem Operations](./apps/web/docs/runbooks/onprem-operations.md)
 - [Sandbox Failures](./apps/web/docs/runbooks/sandbox-failures.md)
