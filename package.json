@@ -18,6 +18,7 @@
     "backup:create": "pnpm --filter web backup:create",
     "backup:restore": "pnpm --filter web backup:restore",
     "backup:verify": "pnpm --filter web backup:verify",
+    "restore:drill:hosted": "pnpm --filter web restore:drill:hosted",
     "restore:drill:single-org": "pnpm --filter web restore:drill:single-org",
     "release:proof:single-org": "pnpm --filter web release:proof:single-org"
   }

@@ -2,56 +2,12 @@
 
 This file tracks the next implementation milestones after the work captured in `steps_completed.md`.
 
-Step 29 finished the `single_org` production cutover package. The remaining work is now the hosted production track:
+Step 31 finished the hosted persistence and recovery-discipline pass. The remaining work is now the hosted production launch package:
 
-1. raise `hosted` to a higher bar suitable for centrally operated multi-tenant deployment
+1. raise `hosted` to a higher bar suitable for centrally operated dedicated-customer-cell deployment
 2. preserve the narrower `single_org` production claim while hosted-only hardening continues
 
 ## Phase 2: `hosted` Production Readiness
-
-## Step 30: Hosted Isolation and Supervisor Hardening
-
-### Goal
-
-Raise the hosted deployment boundary above application-level tenant separation and make the dedicated sandbox supervisor a production-grade dependency.
-
-### What Should Be Implemented
-
-- strengthen hosted tenant isolation beyond the current shared-infrastructure posture
-- harden the hosted sandbox supervisor contract and operations:
-  - deployment requirements
-  - authn/authz between web app and supervisor
-  - failure drills
-  - monitoring and ownership expectations
-- document the hosted trust boundary in production terms rather than pilot terms
-
-### Acceptance Criteria
-
-- hosted deployment has a materially stronger isolation story than the current review-pack caveat
-- the supervisor dependency is treated as a first-class production service
-- hosted failure and recovery procedures are explicit and tested
-
-## Step 31: Hosted Persistence and Scale Envelope
-
-### Goal
-
-Decide and implement the persistence model that will support centrally operated hosted production as concurrency and tenant count grow.
-
-### What Should Be Implemented
-
-- evaluate whether the current SQLite-first runtime remains acceptable for hosted production
-- if not, introduce the next persistence path with a migration plan that preserves current product behavior
-- define hosted limits for:
-  - tenant count
-  - concurrency
-  - backup and restore expectations
-  - operational recovery objectives
-
-### Acceptance Criteria
-
-- hosted persistence and recovery strategy matches expected production load
-- the repo no longer depends on an ambiguous “SQLite-first unless traffic grows” answer
-- production docs state the supported hosted operating envelope concretely
 
 ## Step 32: Hosted Production Launch Package
 
@@ -109,7 +65,17 @@ Finish the remaining platform, product, and documentation work required to descr
   - the `single_org` production envelope is now documented concretely across readiness, deployment, security, and README materials
   - one canonical `single_org` cutover checklist now exists in the first-deployment runbook
   - remaining production blockers are now called out explicitly as hosted-only work rather than `single_org` gaps
+- Step 30 is complete:
+  - `hosted` now enforces one bound organization per deployment cell instead of a shared multi-org runtime
+  - hosted sandbox supervisor requests now use signed auth plus bound-organization verification
+  - hosted health, alerts, provisioning, and runbooks now treat the supervisor as a first-class production dependency
+  - customer-review docs now describe hosted as a dedicated-customer-cell boundary instead of shared infrastructure with application-only separation
+- Step 31 is complete:
+  - hosted now has an explicit SQLite-backed dedicated-cell support envelope instead of an ambiguous future persistence answer
+  - health and operations now surface SQLite/WAL/topology/runtime-path metadata for the current hosted boundary
+  - hosted restore drills now produce real JSON and Markdown evidence records with documented RPO/RTO expectations
+  - backup verification fixtures, runbooks, and customer-review docs now align with one-org-per-hosted-cell recovery
 - The main near-term goal is not more surface area:
   - it is raising `hosted` to a materially stronger production bar without weakening the now-narrower `single_org` claim
 - `hosted` should be treated as a separate bar:
-  - stronger isolation, stronger supervisor operations, and a clearer persistence strategy are still required before calling it broadly production-ready
+  - broader hosted launch packaging and final go/no-go criteria are still required before calling it broadly production-ready

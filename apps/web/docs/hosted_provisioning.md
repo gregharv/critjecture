@@ -16,6 +16,7 @@ Hosted-mode trust boundary:
 - each customer gets a dedicated operator-managed app, SQLite, storage, and sandbox-supervisor footprint
 - tenant isolation is enforced both by dedicated deployment placement and by authenticated organization membership, role checks, and organization-scoped storage paths
 - this document does not describe a shared multi-tenant cell; adding a denser shared-cell model would be future work and would require a separate review
+- the current supported persistence envelope is one writable app instance plus one SQLite file in `WAL` mode per hosted cell
 
 ## Provisioning Flow
 
@@ -39,7 +40,9 @@ Provisioning guardrails:
 ## Operational Notes
 
 - on-prem and local environments should continue using `single_org`
-- hosted operators should back up both SQLite and the storage root
+- hosted operators should back up both SQLite and the storage root at least every `24` hours and before schema or storage-layout changes
+- hosted operators should run `pnpm restore:drill:hosted -- --environment <label> --operator "<name>"` before first cutover and at least quarterly per hosted environment
+- hosted operators should treat the current recovery objectives as `24`-hour RPO and `2`-hour RTO
 - hosted operators should manage `AUTH_SECRET`, model credentials, and sandbox supervisor credentials through platform secret storage
 - hosted operators should record named ownership for the hosted app cell, the hosted supervisor deployment, credential rotation, alerts, and incident response
 - destructive customer data purges should be preceded by a recent full export

@@ -147,4 +147,64 @@ describe("hosted deployment hardening", () => {
       await environment.cleanup();
     }
   });
+
+  it("surfaces the hosted SQLite persistence envelope in health", async () => {
+    const environment = await createTestAppEnvironment({
+      deploymentMode: "hosted",
+      organizationSlug: "acme",
+    });
+
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              authMode: "signed",
+              available: true,
+              boundOrganizationSlug: "acme",
+              detail: "Hosted supervisor is reachable.",
+              runner: "oci-container",
+            }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        ),
+      );
+      process.env.CRITJECTURE_SANDBOX_SUPERVISOR_URL = "http://127.0.0.1:4100";
+      process.env.CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID = "hosted-app";
+      process.env.CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET = "super-secret";
+
+      const health = await getHealthSummary();
+
+      expect(health.persistence).toMatchObject({
+        backupCadenceHours: 24,
+        backupBeforeSchemaChanges: true,
+        deploymentMode: "hosted",
+        engine: "sqlite",
+        journalMode: "wal",
+        requestModel: "synchronous_requests_only",
+        restoreDrillCadence: "before_first_cutover_and_quarterly",
+        targetRpoHours: 24,
+        targetRtoHours: 2,
+        topology: "single_writer_dedicated_hosted_cell",
+        writableAppInstances: 1,
+      });
+      expect(health.persistence.sandboxConcurrency).toMatchObject({
+        globalActiveRuns: 4,
+        perUserActiveRuns: 1,
+      });
+      expect(health.persistence.databasePath).toContain("critjecture.sqlite");
+      expect(health.persistence.storageRoot).toContain(environment.storageRoot);
+      expect(health.checks.find((check) => check.name === "persistence")).toMatchObject({
+        status: "ok",
+      });
+    } finally {
+      await environment.cleanup();
+    }
+  });
 });

@@ -14,6 +14,7 @@ const execFileAsync = promisify(execFile);
 
 const RELEASE_PROOF_FORMAT_VERSION = 1;
 const RESTORE_DRILL_RECORD_TYPE = "single_org_restore_drill";
+const HOSTED_RESTORE_DRILL_RECORD_TYPE = "hosted_restore_drill";
 const RELEASE_PROOF_RECORD_TYPE = "single_org_release_proof";
 
 function formatRecordTimestamp(date = new Date()) {
@@ -83,6 +84,12 @@ function sanitizeFileSegment(value) {
 function ensureSingleOrgRuntime(runtimePaths) {
   if (runtimePaths.deploymentMode !== "single_org") {
     throw new Error("Step 27 release proof tooling supports single_org deployments only.");
+  }
+}
+
+function ensureHostedRuntime(runtimePaths) {
+  if (runtimePaths.deploymentMode !== "hosted") {
+    throw new Error("Hosted restore-drill tooling supports hosted deployments only.");
   }
 }
 
@@ -157,7 +164,7 @@ async function runRealBackupRestoreVerification({
     outputDir: backupOutputDir,
   });
   const restoreTempRoot = await mkdtemp(
-    path.join(os.tmpdir(), "critjecture-single-org-release-proof-"),
+    path.join(os.tmpdir(), "critjecture-restore-drill-"),
   );
 
   try {
@@ -194,9 +201,9 @@ async function resolveGitSha(repositoryRoot) {
   }
 }
 
-function buildRestoreDrillMarkdown(record, artifactPaths) {
+function buildRestoreDrillMarkdown(record, artifactPaths, title) {
   const lines = [
-    "# Single-Org Restore Drill",
+    `# ${title}`,
     "",
     `- Environment: ${record.environmentLabel}`,
     `- Operator: ${record.operator.name}`,
@@ -350,7 +357,92 @@ export async function runSingleOrgRestoreDrill({
     record,
     suffix: normalizedEnvironmentLabel,
   });
-  const markdown = buildRestoreDrillMarkdown(record, artifactPaths);
+  const markdown = buildRestoreDrillMarkdown(
+    record,
+    artifactPaths,
+    "Single-Org Restore Drill",
+  );
+  await writeFile(artifactPaths.markdownPath, markdown);
+
+  return {
+    ...artifactPaths,
+    record,
+  };
+}
+
+export async function runHostedRestoreDrill({
+  backupOutputDir,
+  env = process.env,
+  environmentLabel,
+  followUpItems = [],
+  notes = "",
+  operatorName,
+  outputDir,
+}) {
+  const runtimePaths = getDefaultRuntimePaths(env);
+  ensureHostedRuntime(runtimePaths);
+
+  const normalizedEnvironmentLabel = requireNonEmpty(environmentLabel, "Environment label");
+  const normalizedOperatorName = requireNonEmpty(operatorName, "Operator name");
+  const normalizedNotes = String(notes ?? "").trim();
+  const normalizedFollowUpItems = followUpItems
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+  const resolvedProofOutputDir = path.resolve(
+    outputDir || getDefaultProofOutputDir(runtimePaths),
+  );
+  const resolvedBackupOutputDir = path.resolve(
+    backupOutputDir || getDefaultBackupOutputDir(runtimePaths),
+  );
+  const verification = await runRealBackupRestoreVerification({
+    backupOutputDir: resolvedBackupOutputDir,
+    env,
+    runtimePaths,
+  });
+  const executedAt = new Date().toISOString();
+  const record = {
+    backup: verification.backup,
+    environmentLabel: normalizedEnvironmentLabel,
+    executedAt,
+    formatVersion: RELEASE_PROOF_FORMAT_VERSION,
+    operator: {
+      name: normalizedOperatorName,
+    },
+    recordType: HOSTED_RESTORE_DRILL_RECORD_TYPE,
+    recoveryObjectives: {
+      backupCadenceHours: 24,
+      restoreDrillCadence: "before_first_cutover_and_quarterly",
+      targetRpoHours: 24,
+      targetRtoHours: 2,
+    },
+    restoreValidation: verification.restoreValidation,
+    runtime: {
+      databasePath: runtimePaths.databasePath,
+      deploymentMode: runtimePaths.deploymentMode,
+      repositoryRoot: runtimePaths.repositoryRoot,
+      storageRoot: runtimePaths.storageRoot,
+      topology: "single_writer_dedicated_hosted_cell",
+      writableAppInstances: 1,
+    },
+    signoff: {
+      completedAt: executedAt,
+      completedBy: normalizedOperatorName,
+      followUpItems: normalizedFollowUpItems,
+      notes: normalizedNotes,
+      status: "completed",
+    },
+  };
+  const artifactPaths = await writeRecordArtifacts({
+    markdown: "",
+    outputDir: resolvedProofOutputDir,
+    record,
+    suffix: normalizedEnvironmentLabel,
+  });
+  const markdown = buildRestoreDrillMarkdown(
+    record,
+    artifactPaths,
+    "Hosted Restore Drill",
+  );
   await writeFile(artifactPaths.markdownPath, markdown);
 
   return {

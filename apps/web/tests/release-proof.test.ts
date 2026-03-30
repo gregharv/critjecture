@@ -43,6 +43,39 @@ type ReleaseProofModule = {
       };
     };
   }>;
+  runHostedRestoreDrill: (input: {
+    backupOutputDir?: string;
+    env?: NodeJS.ProcessEnv;
+    environmentLabel: string;
+    followUpItems?: string[];
+    notes?: string;
+    operatorName: string;
+    outputDir?: string;
+  }) => Promise<{
+    jsonPath: string;
+    markdownPath: string;
+    record: {
+      environmentLabel: string;
+      operator: {
+        name: string;
+      };
+      recordType: string;
+      recoveryObjectives: {
+        backupCadenceHours: number;
+        targetRpoHours: number;
+        targetRtoHours: number;
+      };
+      runtime: {
+        deploymentMode: string;
+        topology: string;
+        writableAppInstances: number;
+      };
+      signoff: {
+        followUpItems: string[];
+        notes: string;
+      };
+    };
+  }>;
   runSingleOrgRestoreDrill: (input: {
     backupOutputDir?: string;
     env?: NodeJS.ProcessEnv;
@@ -168,9 +201,20 @@ function createSingleOrgEnv(fixture: Awaited<ReturnType<typeof seedRuntimeFixtur
   return {
     CRITJECTURE_ALERT_WEBHOOK_URL: "https://alerts.example.com/critjecture",
     CRITJECTURE_DEPLOYMENT_MODE: "single_org",
+    NODE_ENV: "test",
     CRITJECTURE_STORAGE_ROOT: fixture.storageRoot,
     DATABASE_URL: fixture.databasePath,
-  };
+  } as NodeJS.ProcessEnv;
+}
+
+function createHostedEnv(fixture: Awaited<ReturnType<typeof seedRuntimeFixture>>) {
+  return {
+    CRITJECTURE_DEPLOYMENT_MODE: "hosted",
+    CRITJECTURE_HOSTED_ORGANIZATION_SLUG: fixture.organizationSlug,
+    NODE_ENV: "test",
+    CRITJECTURE_STORAGE_ROOT: fixture.storageRoot,
+    DATABASE_URL: fixture.databasePath,
+  } as NodeJS.ProcessEnv;
 }
 
 afterEach(async () => {
@@ -183,6 +227,42 @@ afterEach(async () => {
 });
 
 describe("single_org release proof", () => {
+  it("writes hosted restore drill JSON and Markdown artifacts", async () => {
+    const { runHostedRestoreDrill } = await getReleaseProofModule();
+    const rootDir = await createTempRoot();
+    const fixture = await seedRuntimeFixture(rootDir);
+    const env = createHostedEnv(fixture);
+    const proofOutputDir = path.join(rootDir, "release-records");
+    const backupOutputDir = path.join(rootDir, "backups");
+
+    const result = await runHostedRestoreDrill({
+      backupOutputDir,
+      env,
+      environmentLabel: "hosted-prod-east",
+      followUpItems: ["recheck backup replication"],
+      notes: "Completed against the active hosted cell.",
+      operatorName: "Pat Operator",
+      outputDir: proofOutputDir,
+    });
+    const jsonRecord = JSON.parse(await readFile(result.jsonPath, "utf8"));
+    const markdown = await readFile(result.markdownPath, "utf8");
+
+    expect(result.record.recordType).toBe("hosted_restore_drill");
+    expect(result.record.environmentLabel).toBe("hosted-prod-east");
+    expect(result.record.operator.name).toBe("Pat Operator");
+    expect(result.record.runtime.deploymentMode).toBe("hosted");
+    expect(result.record.runtime.topology).toBe("single_writer_dedicated_hosted_cell");
+    expect(result.record.runtime.writableAppInstances).toBe(1);
+    expect(result.record.recoveryObjectives.backupCadenceHours).toBe(24);
+    expect(result.record.recoveryObjectives.targetRpoHours).toBe(24);
+    expect(result.record.recoveryObjectives.targetRtoHours).toBe(2);
+    expect(result.record.signoff.followUpItems).toEqual(["recheck backup replication"]);
+    expect(result.record.signoff.notes).toBe("Completed against the active hosted cell.");
+    expect(jsonRecord.recordType).toBe("hosted_restore_drill");
+    expect(markdown).toContain("# Hosted Restore Drill");
+    expect(markdown).toContain("hosted-prod-east");
+  });
+
   it("writes restore drill JSON and Markdown artifacts", async () => {
     const { runSingleOrgRestoreDrill } = await getReleaseProofModule();
     const rootDir = await createTempRoot();

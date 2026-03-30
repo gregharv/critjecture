@@ -76,6 +76,11 @@ Current characteristics:
 
 - one hosted deployment cell contains exactly one organization/customer
 - `CRITJECTURE_HOSTED_ORGANIZATION_SLUG` binds the app and the supervisor to that one organization
+- hosted remains SQLite-backed per dedicated customer cell in the current supported envelope
+- one writable web-app instance is supported per hosted cell
+- active-active multi-writer replicas sharing one SQLite file are out of scope
+- current hosted support assumes the existing synchronous request model only, not queue-backed heavy analytics expansion
+- hosted inherits the current sandbox envelope of `1` active run per user and `4` globally
 - tenant creation is operator-managed through the provisioning script, not tenant self-service
 - the web app must be configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
 - hosted supervisor traffic must use signed requests with `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID` and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
@@ -113,13 +118,23 @@ Restore expectations:
 - restore only into clean target paths
 - validate the restored database against current migrations before reopening traffic
 - protect backup artifacts as sensitive customer data because they can contain uploads, generated files, audit history, and governance artifacts
+- for hosted cells, keep backup cadence at least every `24` hours and take an additional backup before schema or storage-layout changes
+
+Hosted recovery objectives for the current supported envelope:
+
+- target RPO: `24` hours
+- target RTO: `2` hours
+- rebuild or replace the whole hosted cell if recovery requires more than a clean app restart
 
 ## Recovery Drills
 
 - `single_org`: run `pnpm backup:verify -- --deployment-mode single_org` after schema or storage-layout changes
 - `hosted`: run `pnpm backup:verify -- --deployment-mode hosted` against the same build artifacts used for hosted deploys
+- `hosted`: run `pnpm restore:drill:hosted -- --environment <label> --operator "<name>"` before first hosted cutover and at least quarterly per hosted environment
 
 `pnpm backup:verify` proves the repo's recovery tooling still works in representative fixtures. It is not the production release record for a real `single_org` environment.
+
+`pnpm restore:drill:hosted` is the hosted environment evidence command. It creates a real backup from the configured hosted runtime, restores into a clean temporary target, validates migrations, and emits JSON plus Markdown records.
 
 ## `single_org` Release Gate
 
@@ -159,6 +174,7 @@ Runbooks:
 - `apps/web/docs/runbooks/migration-failures.md`
 - `apps/web/docs/runbooks/backup-restore-failures.md`
 - `apps/web/docs/runbooks/hosted-operations.md`
+- `apps/web/docs/runbooks/hosted-restore-drill.md`
 - `apps/web/docs/runbooks/onprem-operations.md`
 - `apps/web/docs/runbooks/single-org-restore-drill.md`
 - `apps/web/docs/runbooks/single-org-first-deployment.md`
@@ -169,7 +185,7 @@ Runbooks:
 The remaining blockers to a broader production claim are `hosted` concerns, not `single_org` blockers:
 
 - further hosted density or cell-sharing work beyond the current dedicated-customer-cell boundary
-- a clearer persistence and scale answer for growing hosted concurrency and tenant count
+- broader hosted launch packaging, onboarding, and final go/no-go criteria
 
 ## Retention
 

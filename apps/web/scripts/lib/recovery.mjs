@@ -697,22 +697,13 @@ async function createHostedScenario(rootDir) {
   const databasePath = path.join(storageRoot, "critjecture.sqlite");
   const migrationState = await runMigrationsOnDatabasePath(databasePath);
   const now = Date.now();
-  const definitions = [
-    {
-      fileLabel: "alpha",
-      name: "Alpha Org",
-      ownerEmail: "owner@alpha.example.com",
-      ownerName: "Owner Alpha",
-      slug: "alpha-org",
-    },
-    {
-      fileLabel: "beta",
-      name: "Beta Org",
-      ownerEmail: "owner@beta.example.com",
-      ownerName: "Owner Beta",
-      slug: "beta-org",
-    },
-  ];
+  const definition = {
+    fileLabel: "hosted",
+    name: "Hosted Org",
+    ownerEmail: "owner@hosted.example.com",
+    ownerName: "Hosted Owner",
+    slug: "hosted-org",
+  };
   const files = [];
 
   await mkdir(storageRoot, { recursive: true });
@@ -721,129 +712,127 @@ async function createHostedScenario(rootDir) {
   sqlite.pragma("foreign_keys = ON");
 
   try {
-    for (const definition of definitions) {
-      const organizationId = randomUUID();
-      const ownerId = randomUUID();
-      const sandboxRunId = randomUUID();
-      const governanceJobId = randomUUID();
-      const organizationRoot = path.join("organizations", definition.slug);
-      const companyDataText = `${definition.fileLabel} hosted company data`;
-      const generatedAssetText = `${definition.fileLabel} hosted generated asset`;
-      const knowledgeStagingText = `${definition.fileLabel} hosted staging file`;
-      const governanceArtifactText = `${definition.fileLabel} hosted export artifact`;
+    const organizationId = randomUUID();
+    const ownerId = randomUUID();
+    const sandboxRunId = randomUUID();
+    const governanceJobId = randomUUID();
+    const organizationRoot = path.join("organizations", definition.slug);
+    const companyDataText = `${definition.fileLabel} hosted company data`;
+    const generatedAssetText = `${definition.fileLabel} hosted generated asset`;
+    const knowledgeStagingText = `${definition.fileLabel} hosted staging file`;
+    const governanceArtifactText = `${definition.fileLabel} hosted export artifact`;
 
-      insertOrganization(sqlite, {
-        id: organizationId,
-        name: definition.name,
-        now,
-        slug: definition.slug,
-      });
-      insertUser(sqlite, {
-        email: definition.ownerEmail,
-        id: ownerId,
-        name: definition.ownerName,
-        now,
-        passwordHash: `scrypt:${definition.fileLabel}`,
-        role: "owner",
-      });
-      insertMembership(sqlite, {
-        id: randomUUID(),
-        now,
-        organizationId,
-        role: "owner",
-        userId: ownerId,
-      });
-      insertDocument(sqlite, {
-        accessScope: "admin",
-        byteSize: Buffer.byteLength(companyDataText),
-        contentSha256: createHash("sha256").update(companyDataText).digest("hex"),
-        displayName: `${definition.fileLabel}-ledger.txt`,
-        id: randomUUID(),
-        now,
-        organizationId,
-        sourcePath: `admin/uploads/2026/03/${definition.fileLabel}-ledger.txt`,
-        uploadedByUserId: ownerId,
-      });
-      insertGovernanceJob(sqlite, {
-        artifactFileName: `export-${governanceJobId}.tar.gz`,
-        artifactStoragePath: path.posix.join("governance", `export-${governanceJobId}.tar.gz`),
-        id: governanceJobId,
-        now,
-        organizationId,
-        requestedByUserId: ownerId,
-      });
-      insertSandboxRun(sqlite, {
-        now,
-        organizationId,
-        runId: sandboxRunId,
-        userId: ownerId,
-      });
-      insertSandboxAsset(sqlite, {
-        byteSize: Buffer.byteLength(generatedAssetText),
-        fileName: `${definition.fileLabel}-chart.txt`,
-        now,
-        relativePath: `${definition.fileLabel}-chart.txt`,
-        runId: sandboxRunId,
-        storagePath: path.posix.join(
+    insertOrganization(sqlite, {
+      id: organizationId,
+      name: definition.name,
+      now,
+      slug: definition.slug,
+    });
+    insertUser(sqlite, {
+      email: definition.ownerEmail,
+      id: ownerId,
+      name: definition.ownerName,
+      now,
+      passwordHash: `scrypt:${definition.fileLabel}`,
+      role: "owner",
+    });
+    insertMembership(sqlite, {
+      id: randomUUID(),
+      now,
+      organizationId,
+      role: "owner",
+      userId: ownerId,
+    });
+    insertDocument(sqlite, {
+      accessScope: "admin",
+      byteSize: Buffer.byteLength(companyDataText),
+      contentSha256: createHash("sha256").update(companyDataText).digest("hex"),
+      displayName: `${definition.fileLabel}-ledger.txt`,
+      id: randomUUID(),
+      now,
+      organizationId,
+      sourcePath: `admin/uploads/2026/03/${definition.fileLabel}-ledger.txt`,
+      uploadedByUserId: ownerId,
+    });
+    insertGovernanceJob(sqlite, {
+      artifactFileName: `export-${governanceJobId}.tar.gz`,
+      artifactStoragePath: path.posix.join("governance", `export-${governanceJobId}.tar.gz`),
+      id: governanceJobId,
+      now,
+      organizationId,
+      requestedByUserId: ownerId,
+    });
+    insertSandboxRun(sqlite, {
+      now,
+      organizationId,
+      runId: sandboxRunId,
+      userId: ownerId,
+    });
+    insertSandboxAsset(sqlite, {
+      byteSize: Buffer.byteLength(generatedAssetText),
+      fileName: `${definition.fileLabel}-chart.txt`,
+      now,
+      relativePath: `${definition.fileLabel}-chart.txt`,
+      runId: sandboxRunId,
+      storagePath: path.posix.join(
+        "generated_assets",
+        sandboxRunId,
+        `${definition.fileLabel}-chart.txt`,
+      ),
+    });
+
+    files.push(
+      await writeScenarioFile(
+        storageRoot,
+        path.posix.join(
+          organizationRoot,
+          "company_data",
+          "admin",
+          "uploads",
+          "2026",
+          "03",
+          `${definition.fileLabel}-ledger.txt`,
+        ),
+        companyDataText,
+      ),
+    );
+    files.push(
+      await writeScenarioFile(
+        storageRoot,
+        path.posix.join(
+          organizationRoot,
           "generated_assets",
           sandboxRunId,
           `${definition.fileLabel}-chart.txt`,
         ),
-      });
-
-      files.push(
-        await writeScenarioFile(
-          storageRoot,
-          path.posix.join(
-            organizationRoot,
-            "company_data",
-            "admin",
-            "uploads",
-            "2026",
-            "03",
-            `${definition.fileLabel}-ledger.txt`,
-          ),
-          companyDataText,
+        generatedAssetText,
+      ),
+    );
+    files.push(
+      await writeScenarioFile(
+        storageRoot,
+        path.posix.join(
+          organizationRoot,
+          "knowledge_staging",
+          "imports",
+          randomUUID(),
+          "archive",
+          `${definition.fileLabel}-staged.txt`,
         ),
-      );
-      files.push(
-        await writeScenarioFile(
-          storageRoot,
-          path.posix.join(
-            organizationRoot,
-            "generated_assets",
-            sandboxRunId,
-            `${definition.fileLabel}-chart.txt`,
-          ),
-          generatedAssetText,
+        knowledgeStagingText,
+      ),
+    );
+    files.push(
+      await writeScenarioFile(
+        storageRoot,
+        path.posix.join(
+          organizationRoot,
+          "governance",
+          `export-${governanceJobId}.tar.gz`,
         ),
-      );
-      files.push(
-        await writeScenarioFile(
-          storageRoot,
-          path.posix.join(
-            organizationRoot,
-            "knowledge_staging",
-            "imports",
-            randomUUID(),
-            "archive",
-            `${definition.fileLabel}-staged.txt`,
-          ),
-          knowledgeStagingText,
-        ),
-      );
-      files.push(
-        await writeScenarioFile(
-          storageRoot,
-          path.posix.join(
-            organizationRoot,
-            "governance",
-            `export-${governanceJobId}.tar.gz`,
-          ),
-          governanceArtifactText,
-        ),
-      );
-    }
+        governanceArtifactText,
+      ),
+    );
   } finally {
     sqlite.close();
   }
@@ -854,15 +843,15 @@ async function createHostedScenario(rootDir) {
     expected: {
       appliedMigrationIds: migrationState.appliedMigrationIds,
       files,
-      organizationSlugs: definitions.map((definition) => definition.slug).sort(),
+      organizationSlugs: [definition.slug],
       tableCounts: {
-        documents: 2,
-        governance_jobs: 2,
-        organization_memberships: 2,
-        organizations: 2,
-        sandbox_generated_assets: 2,
-        sandbox_runs: 2,
-        users: 2,
+        documents: 1,
+        governance_jobs: 1,
+        organization_memberships: 1,
+        organizations: 1,
+        sandbox_generated_assets: 1,
+        sandbox_runs: 1,
+        users: 1,
       },
     },
     storageRoot,

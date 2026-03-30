@@ -2,6 +2,7 @@ import type {
   OperationsPoliciesSnapshot,
   OperationsRouteGroup,
 } from "@/lib/operations-policy";
+import type { RuntimePersistenceSnapshot } from "@/lib/persistence-policy";
 import type { MembershipStatus } from "@/lib/access-control";
 import type { SandboxExecutionBackend } from "@/lib/sandbox-policy";
 import type { CommercialUsageClass, WorkspacePlanSummary } from "@/lib/workspace-plans";
@@ -19,6 +20,7 @@ export type HealthCheckResult = {
 
 export type HealthSummary = {
   checks: HealthCheckResult[];
+  persistence: RuntimePersistenceSnapshot;
   sandbox: {
     abandonedRuns: number;
     activeRuns: number;

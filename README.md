@@ -137,6 +137,15 @@ Critjecture uses a SQLite-first runtime for:
 - customer-managed hardware / on-prem
 - Railway deployments with attached persistent storage
 
+Current hosted support keeps that same engine inside a narrower dedicated-cell envelope:
+
+- one organization/customer per hosted deployment cell
+- one writable web-app instance per hosted cell
+- SQLite in `WAL` mode plus one persistent storage root per cell
+- no active-active multi-writer replicas sharing one SQLite file
+- current synchronous request model only
+- target hosted recovery objectives of `24`-hour RPO and `2`-hour RTO
+
 The runtime storage model is:
 
 - SQLite database: `DATABASE_URL` or `<CRITJECTURE_STORAGE_ROOT>/critjecture.sqlite`

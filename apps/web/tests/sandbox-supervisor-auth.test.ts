@@ -4,7 +4,7 @@ import {
   DEFAULT_MAX_CLOCK_SKEW_MS,
   buildHostedSupervisorSignatureHeaders,
   verifyHostedSupervisorRequest,
-} from "../../../packages/sandbox-supervisor/auth.mjs";
+} from "@/tests/helpers/sandbox-supervisor-auth";
 
 describe("sandbox supervisor signed auth", () => {
   it("verifies a valid signed hosted request", () => {

@@ -94,6 +94,7 @@ Hosted-mode boundary notes:
 
 - hosted mode uses a dedicated app, SQLite runtime, storage root, logs, and sandbox supervisor per customer organization
 - hosted mode depends on operator-managed provisioning plus a dedicated sandbox supervisor service bound to the same organization slug
+- hosted mode currently supports one writable app instance and one SQLite database in `WAL` mode per customer cell
 - the app still enforces org scoping and role checks, but hosted no longer claims a shared multi-org deployment model
 - production review for hosted mode should treat the hosted app cell and the hosted supervisor as customer-dedicated operator-managed infrastructure with one bound organization
 
@@ -128,6 +129,7 @@ Current controls and expectations:
 - `single_org` production uses a dedicated container supervisor service and per-run OCI containers
 - `local_supervisor` keeps `bubblewrap` + `prlimit` only as an explicit dev/test fallback
 - `hosted` requires a dedicated remote sandbox supervisor, signed app-to-supervisor requests, and matching organization binding on both sides
+- `hosted` recovery discipline now includes `pnpm restore:drill:hosted`, at-least-daily backups, `24`-hour RPO, and `2`-hour RTO expectations for the current envelope
 - `single_org` production changes should produce a restore-drill record plus a release-proof record before cutover
 - operators should capture `x-critjecture-request-id` together with sandbox, governance, and import identifiers during incident response
 
@@ -153,4 +155,4 @@ Important caveats:
 
 - `single_org` is the lower-risk first deployment path because it is customer-managed and narrower in scope
 - `hosted` still has a higher review bar because it adds centrally operated infrastructure ownership and the dedicated sandbox supervisor dependency
-- future work such as stronger hosted isolation, stronger hosted supervisor operations, or a different hosted persistence path would be new hardening steps, not claims of the current production package
+- future work such as denser hosted placement or a different hosted persistence path would be new hardening steps, not claims of the current production package

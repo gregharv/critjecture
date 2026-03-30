@@ -2,7 +2,7 @@
 
 This document states what Critjecture is ready for now, what remains out of scope for the current production claim, and how that answer differs between `single_org` and `hosted`.
 
-It reflects the repo after Step 29.
+It reflects the repo after Step 31.
 
 ## Readiness Call
 
@@ -17,7 +17,7 @@ Current call by deployment target:
   - not yet broadly production-ready
   - still suitable only for carefully reviewed centrally operated dedicated-customer cells
 
-The important distinction is simple: Step 29 closes the minimum production package for `single_org`, not for `hosted`.
+The important distinction is simple: the repo now has a narrower production package for `single_org`, while `hosted` has a clearer but still limited dedicated-cell operating envelope.
 
 ## What The `single_org` Claim Covers
 
@@ -73,8 +73,7 @@ These items are not blockers for the current `single_org` claim, but they are st
 The remaining production blockers are now primarily `hosted` concerns:
 
 - stronger hosted operating evidence and recovery discipline around the dedicated-customer-cell boundary
-- production hardening of the hosted sandbox supervisor as a first-class dependency
-- a clearer hosted persistence and scale answer as concurrency and tenant count grow
+- broader hosted launch packaging, onboarding expectations, and final go/no-go criteria
 
 Those are the next roadmap items because they are required before calling `hosted` broadly production-ready.
 
@@ -82,4 +81,4 @@ Those are the next roadmap items because they are required before calling `hoste
 
 The repo can now honestly describe controlled `single_org` deployments as production-ready within one clear support envelope and one clear operator cutover path.
 
-The repo still cannot honestly describe Critjecture as broadly production-ready across both deployment modes, because `hosted` still has material isolation, supervisor, and scale work remaining.
+The repo still cannot honestly describe Critjecture as broadly production-ready across both deployment modes, because `hosted` still has material launch-packaging and operator-readiness work remaining.

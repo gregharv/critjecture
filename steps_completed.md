@@ -2165,3 +2165,191 @@ Step 29 was implemented as the final `single_org` production packaging pass: it 
 ### Verification
 
 - `pnpm --filter web exec vitest run tests/user-bootstrap.integration.test.ts tests/workspace-commercial.integration.test.ts tests/customer-review-docs.test.ts tests/sandbox-policy.test.ts`
+
+## Step 30: Hosted Isolation and Supervisor Hardening
+
+### What Was Implemented
+
+Step 30 was implemented as a real hosted deployment-boundary hardening pass: it replaced the earlier shared multi-org hosted posture with a dedicated customer-cell model and tightened the hosted sandbox supervisor into a production dependency with explicit auth, health, alerting, and recovery expectations.
+
+- Added hosted deployment validation and one-org-per-cell enforcement:
+  - `apps/web/lib/hosted-deployment.ts`
+  - `apps/web/lib/organizations.ts`
+  - `apps/web/scripts/provision-hosted-org.mjs`
+  - now:
+    - requires `CRITJECTURE_HOSTED_ORGANIZATION_SLUG` in `hosted`
+    - treats hosted as one organization per deployment cell
+    - refuses second-organization provisioning in hosted mode
+    - fails hosted auth/org resolution closed when the bound organization is missing, mismatched, or no longer unique
+- Hardened hosted supervisor auth and health signaling:
+  - `apps/web/lib/sandbox-supervisor-auth.ts`
+  - `apps/web/lib/python-sandbox.ts`
+  - `packages/sandbox-supervisor/auth.mjs`
+  - `packages/sandbox-supervisor/server.mjs`
+  - now:
+    - keeps bearer-token auth for `single_org` container-supervisor traffic
+    - uses signed HMAC headers for `hosted_supervisor` traffic
+    - verifies request timestamps and nonces to reduce replay risk
+    - binds the hosted supervisor to the same organization slug as the web app
+    - exposes structured supervisor health metadata including auth mode, bound organization slug, and runner
+- Extended health, operations, and alert handling:
+  - `apps/web/lib/operations.ts`
+  - `apps/web/lib/operations-types.ts`
+  - `apps/web/components/operations-page-client.tsx`
+  - now:
+    - adds a hosted-deployment health check
+    - surfaces supervisor auth mode, bound organization, and runner in operations
+    - opens dedicated alerts for hosted binding failures and supervisor auth failures
+- Rewrote the hosted production docs and runbooks:
+  - `README.md`
+  - `overview.md`
+  - `production_readiness.md`
+  - `sandbox.md`
+  - `apps/web/.env.local.example`
+  - `apps/web/docs/hosted_provisioning.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/runbooks/hosted-operations.md`
+  - `apps/web/docs/runbooks/sandbox-failures.md`
+  - `packages/sandbox-supervisor/README.md`
+  - now documents:
+    - hosted as a dedicated-customer-cell deployment boundary
+    - signed supervisor credentials and bound-org requirements
+    - named ownership expectations for hosted supervisor operations
+    - explicit hosted recovery expectations rather than pilot caveats
+- Added targeted regression coverage:
+  - `apps/web/tests/hosted-deployment.test.ts`
+  - `apps/web/tests/hosted-provisioning.test.ts`
+  - `apps/web/tests/hosted-docs.test.ts`
+  - `apps/web/tests/sandbox-supervisor-auth.test.ts`
+  - `apps/web/tests/sandbox-policy.test.ts`
+  - covers:
+    - hosted binding validation failures
+    - hosted auth gating against the bound organization
+    - hosted binding alert creation
+    - signed supervisor request verification
+    - provisioning refusal for a second hosted organization
+    - hosted supervisor health metadata and signed request headers
+
+### Current Step 30 Behavior
+
+- `hosted`
+  - requires `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
+  - assumes exactly one organization/customer per deployment cell
+  - refuses to authenticate users against any organization outside that bound hosted cell
+  - requires signed supervisor requests using `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID` and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
+- hosted supervisor health now reports:
+  - auth mode
+  - bound organization slug
+  - runner identity
+- hosted operations now treat binding drift and supervisor auth failures as explicit operational incidents rather than generic sandbox unavailability
+
+### Important Implementation Details
+
+- Step 30 intentionally strengthened the hosted isolation story by reducing deployment density:
+  - hosted is now modeled as a dedicated customer cell, not a shared multi-org runtime
+- `single_org` behavior was preserved:
+  - the existing container-supervisor path still uses bearer-token auth
+  - the narrower `single_org` production claim is unchanged
+- This step did not answer the long-term hosted persistence question:
+  - SQLite-first runtime and broader hosted scale-envelope decisions remain Step 31 work
+
+### Verification
+
+- `pnpm --filter web exec vitest run`
+- `node --check packages/sandbox-supervisor/server.mjs`
+- `node --check packages/sandbox-supervisor/auth.mjs`
+
+## Step 31: Hosted Persistence and Recovery Discipline
+
+### What Was Implemented
+
+Step 31 was implemented as a conservative hosted persistence and recovery pass: it kept SQLite for hosted dedicated customer cells, made that support envelope explicit in app health and operations, added hosted restore-drill evidence tooling, and aligned recovery docs and fixtures to the one-org-per-cell hosted model from Step 30.
+
+- Added a shared hosted persistence snapshot:
+  - `apps/web/lib/persistence-policy.ts`
+  - `apps/web/lib/app-db.ts`
+  - `apps/web/lib/operations.ts`
+  - `apps/web/lib/operations-types.ts`
+  - `apps/web/components/operations-page-client.tsx`
+  - now:
+    - reports `sqlite` as the current engine
+    - verifies `WAL` journal mode in health
+    - surfaces deployment topology, writable-app-instance count, database path, and storage root
+    - records the current hosted recovery envelope of:
+      - one writable app instance per cell
+      - synchronous requests only
+      - backup cadence every `24` hours plus before schema/storage-layout changes
+      - target `24`-hour RPO and `2`-hour RTO
+      - sandbox concurrency envelope of `1` active run per user and `4` globally
+- Added hosted restore-drill evidence tooling:
+  - `apps/web/scripts/lib/release-proof.mjs`
+  - `apps/web/scripts/restore-drill-hosted.mjs`
+  - `apps/web/package.json`
+  - `package.json`
+  - now:
+    - adds `pnpm restore:drill:hosted`
+    - creates a real backup from the configured hosted runtime
+    - restores into a clean temporary target
+    - validates the restored SQLite file against current migrations
+    - emits JSON and Markdown evidence records for hosted environments
+- Updated recovery fixtures to match the hosted dedicated-cell boundary:
+  - `apps/web/scripts/lib/recovery.mjs`
+  - `apps/web/tests/backup-recovery.test.ts`
+  - now:
+    - models hosted backup verification as one organization per hosted cell
+    - verifies hosted restore results against a one-org fixture instead of the older shared multi-org scenario
+- Rewrote hosted persistence and recovery docs:
+  - `README.md`
+  - `production_readiness.md`
+  - `apps/web/docs/deployment.md`
+  - `apps/web/docs/hosted_provisioning.md`
+  - `apps/web/docs/security_review.md`
+  - `apps/web/docs/runbooks/hosted-operations.md`
+  - `apps/web/docs/runbooks/hosted-restore-drill.md`
+  - now documents:
+    - SQLite per dedicated hosted customer cell as the current supported answer
+    - single-writer hosted topology and no active-active multi-writer replicas
+    - hosted backup cadence, restore-drill cadence, RPO, and RTO expectations
+    - whole-cell recovery guidance instead of improvising in place
+- Added targeted regression coverage:
+  - `apps/web/tests/hosted-deployment.test.ts`
+  - `apps/web/tests/release-proof.test.ts`
+  - `apps/web/tests/hosted-docs.test.ts`
+  - covers:
+    - hosted persistence metadata in health
+    - hosted restore-drill record generation
+    - hosted docs staying aligned with the explicit SQLite-backed dedicated-cell envelope
+
+### Current Step 31 Behavior
+
+- `hosted`
+  - is explicitly supported as one SQLite-backed dedicated customer cell
+  - assumes one writable web-app instance per cell
+  - requires `WAL` journal mode for the supported envelope
+  - keeps the current synchronous request model and sandbox concurrency limits
+  - now has a hosted-specific restore-drill command and environment evidence record
+- health and operations now surface:
+  - engine
+  - journal mode
+  - topology
+  - resolved database path
+  - resolved storage root
+  - backup/restore expectations
+
+### Important Implementation Details
+
+- Step 31 intentionally did not introduce Postgres, libSQL, or any second database backend:
+  - the supported hosted answer is still SQLite, but now inside an explicit single-writer dedicated-cell envelope
+- `single_org` release-proof behavior was preserved:
+  - Step 31 adds a hosted restore-drill path, not a hosted release-proof gate
+- This step narrowed the supported hosted claim instead of overpromising scale:
+  - no multi-writer hosted replicas
+  - no shared-cell density work
+  - no queue-backed heavy-job expansion
+
+### Verification
+
+- `pnpm --filter web exec vitest run`
+- `node --check apps/web/scripts/restore-drill-hosted.mjs`
+- `node --check apps/web/scripts/lib/release-proof.mjs`

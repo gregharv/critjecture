@@ -367,6 +367,106 @@ export function OperationsPageClient() {
           <section className="operations-panel">
             <div className="operations-panel__header">
               <div>
+                <div className="operations-panel__eyebrow">Persistence Envelope</div>
+                <h2>SQLite and Recovery</h2>
+              </div>
+              <span className="operations-panel__meta">
+                {summary.health.persistence.deploymentMode}
+              </span>
+            </div>
+            <div className="operations-metrics">
+              <article className="operations-metric">
+                <span className="operations-metric__label">Engine</span>
+                <strong>{summary.health.persistence.engine}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Journal</span>
+                <strong>{summary.health.persistence.journalMode.toUpperCase()}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Writable app instances</span>
+                <strong>{formatInteger(summary.health.persistence.writableAppInstances)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Target RPO</span>
+                <strong>{formatInteger(summary.health.persistence.targetRpoHours)}h</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Target RTO</span>
+                <strong>{formatInteger(summary.health.persistence.targetRtoHours)}h</strong>
+              </article>
+            </div>
+            <div className="operations-health-list">
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Topology</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.persistence.topology}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Request model</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.persistence.requestModel}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Database path</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.persistence.databasePath}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Storage root</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.persistence.storageRoot}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Backup cadence</strong>
+                  <span className="operations-panel__meta">
+                    every {formatInteger(summary.health.persistence.backupCadenceHours)}h
+                  </span>
+                </div>
+                <p>
+                  {summary.health.persistence.backupBeforeSchemaChanges
+                    ? "Take an additional backup before schema or storage-layout changes."
+                    : "No extra schema-change backup requirement recorded."}
+                </p>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Restore drill cadence</strong>
+                  <span className="operations-panel__meta">
+                    {summary.health.persistence.restoreDrillCadence}
+                  </span>
+                </div>
+              </article>
+              <article className="operations-health-item">
+                <div className="operations-health-item__header">
+                  <strong>Sandbox concurrency envelope</strong>
+                  <span className="operations-panel__meta">
+                    {formatInteger(summary.health.persistence.sandboxConcurrency.perUserActiveRuns)}
+                    {" / "}
+                    {formatInteger(summary.health.persistence.sandboxConcurrency.globalActiveRuns)}
+                  </span>
+                </div>
+                <p>Per-user active runs / global active runs.</p>
+              </article>
+            </div>
+          </section>
+
+          <section className="operations-panel">
+            <div className="operations-panel__header">
+              <div>
                 <div className="operations-panel__eyebrow">Open Alerts</div>
                 <h2>Warnings and Incidents</h2>
               </div>

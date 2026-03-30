@@ -14,6 +14,7 @@
     "backup:create": "node ./scripts/create-backup.mjs",
     "backup:restore": "node ./scripts/restore-backup.mjs",
     "backup:verify": "node ./scripts/verify-backups.mjs",
+    "restore:drill:hosted": "node ./scripts/restore-drill-hosted.mjs",
     "restore:drill:single-org": "node ./scripts/restore-drill-single-org.mjs",
     "release:proof:single-org": "node ./scripts/release-proof-single-org.mjs",
     "sync:pi-web-ui-css": "node ./scripts/sync-pi-web-ui-css.mjs",

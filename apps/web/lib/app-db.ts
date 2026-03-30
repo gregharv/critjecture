@@ -101,6 +101,19 @@ export async function ensureDatabaseReady() {
 
 export const getAppDatabase = ensureDatabaseReady;
 
+export async function getAppDatabaseRuntimeMetadata() {
+  await ensureDatabaseReady();
+  const { dbFilePath } = await resolveMigrationPaths();
+  const journalMode = String(
+    sqliteInstance?.pragma("journal_mode", { simple: true }) ?? "unknown",
+  ).toLowerCase();
+
+  return {
+    databasePath: dbFilePath,
+    journalMode,
+  };
+}
+
 export async function resetAppDatabaseForTests() {
   migrationPromise = null;
   databaseInstance = null;

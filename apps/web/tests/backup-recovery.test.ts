@@ -49,6 +49,8 @@ type RecoveryModule = {
   }) => Promise<{
     results: Array<{
       deploymentMode: "hosted" | "single_org";
+      restoredOrganizationSlugs: string[];
+      tableCounts: Record<string, number>;
     }>;
   }>;
 };
@@ -248,11 +250,20 @@ describe("backup recovery", () => {
   it("runs recovery drills for both single_org and hosted modes", async () => {
     const { verifyBackupDrills } = await getRecoveryModule();
     const result = await verifyBackupDrills({ deploymentMode: "both" });
+    const hostedResult = result.results.find((entry) => entry.deploymentMode === "hosted");
 
     expect(result.results).toHaveLength(2);
     expect(result.results.map((entry) => entry.deploymentMode).sort()).toEqual([
       "hosted",
       "single_org",
     ]);
+    expect(hostedResult).toMatchObject({
+      restoredOrganizationSlugs: ["hosted-org"],
+      tableCounts: {
+        organization_memberships: 1,
+        organizations: 1,
+        users: 1,
+      },
+    });
   });
 });

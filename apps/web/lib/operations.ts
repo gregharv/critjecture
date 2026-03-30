@@ -47,6 +47,7 @@ import {
   type RateLimitedRouteGroup,
   type OperationsRouteGroup,
 } from "@/lib/operations-policy";
+import { getRuntimePersistenceSnapshot } from "@/lib/persistence-policy";
 import type {
   CommercialBlockSummary,
   HealthCheckResult,
@@ -1277,6 +1278,7 @@ export function clampChatMaxTokens(value: number | undefined) {
 export async function getHealthSummary(): Promise<HealthSummary> {
   const checks: HealthCheckResult[] = [];
   const now = Date.now();
+  let persistence: HealthSummary["persistence"] | null = null;
   const [hostedValidation, sandboxBackendHealth, sandboxSnapshot] = await Promise.all([
     getHostedDeploymentValidation(),
     getSandboxBackendHealth(),
@@ -1321,6 +1323,33 @@ export async function getHealthSummary(): Promise<HealthSummary> {
       detail:
         caughtError instanceof Error ? caughtError.message : "Storage root is unavailable.",
       name: "storage",
+      status: "fail",
+    });
+  }
+
+  try {
+    persistence = await getRuntimePersistenceSnapshot();
+
+    if (persistence.journalMode !== "wal") {
+      checks.push({
+        detail: `SQLite persistence is using ${persistence.journalMode} journal mode at ${persistence.databasePath}. Hosted and single-writer recovery expectations require WAL.`,
+        name: "persistence",
+        status: "fail",
+      });
+    } else {
+      checks.push({
+        detail: `${persistence.engine} is configured at ${persistence.databasePath} with ${persistence.journalMode.toUpperCase()} journaling and ${persistence.topology} topology.`,
+        name: "persistence",
+        status: "ok",
+      });
+    }
+  } catch (caughtError) {
+    checks.push({
+      detail:
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to inspect runtime persistence metadata.",
+      name: "persistence",
       status: "fail",
     });
   }
@@ -1408,6 +1437,30 @@ export async function getHealthSummary(): Promise<HealthSummary> {
 
   return {
     checks,
+    persistence:
+      persistence ??
+      ({
+        backupCadenceHours: 24,
+        backupBeforeSchemaChanges: true,
+        databasePath: "unknown",
+        deploymentMode: hostedValidation.code === "disabled" ? "single_org" : "hosted",
+        engine: "sqlite",
+        journalMode: "unknown",
+        requestModel: "synchronous_requests_only",
+        restoreDrillCadence: "before_first_cutover_and_quarterly",
+        sandboxConcurrency: {
+          globalActiveRuns: 4,
+          perUserActiveRuns: 1,
+        },
+        storageRoot: "unknown",
+        targetRpoHours: 24,
+        targetRtoHours: 2,
+        topology:
+          hostedValidation.code === "disabled"
+            ? "single_writer_customer_managed_cell"
+            : "single_writer_dedicated_hosted_cell",
+        writableAppInstances: 1,
+      } satisfies HealthSummary["persistence"]),
     sandbox: {
       ...sandboxSnapshot,
       authMode: sandboxBackendHealth.authMode,

@@ -28,6 +28,7 @@ This file indexes the project documents that live in the repository root and in 
 
 - [Backup And Restore Failures](./apps/web/docs/runbooks/backup-restore-failures.md)
 - [Hosted Operations](./apps/web/docs/runbooks/hosted-operations.md)
+- [Hosted Restore Drill](./apps/web/docs/runbooks/hosted-restore-drill.md)
 - [Migration Failures](./apps/web/docs/runbooks/migration-failures.md)
 - [On-Prem Operations](./apps/web/docs/runbooks/onprem-operations.md)
 - [Sandbox Failures](./apps/web/docs/runbooks/sandbox-failures.md)
