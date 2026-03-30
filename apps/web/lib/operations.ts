@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import type { SessionUser } from "@/lib/auth-state";
 import { ensureStorageRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
+import { cleanupExpiredAnalysisResults } from "@/lib/analysis-results";
 import {
   operationalAlerts,
   knowledgeImportJobFiles,
@@ -871,6 +872,7 @@ export async function runOperationsMaintenance() {
     db.delete(rateLimitBuckets).where(lt(rateLimitBuckets.updatedAt, bucketCutoff)),
     db.delete(operationalAlerts).where(alertsCleanupWhere),
   ]);
+  await cleanupExpiredAnalysisResults();
 
   await evaluateSandboxOperationalAlerts().catch((caughtError) => {
     logStructuredError("operations.sandbox_alert_evaluation_failed", caughtError);

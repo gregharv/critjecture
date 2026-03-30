@@ -36,6 +36,7 @@ import {
   replaceSandboxGeneratedAssets,
   rejectSandboxRun,
   waitForSandboxRunTerminal,
+  type SandboxInlineWorkspaceFile,
 } from "@/lib/sandbox-runs";
 import {
   logStructuredError,
@@ -130,6 +131,8 @@ export type GeneratedSandboxAsset = {
   relativePath: string;
   runId: string;
 };
+
+export type SandboxedInlineWorkspaceFile = SandboxInlineWorkspaceFile;
 
 export type SandboxedCommandResult = {
   exitCode: number;
@@ -295,6 +298,31 @@ export function normalizeGeneratedAssetRelativePath(relativePath: string) {
     !normalized.startsWith(`${SANDBOX_OUTPUTS_DIR}/`)
   ) {
     throw new Error("Generated asset path must stay inside the sandbox outputs directory.");
+  }
+
+  return normalized;
+}
+
+export function normalizeInlineWorkspaceRelativePath(relativePath: string) {
+  const trimmed = relativePath.trim().replaceAll("\\", "/");
+
+  if (!trimmed) {
+    throw new Error("Inline workspace file path must not be empty.");
+  }
+
+  if (trimmed.startsWith("/")) {
+    throw new Error("Inline workspace file path must be relative.");
+  }
+
+  const normalized = path.posix.normalize(trimmed);
+
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../")
+  ) {
+    throw new Error("Inline workspace file path must stay inside the sandbox workspace.");
   }
 
   return normalized;
@@ -637,6 +665,24 @@ async function stageInputFiles(
   }
 
   return stagedFiles;
+}
+
+export async function stageInlineWorkspaceFiles(
+  files: SandboxedInlineWorkspaceFile[],
+  workspaceDir: string,
+) {
+  const uniqueFiles = new Map<string, string>();
+
+  for (const file of files) {
+    uniqueFiles.set(normalizeInlineWorkspaceRelativePath(file.relativePath), file.content);
+  }
+
+  for (const [relativePath, content] of uniqueFiles) {
+    const absolutePath = path.join(workspaceDir, ...relativePath.split("/"));
+
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, content, "utf8");
+  }
 }
 
 async function readMagicHeader(absolutePath: string, length = 8) {
@@ -1102,6 +1148,7 @@ async function withSandboxHeartbeat<T>(runId: string, operation: () => Promise<T
 async function runLocalSandboxExecution(input: {
   code: string;
   inputFiles: string[];
+  inlineWorkspaceFiles: SandboxedInlineWorkspaceFile[];
   limits: SandboxLimitsSnapshot;
   organizationId: string;
   organizationSlug: string;
@@ -1124,6 +1171,7 @@ async function runLocalSandboxExecution(input: {
 
   try {
     return await withSandboxHeartbeat(input.runId, async () => {
+      await stageInlineWorkspaceFiles(input.inlineWorkspaceFiles, workspaceDir);
       const stagedFiles = await stageInputFiles(
         input.inputFiles,
         input.organizationId,
@@ -1274,6 +1322,7 @@ async function processClaimedLocalSandboxRun(runId: string) {
   await runLocalSandboxExecution({
     code: executionPayload.code,
     inputFiles: executionPayload.inputFiles,
+    inlineWorkspaceFiles: executionPayload.inlineWorkspaceFiles,
     limits: {
       artifactMaxBytes: sandboxRun.artifactMaxBytes,
       artifactTtlMs: sandboxRun.artifactTtlMs,
@@ -1349,6 +1398,7 @@ function ensureLocalSandboxSupervisorRunning() {
 async function executeHostedSandboxRun(options: {
   code: string;
   inputFiles: string[];
+  inlineWorkspaceFiles: SandboxedInlineWorkspaceFile[];
   limits: SandboxLimitsSnapshot;
   organizationId: string;
   organizationSlug: string;
@@ -1372,6 +1422,7 @@ async function executeHostedSandboxRun(options: {
       body: JSON.stringify({
         code: options.code,
         inputFiles: options.inputFiles,
+        inlineWorkspaceFiles: options.inlineWorkspaceFiles,
         limits: options.limits,
         organizationId: options.organizationId,
         organizationSlug: options.organizationSlug,
@@ -1538,6 +1589,7 @@ async function finalizeSandboxRunResult(
 export async function executeSandboxedCommand(options: {
   code: string;
   inputFiles?: string[];
+  inlineWorkspaceFiles?: SandboxedInlineWorkspaceFile[];
   organizationId: string;
   organizationSlug: string;
   role: UserRole;
@@ -1547,10 +1599,25 @@ export async function executeSandboxedCommand(options: {
   userId: string;
 }): Promise<SandboxedCommandResult> {
   const normalizedCode = options.code.trim();
+  const normalizedInlineWorkspaceFiles = new Map<string, string>();
 
   if (!normalizedCode) {
     throw new Error("Sandbox code must not be empty.");
   }
+
+  for (const file of options.inlineWorkspaceFiles ?? []) {
+    normalizedInlineWorkspaceFiles.set(
+      normalizeInlineWorkspaceRelativePath(file.relativePath),
+      file.content,
+    );
+  }
+
+  const inlineWorkspaceFiles = [...normalizedInlineWorkspaceFiles.entries()].map(
+    ([relativePath, content]) => ({
+      content,
+      relativePath,
+    }),
+  );
 
   await reconcileStaleSandboxRuns();
   await cleanupExpiredSandboxArtifacts({
@@ -1561,6 +1628,7 @@ export async function executeSandboxedCommand(options: {
   const queuedRun = await queueSandboxRun({
     code: normalizedCode,
     inputFiles: options.inputFiles ?? [],
+    inlineWorkspaceFiles,
     organizationId: options.organizationId,
     runtimeToolCallId: options.runtimeToolCallId,
     toolName: options.toolName,
@@ -1609,6 +1677,7 @@ export async function executeSandboxedCommand(options: {
     await executeHostedSandboxRun({
       code: normalizedCode,
       inputFiles: options.inputFiles ?? [],
+      inlineWorkspaceFiles,
       limits: queuedRun.limits,
       organizationId: options.organizationId,
       organizationSlug: options.organizationSlug,

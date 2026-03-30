@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import {
+  AnalysisResultValidationError,
   buildCsvSchemas,
   parseChartAnalysisStdout,
   storeAnalysisResult,
@@ -135,7 +136,7 @@ export async function POST(request: Request) {
         : null;
     const analysisResult =
       chartPayload && parsedRequest.turnId
-        ? storeAnalysisResult({
+        ? await storeAnalysisResult({
             chart: chartPayload,
             csvSchemas,
             inputFiles: parsedRequest.inputFiles,
@@ -257,6 +258,22 @@ export async function POST(request: Request) {
                 },
               ]
             : [],
+      });
+    }
+
+    if (caughtError instanceof AnalysisResultValidationError) {
+      return finalizeObservedRequest(observed, {
+        errorCode: caughtError.code,
+        metadata: {
+          status: "failed",
+        },
+        outcome: "error",
+        response: buildObservedErrorResponse(caughtError.message, 400, {
+          status: "failed",
+        }),
+        runtimeToolCallId: parsedRequest.runtimeToolCallId ?? null,
+        toolName: "run_data_analysis",
+        turnId: parsedRequest.turnId ?? null,
       });
     }
 

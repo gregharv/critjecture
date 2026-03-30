@@ -5,14 +5,64 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  createBackup,
-  inspectRuntimeState,
-  loadBackupManifest,
-  restoreBackup,
-  runMigrationsOnDatabasePath,
-  verifyBackupDrills,
-} from "../scripts/lib/recovery.mjs";
+type BackupManifest = {
+  artifacts: {
+    database: {
+      sha256: string;
+    };
+  };
+  organizations: string[];
+};
+
+type RecoveryModule = {
+  createBackup: (input: {
+    databasePath: string;
+    deploymentMode: "hosted" | "single_org";
+    outputDir: string;
+    storageRoot: string;
+  }) => Promise<{
+    backupDir: string;
+    manifest: BackupManifest;
+  }>;
+  inspectRuntimeState: (input: {
+    databasePath: string;
+    storageRoot: string;
+  }) => Promise<{
+    organizationSlugs: string[];
+    tableCounts: Record<string, number>;
+  }>;
+  loadBackupManifest: (backupDir: string) => Promise<{
+    manifest: BackupManifest;
+    manifestPath: string;
+  }>;
+  restoreBackup: (input: {
+    backupDir: string;
+    databasePath: string;
+    storageRoot: string;
+  }) => Promise<{
+    databasePath: string;
+    storageRoot: string;
+  }>;
+  runMigrationsOnDatabasePath: (databasePath: string) => Promise<void>;
+  verifyBackupDrills: (input?: {
+    deploymentMode?: "both" | "hosted" | "single_org";
+  }) => Promise<{
+    results: Array<{
+      deploymentMode: "hosted" | "single_org";
+    }>;
+  }>;
+};
+
+let recoveryModulePromise: Promise<RecoveryModule> | null = null;
+
+async function getRecoveryModule() {
+  if (!recoveryModulePromise) {
+    // @ts-expect-error The backup helper is authored as ESM .mjs; tests use a typed wrapper.
+    recoveryModulePromise = import("../scripts/lib/recovery.mjs");
+  }
+
+  return recoveryModulePromise;
+}
 
 const tempRoots = new Set<string>();
 
@@ -42,6 +92,7 @@ async function seedRuntimeFixture(rootDir: string) {
   const companyFileContent = "fixture backup content";
 
   await mkdir(storageRoot, { recursive: true });
+  const { runMigrationsOnDatabasePath } = await getRecoveryModule();
   await runMigrationsOnDatabasePath(databasePath);
 
   const sqlite = new Database(databasePath);
@@ -91,6 +142,7 @@ afterEach(async () => {
 
 describe("backup recovery", () => {
   it("creates and restores a clean runtime backup", async () => {
+    const { createBackup, inspectRuntimeState, restoreBackup } = await getRecoveryModule();
     const rootDir = await createTempRoot();
     const fixture = await seedRuntimeFixture(rootDir);
     const backupRoot = path.join(rootDir, "backups");
@@ -126,6 +178,7 @@ describe("backup recovery", () => {
   });
 
   it("rejects backup output paths inside the active storage root", async () => {
+    const { createBackup } = await getRecoveryModule();
     const rootDir = await createTempRoot();
     const fixture = await seedRuntimeFixture(rootDir);
 
@@ -140,6 +193,7 @@ describe("backup recovery", () => {
   });
 
   it("rejects restoring into non-empty target storage", async () => {
+    const { createBackup, restoreBackup } = await getRecoveryModule();
     const rootDir = await createTempRoot();
     const fixture = await seedRuntimeFixture(rootDir);
     const backupRoot = path.join(rootDir, "backups");
@@ -165,6 +219,7 @@ describe("backup recovery", () => {
   });
 
   it("rejects checksum mismatches before restore", async () => {
+    const { createBackup, loadBackupManifest, restoreBackup } = await getRecoveryModule();
     const rootDir = await createTempRoot();
     const fixture = await seedRuntimeFixture(rootDir);
     const backupRoot = path.join(rootDir, "backups");
@@ -191,6 +246,7 @@ describe("backup recovery", () => {
   });
 
   it("runs recovery drills for both single_org and hosted modes", async () => {
+    const { verifyBackupDrills } = await getRecoveryModule();
     const result = await verifyBackupDrills({ deploymentMode: "both" });
 
     expect(result.results).toHaveLength(2);

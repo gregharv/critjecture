@@ -10,6 +10,7 @@ The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` a
 - Searches organization data and asks for clarification when multiple files are plausible.
 - Runs structured data analysis in an isolated Python sandbox using Polars.
 - Generates PNG charts and PDF documents from approved company data.
+- Persists short-lived chart-ready analysis results in SQLite so `analysisResultId` survives normal app restarts within its TTL.
 - Lets authenticated users upload approved tenant files into organization-owned knowledge storage.
 - Records chat turns, tool calls, accessed files, and assistant responses in an audit dashboard.
 - Provides scripted backup creation, clean restore tooling, and repeatable recovery drills for the persisted runtime state.

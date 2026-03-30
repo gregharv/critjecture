@@ -1,11 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   normalizeGeneratedAssetRelativePath,
+  normalizeInlineWorkspaceRelativePath,
   SandboxValidationError,
+  stageInlineWorkspaceFiles,
   validateCsvAnalysisCode,
   type StagedSandboxFile,
 } from "@/lib/python-sandbox";
@@ -24,6 +26,39 @@ describe("python sandbox CSV validation", () => {
   it("rejects path traversal for generated assets", () => {
     expect(() => normalizeGeneratedAssetRelativePath("../secret.txt")).toThrow(
       "Generated asset path must stay inside the sandbox outputs directory.",
+    );
+  });
+
+  it("rejects path traversal for inline workspace files", () => {
+    expect(() => normalizeInlineWorkspaceRelativePath("../chart_payload.json")).toThrow(
+      "Inline workspace file path must stay inside the sandbox workspace.",
+    );
+  });
+
+  it("stages inline workspace files into the local sandbox workspace", async () => {
+    const env = await createTestAppEnvironment();
+    cleanup = env.cleanup;
+    const workspaceDir = path.join(env.rootDir, "workspace");
+
+    await stageInlineWorkspaceFiles(
+      [
+        {
+          content: "{\"x\":[\"Acme\"],\"y\":[1200]}",
+          relativePath: "chart_payload.json",
+        },
+        {
+          content: "nested",
+          relativePath: "fixtures/example.txt",
+        },
+      ],
+      workspaceDir,
+    );
+
+    await expect(readFile(path.join(workspaceDir, "chart_payload.json"), "utf8")).resolves.toBe(
+      "{\"x\":[\"Acme\"],\"y\":[1200]}",
+    );
+    await expect(readFile(path.join(workspaceDir, "fixtures", "example.txt"), "utf8")).resolves.toBe(
+      "nested",
     );
   });
 

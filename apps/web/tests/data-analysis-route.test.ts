@@ -9,6 +9,18 @@ import {
 } from "@/tests/helpers/route-test-utils";
 
 const mocks = vi.hoisted(() => {
+  class MockAnalysisResultValidationError extends Error {
+    code: "payload_bytes_limit" | "point_count_limit";
+
+    constructor(
+      message: string,
+      code: "payload_bytes_limit" | "point_count_limit",
+    ) {
+      super(message);
+      this.code = code;
+    }
+  }
+
   class MockSandboxAdmissionError extends Error {
     sandboxRunId: string;
 
@@ -63,6 +75,7 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
+    AnalysisResultValidationError: MockAnalysisResultValidationError,
     SandboxAdmissionError: MockSandboxAdmissionError,
     SandboxExecutionError: MockSandboxExecutionError,
     SandboxUnavailableError: MockSandboxUnavailableError,
@@ -85,6 +98,7 @@ vi.mock("@/lib/auth-state", () => ({
 }));
 
 vi.mock("@/lib/analysis-results", () => ({
+  AnalysisResultValidationError: mocks.AnalysisResultValidationError,
   buildCsvSchemas: mocks.buildCsvSchemas,
   parseChartAnalysisStdout: mocks.parseChartAnalysisStdout,
   storeAnalysisResult: mocks.storeAnalysisResult,
@@ -135,7 +149,7 @@ describe("POST /api/data-analysis/run", () => {
     mocks.runOperationsMaintenance.mockResolvedValue(undefined);
     mocks.buildCsvSchemas.mockResolvedValue([]);
     mocks.parseChartAnalysisStdout.mockReturnValue(null);
-    mocks.storeAnalysisResult.mockReturnValue(null);
+    mocks.storeAnalysisResult.mockResolvedValue(null);
     mocks.executeSandboxedCommand.mockResolvedValue({
       exitCode: 0,
       generatedAssets: [],
@@ -274,7 +288,7 @@ describe("POST /api/data-analysis/run", () => {
       y: [1200],
       yLabel: "Payout",
     });
-    mocks.storeAnalysisResult.mockReturnValue({ id: "analysis-1" });
+    mocks.storeAnalysisResult.mockResolvedValue({ id: "analysis-1" });
 
     const response = await POST(createJsonRequest("http://localhost/api/data-analysis/run", {
       code: "print('ok')",
@@ -298,5 +312,41 @@ describe("POST /api/data-analysis/run", () => {
       },
     ]);
     expect(body.summary).toContain("analysisResultId analysis-1");
+  });
+
+  it("returns 400 when chart-ready analysis exceeds persistence limits", async () => {
+    mocks.buildCsvSchemas.mockResolvedValue([
+      {
+        columns: ["ledger_year", "contractor", "payout"],
+        file: "admin/contractors_2026.csv",
+      },
+    ]);
+    mocks.parseChartAnalysisStdout.mockReturnValue({
+      chartType: "bar",
+      title: "Contractor payouts",
+      x: ["Acme"],
+      xLabel: "Contractor",
+      y: [1200],
+      yLabel: "Payout",
+    });
+    mocks.storeAnalysisResult.mockRejectedValue(
+      new mocks.AnalysisResultValidationError(
+        "Chart-ready analysis produced too many plotted values.",
+        "point_count_limit",
+      ),
+    );
+
+    const response = await POST(createJsonRequest("http://localhost/api/data-analysis/run", {
+      code: "print('ok')",
+      inputFiles: ["admin/contractors_2026.csv"],
+      turnId: "turn-1",
+    }));
+    const body = await readJson<{ error: string; status?: string }>(response);
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      error: "Chart-ready analysis produced too many plotted values.",
+      status: "failed",
+    });
   });
 });

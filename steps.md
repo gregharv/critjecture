@@ -2,27 +2,7 @@
 
 This file tracks the next implementation milestones after the work already captured in `steps_completed.md`.
 
-Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 22 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, tested recovery tooling, and production observability/runbooks. The remaining gaps are narrower and more packaging-oriented.
-
-## Step 23: Durable Analysis Results and Chart Pipeline Scaling
-
-### Goal
-
-Remove the current same-process, in-memory limitation from `analysisResultId` and make chart generation safer for larger workloads.
-
-### What Should Be Implemented
-
-- persist analysis-result payloads outside in-memory process state
-- bind persisted analysis results to user, org, turn, TTL, and cleanup policy
-- let chart generation read structured stored payloads directly instead of embedding larger JSON blobs back into Python source
-- add explicit payload-size or point-count limits for chart-ready data
-- define when large chart/document work should stay synchronous vs move to async jobs
-
-### Acceptance Criteria
-
-- `analysisResultId` survives normal app restarts within its intended TTL
-- chart rendering no longer depends on same-process memory continuity
-- oversized chart payloads are rejected or reduced predictably before rendering
+Critjecture is closer to a controlled pilot than to full production readiness. Several items in `production_readiness.md` are now outdated because Steps 16 through 23 already shipped rate limits, operations dashboards, tests, uploads, chat history, admin/governance controls, supervisor-backed sandbox hardening, tested recovery tooling, production observability/runbooks, and durable chart intermediates. The remaining gaps are narrower and more packaging-oriented.
 
 ## Step 24: Security and Deployment Review Package
 
@@ -76,6 +56,11 @@ Package Critjecture for real customer security review and repeatable deployment 
   - webhook-delivered external operational alerts
   - observed admin/governance/health routes with propagated request ids
   - runbooks for sandbox, storage, migration, backup/restore, hosted, and on-prem incidents
-- The main remaining blockers are now durable intermediate storage and deployment/security packaging, not core product surface area.
+- Step 23 is complete:
+  - durable SQLite-backed `analysisResultId` storage with TTL cleanup and org/user/turn binding
+  - chart rendering from server-staged structured payload files instead of JSON embedded back into Python source
+  - explicit chart-ready point-count and payload-byte limits for synchronous rendering
+  - documented boundary that larger chart/document workloads remain future async-job work
+- The main remaining blocker is now deployment/security packaging, not core product surface area.
 - A controlled on-prem single-org pilot may be viable sooner than a broadly hosted production rollout.
-- Hosted production still has a higher bar than on-prem because the web app expects a dedicated sandbox supervisor service and the remaining work is concentrated in durable chart intermediates plus security/deployment review packaging.
+- Hosted production still has a higher bar than on-prem because the web app expects a dedicated sandbox supervisor service and the remaining work is concentrated in security/deployment review packaging plus any later async-job expansion.

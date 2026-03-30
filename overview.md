@@ -52,8 +52,6 @@ The current MVP is not for:
 * **Hundreds of thousands of plotted points** passed directly through the current chart pipeline.
   * The current flow works well when analysis reduces large source data into a small chart-ready summary.
   * It does not scale well if the model tries to emit or render massive `x`/`y` arrays directly.
-* **Durable multi-instance intermediate analysis storage.**
-  * The current `analysisResultId` chart flow uses an in-memory same-process store.
 * **Long-running async jobs** such as bulk heavy transformations, background chart rendering, or warehouse-style analytics.
 * **General-purpose autonomous coding or arbitrary enterprise automation.**
   * The product is intentionally tool-constrained and workflow-specific.
@@ -68,22 +66,19 @@ The current chart pipeline is:
 4. store that payload temporarily as an `analysisResultId`
 5. render the chart from that stored payload
 
-This is a good fit for summarized charts. It will break down if the chart payload itself becomes very large.
+This is a good fit for summarized charts. The intermediate result is now durable within its TTL, but the flow still breaks down if the chart payload itself becomes very large.
 
 Current limitations:
 
 * **Stdout-bound chart payloads:** chart-ready JSON currently comes back through sandbox stdout, which has a fixed byte cap.
-* **In-memory intermediate storage:** `analysisResultId` data is stored in-process, so it is not a durable or horizontally scalable intermediate store.
+* **Bounded intermediate storage:** `analysisResultId` data is now persisted durably in SQLite, but the system intentionally caps payload bytes and plotted point counts so synchronous rendering stays predictable.
 * **Tight sandbox limits:** chart generation still runs under strict timeout, memory, process, and artifact-size limits.
 * **Matplotlib readability limits:** even if huge point sets render successfully, the result is often visually useless without aggregation or sampling.
-* **Code-string embedding:** the current graph route serializes structured chart data back into Python source, which is fine for small summaries but inefficient for very large payloads.
+* **No async chart/document jobs yet:** large chart or document workloads still fail synchronously once they exceed the current request-time budget or chart-ready caps.
 
 Near-term scaling ideas:
 
 * **Require aggregation, binning, or top-N reduction** before a chart can be rendered.
-* **Add explicit point-count caps** for chart-ready payloads.
-* **Move intermediate analysis results into durable storage** instead of an in-memory map.
-* **Let the graph renderer read stored structured data directly** instead of embedding large JSON blobs into Python source.
 * **Introduce async job handling** once charts or analysis need to exceed the current request-time sandbox budget.
 
 ### 7. Current System Summary

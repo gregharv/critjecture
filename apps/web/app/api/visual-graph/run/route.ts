@@ -104,7 +104,7 @@ function parseVisualGraphRequest(body: VisualGraphRequestBody):
   };
 }
 
-function buildChartCodeFromAnalysis(
+function buildStoredChartPayload(
   chart: ChartAnalysisPayload,
   overrides: {
     chartType: "bar" | "line" | "scatter" | null;
@@ -113,7 +113,7 @@ function buildChartCodeFromAnalysis(
     yLabel: string | null;
   },
 ) {
-  const payload = {
+  return {
     chartType: overrides.chartType ?? chart.chartType,
     title: overrides.title ?? chart.title,
     x: chart.x,
@@ -121,12 +121,15 @@ function buildChartCodeFromAnalysis(
     y: chart.y,
     yLabel: overrides.yLabel ?? chart.yLabel,
   };
+}
 
+function buildStoredChartRenderCode() {
   return buildVisualGraphCode(`
 import json
+from pathlib import Path
 import matplotlib.pyplot as plt
 
-payload = json.loads(${JSON.stringify(JSON.stringify(payload))})
+payload = json.loads(Path("chart_payload.json").read_text(encoding="utf-8"))
 x_values = payload["x"]
 y_values = payload["y"]
 positions = list(range(len(x_values)))
@@ -248,7 +251,7 @@ export async function POST(request: Request) {
 
   const storedAnalysisResult =
     parsedRequest.analysisResultId && parsedRequest.turnId
-      ? getStoredAnalysisResult({
+      ? await getStoredAnalysisResult({
           analysisResultId: parsedRequest.analysisResultId,
           organizationId: user.organizationId,
           turnId: parsedRequest.turnId,
@@ -271,16 +274,27 @@ export async function POST(request: Request) {
   }
 
   try {
+    const storedChartPayload = storedAnalysisResult
+      ? buildStoredChartPayload(storedAnalysisResult.chart, {
+          chartType: parsedRequest.chartType,
+          title: parsedRequest.title,
+          xLabel: parsedRequest.xLabel,
+          yLabel: parsedRequest.yLabel,
+        })
+      : null;
     const result = await executeSandboxedCommand({
-      code: storedAnalysisResult
-        ? buildChartCodeFromAnalysis(storedAnalysisResult.chart, {
-            chartType: parsedRequest.chartType,
-            title: parsedRequest.title,
-            xLabel: parsedRequest.xLabel,
-            yLabel: parsedRequest.yLabel,
-          })
+      code: storedChartPayload
+        ? buildStoredChartRenderCode()
         : buildVisualGraphCode(parsedRequest.code ?? ""),
       inputFiles: [],
+      inlineWorkspaceFiles: storedChartPayload
+        ? [
+            {
+              content: JSON.stringify(storedChartPayload),
+              relativePath: "chart_payload.json",
+            },
+          ]
+        : [],
       organizationId: user.organizationId,
       organizationSlug: user.organizationSlug,
       role: user.role,

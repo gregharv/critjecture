@@ -1645,3 +1645,71 @@ Step 21 was implemented as a tested recovery layer for the SQLite-first deployme
   - `pnpm --filter web test -- tests/backup-recovery.test.ts`
   - `pnpm --filter web lint`
   - `pnpm --filter web backup:verify -- --deployment-mode both`
+
+## Step 23: Durable Analysis Results and Chart Pipeline Scaling
+
+### What Was Implemented
+
+Step 23 was implemented as a durable chart-intermediate layer on top of the existing sandbox and SQLite runtime, removing the same-process limitation from `analysisResultId` and tightening the synchronous chart boundary.
+
+- Added durable analysis-result persistence:
+  - `apps/web/lib/app-schema.ts`
+  - `apps/web/drizzle/0009_step23_analysis_results.sql`
+  - `apps/web/lib/analysis-results.ts`
+  - adds:
+    - a new `analysis_results` SQLite table
+    - org/user/turn-bound stored chart payloads
+    - one-hour TTL tracking and cleanup
+    - explicit chart-ready payload validation by point count and serialized byte size
+- Reworked the chart pipeline:
+  - `apps/web/app/api/data-analysis/run/route.ts`
+  - `apps/web/app/api/visual-graph/run/route.ts`
+  - now:
+    - persists chart-ready results durably after analysis
+    - rejects oversized chart-ready payloads with clear reduction guidance
+    - renders charts from a server-staged JSON payload file instead of embedding large JSON blobs back into Python source
+- Extended sandbox run persistence and execution:
+  - `apps/web/lib/sandbox-runs.ts`
+  - `apps/web/lib/python-sandbox.ts`
+  - now:
+    - persists inline workspace files with queued sandbox runs
+    - stages those files back into the local sandbox workspace after restart or delayed claim
+    - forwards the same inline file contract to the hosted supervisor request path
+- Added cleanup and verification coverage:
+  - `apps/web/lib/operations.ts`
+  - `apps/web/tests/analysis-results.integration.test.ts`
+  - `apps/web/tests/data-analysis-route.test.ts`
+  - `apps/web/tests/visual-graph-route.test.ts`
+  - `apps/web/tests/python-sandbox-validation.test.ts`
+- Updated operator-facing docs:
+  - `README.md`
+  - `overview.md`
+  - `steps.md`
+
+### Current Step 23 Behavior
+
+- `run_data_analysis`
+  - still returns `analysisResultId` for chart-ready CSV analysis
+  - now stores that payload in SQLite instead of process memory
+  - rejects chart-ready payloads above the synchronous limits:
+    - `2,000` plotted points
+    - `256 KiB` serialized chart JSON
+- `generate_visual_graph`
+  - still accepts `analysisResultId`
+  - now reloads the stored payload durably after normal app restarts within TTL
+  - writes the final chart payload into a sandbox workspace JSON file and renders from that file
+- Maintenance
+  - expired analysis results are cleaned during the normal operations-maintenance path and opportunistically before chart-result reads/writes
+
+### Important Implementation Details
+
+- Step 23 intentionally does not add async chart or document jobs.
+- The synchronous boundary is now explicit:
+  - summarized charts stay in the current request/response path
+  - oversized chart-ready payloads fail early and tell the model to aggregate, bin, sample, or reduce to top-N
+- Hosted supervisor compatibility remains fail-closed:
+  - the web app now forwards inline workspace files to the hosted supervisor contract
+  - if the hosted supervisor does not implement that contract, stored-chart rendering fails instead of silently falling back to JSON-in-source behavior
+- Verification completed for this implementation:
+  - `pnpm --filter web test -- tests/analysis-results.integration.test.ts tests/data-analysis-route.test.ts tests/visual-graph-route.test.ts tests/python-sandbox-validation.test.ts`
+  - `pnpm --filter web exec tsc --noEmit`

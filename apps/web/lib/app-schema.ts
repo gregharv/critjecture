@@ -231,6 +231,7 @@ export const sandboxRuns = sqliteTable(
     artifactTtlMs: integer("artifact_ttl_ms").notNull().default(0),
     codeText: text("code_text").notNull().default(""),
     inputFilesJson: text("input_files_json").notNull().default("[]"),
+    inlineWorkspaceFilesJson: text("inline_workspace_files_json").notNull().default("[]"),
     stdoutText: text("stdout_text"),
     stderrText: text("stderr_text"),
     supervisorId: text("supervisor_id"),
@@ -280,6 +281,37 @@ export const sandboxRuns = sqliteTable(
     ),
     index("sandbox_runs_status_started_at_idx").on(table.status, table.startedAt),
     index("sandbox_runs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
+  ],
+);
+
+export const analysisResults = sqliteTable(
+  "analysis_results",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    turnId: text("turn_id")
+      .notNull()
+      .references(() => chatTurns.id, { onDelete: "cascade" }),
+    inputFilesJson: text("input_files_json").notNull().default("[]"),
+    csvSchemasJson: text("csv_schemas_json").notNull().default("[]"),
+    chartJson: text("chart_json").notNull(),
+    pointCount: integer("point_count").notNull(),
+    payloadBytes: integer("payload_bytes").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    index("analysis_results_expires_at_idx").on(table.expiresAt),
+    index("analysis_results_org_turn_user_idx").on(
+      table.organizationId,
+      table.turnId,
+      table.userId,
+    ),
   ],
 );
 

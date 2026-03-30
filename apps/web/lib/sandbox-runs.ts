@@ -58,6 +58,11 @@ type PersistedGeneratedSandboxAsset = {
   runId: string;
 };
 
+export type SandboxInlineWorkspaceFile = {
+  content: string;
+  relativePath: string;
+};
+
 type SandboxRunRow = typeof sandboxRuns.$inferSelect;
 
 const ACTIVE_SANDBOX_RUN_STATUSES = ["starting", "running", "finalizing"] as const;
@@ -88,6 +93,35 @@ function parseInputFilesJson(value: string) {
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
       : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseInlineWorkspaceFilesJson(value: string): SandboxInlineWorkspaceFile[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) {
+        return [];
+      }
+
+      const entryRecord = entry as Record<string, unknown>;
+      const relativePath =
+        typeof entryRecord.relativePath === "string" ? entryRecord.relativePath.trim() : "";
+      const content = typeof entryRecord.content === "string" ? entryRecord.content : null;
+
+      if (!relativePath || content === null) {
+        return [];
+      }
+
+      return [{ content, relativePath }];
+    });
   } catch {
     return [];
   }
@@ -185,6 +219,7 @@ function mapSandboxRunRow(
           }))
         : parseGeneratedAssetsJson(row.generatedAssetsJson),
     inputFiles: parseInputFilesJson(row.inputFilesJson),
+    inlineWorkspaceFiles: parseInlineWorkspaceFilesJson(row.inlineWorkspaceFilesJson),
     lastHeartbeatAt: row.lastHeartbeatAt,
     leaseExpiresAt: row.leaseExpiresAt,
     maxProcesses: row.maxProcesses,
@@ -253,6 +288,7 @@ export async function cleanupExpiredSandboxArtifacts(input: {
 export async function queueSandboxRun(input: {
   code: string;
   inputFiles?: string[];
+  inlineWorkspaceFiles?: SandboxInlineWorkspaceFile[];
   organizationId: string;
   runtimeToolCallId?: string;
   toolName: string;
@@ -274,6 +310,7 @@ export async function queueSandboxRun(input: {
     cpuLimitSeconds: limits.cpuLimitSeconds,
     createdAt: now,
     inputFilesJson: JSON.stringify(input.inputFiles ?? []),
+    inlineWorkspaceFilesJson: JSON.stringify(input.inlineWorkspaceFiles ?? []),
     maxProcesses: limits.maxProcesses,
     memoryLimitBytes: limits.memoryLimitBytes,
     organizationId: input.organizationId,
@@ -579,6 +616,7 @@ export async function getSandboxRunExecutionPayload(runId: string) {
       backend: sandboxRuns.backend,
       codeText: sandboxRuns.codeText,
       inputFilesJson: sandboxRuns.inputFilesJson,
+      inlineWorkspaceFilesJson: sandboxRuns.inlineWorkspaceFilesJson,
       organizationId: sandboxRuns.organizationId,
       organizationSlug: organizations.slug,
       runId: sandboxRuns.runId,
@@ -604,6 +642,7 @@ export async function getSandboxRunExecutionPayload(runId: string) {
     backend: payload.backend as SandboxExecutionBackend,
     code: payload.codeText,
     inputFiles: parseInputFilesJson(payload.inputFilesJson),
+    inlineWorkspaceFiles: parseInlineWorkspaceFilesJson(payload.inlineWorkspaceFilesJson),
     organizationId: payload.organizationId,
     organizationSlug: payload.organizationSlug,
     role: payload.userRole as UserRole,

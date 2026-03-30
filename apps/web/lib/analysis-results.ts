@@ -3,10 +3,17 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
+import { and, eq, gt, lte } from "drizzle-orm";
+
+import { getAppDatabase } from "@/lib/app-db";
+import { analysisResults } from "@/lib/app-schema";
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
 import type { UserRole } from "@/lib/roles";
 
 const ANALYSIS_RESULT_TTL_MS = 60 * 60 * 1000;
+
+export const ANALYSIS_RESULT_MAX_POINT_COUNT = 2_000;
+export const ANALYSIS_RESULT_MAX_PAYLOAD_BYTES = 256 * 1024;
 
 export type CsvSchemaSummary = {
   columns: string[];
@@ -26,20 +33,26 @@ export type StoredAnalysisResult = {
   chart: ChartAnalysisPayload;
   createdAt: number;
   csvSchemas: CsvSchemaSummary[];
+  expiresAt: number;
   id: string;
   inputFiles: string[];
   organizationId: string;
+  payloadBytes: number;
+  pointCount: number;
   turnId: string;
   userId: string;
 };
 
-const storedAnalysisResults = new Map<string, StoredAnalysisResult>();
+export class AnalysisResultValidationError extends Error {
+  readonly code: "payload_bytes_limit" | "point_count_limit";
 
-function cleanupExpiredAnalysisResults(now = Date.now()) {
-  for (const [analysisResultId, result] of storedAnalysisResults.entries()) {
-    if (result.createdAt + ANALYSIS_RESULT_TTL_MS <= now) {
-      storedAnalysisResults.delete(analysisResultId);
-    }
+  constructor(
+    message: string,
+    code: "payload_bytes_limit" | "point_count_limit",
+  ) {
+    super(message);
+    this.name = "AnalysisResultValidationError";
+    this.code = code;
   }
 }
 
@@ -85,9 +98,9 @@ function parseChartPayload(value: unknown): ChartAnalysisPayload | null {
     return null;
   }
 
-  const x = payload.x;
-  const y = payload.y;
   const payloadRecord = payload as Record<string, unknown>;
+  const x = payloadRecord.x;
+  const y = payloadRecord.y;
 
   if (!isChartAxisArray(x) || !isNumericArray(y) || x.length !== y.length) {
     return null;
@@ -105,11 +118,85 @@ function parseChartPayload(value: unknown): ChartAnalysisPayload | null {
   };
 }
 
+function parseStringArray(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseCsvSchemasJson(value: string): CsvSchemaSummary[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) {
+        return [];
+      }
+
+      const entryRecord = entry as Record<string, unknown>;
+      const file = typeof entryRecord.file === "string" ? entryRecord.file.trim() : "";
+      const columns = Array.isArray(entryRecord.columns)
+        ? entryRecord.columns.filter(
+            (column): column is string => typeof column === "string" && column.trim().length > 0,
+          )
+        : [];
+
+      if (!file || columns.length === 0) {
+        return [];
+      }
+
+      return [{ columns, file }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 function splitCsvHeaderColumns(headerLine: string) {
   return headerLine
     .split(",")
     .map((column) => column.trim())
     .filter(Boolean);
+}
+
+function normalizeInputFiles(inputFiles: string[]) {
+  return [...new Set(inputFiles.map((value) => value.trim()).filter(Boolean))];
+}
+
+function serializeChartPayload(chart: ChartAnalysisPayload) {
+  const payloadJson = JSON.stringify(chart);
+  const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
+  const pointCount = chart.x.length;
+
+  if (pointCount > ANALYSIS_RESULT_MAX_POINT_COUNT) {
+    throw new AnalysisResultValidationError(
+      `Chart-ready analysis produced ${pointCount} plotted values, which exceeds the ${ANALYSIS_RESULT_MAX_POINT_COUNT} point limit. Aggregate, bin, sample, or reduce to top-N before rendering.`,
+      "point_count_limit",
+    );
+  }
+
+  if (payloadBytes > ANALYSIS_RESULT_MAX_PAYLOAD_BYTES) {
+    throw new AnalysisResultValidationError(
+      `Chart-ready analysis produced ${payloadBytes} bytes of chart payload, which exceeds the ${ANALYSIS_RESULT_MAX_PAYLOAD_BYTES} byte limit. Aggregate, bin, sample, or reduce to top-N before rendering.`,
+      "payload_bytes_limit",
+    );
+  }
+
+  return {
+    payloadBytes,
+    payloadJson,
+    pointCount,
+  };
 }
 
 async function readCsvSchemas(input: {
@@ -118,7 +205,7 @@ async function readCsvSchemas(input: {
   organizationSlug: string;
   role: UserRole;
 }) {
-  const uniquePaths = [...new Set(input.inputFiles.map((value) => value.trim()).filter(Boolean))];
+  const uniquePaths = normalizeInputFiles(input.inputFiles);
   const schemas: CsvSchemaSummary[] = [];
 
   for (const requestedPath of uniquePaths) {
@@ -145,6 +232,34 @@ async function readCsvSchemas(input: {
   return schemas;
 }
 
+function mapStoredAnalysisResultRow(row: typeof analysisResults.$inferSelect): StoredAnalysisResult | null {
+  const chart = parseChartPayload(JSON.parse(row.chartJson) as unknown);
+
+  if (!chart) {
+    return null;
+  }
+
+  return {
+    chart,
+    createdAt: row.createdAt,
+    csvSchemas: parseCsvSchemasJson(row.csvSchemasJson),
+    expiresAt: row.expiresAt,
+    id: row.id,
+    inputFiles: parseStringArray(row.inputFilesJson),
+    organizationId: row.organizationId,
+    payloadBytes: row.payloadBytes,
+    pointCount: row.pointCount,
+    turnId: row.turnId,
+    userId: row.userId,
+  };
+}
+
+export async function cleanupExpiredAnalysisResults(now = Date.now()) {
+  const db = await getAppDatabase();
+
+  await db.delete(analysisResults).where(lte(analysisResults.expiresAt, now));
+}
+
 export async function buildCsvSchemas(input: {
   inputFiles: string[];
   organizationId: string;
@@ -168,7 +283,7 @@ export function parseChartAnalysisStdout(stdout: string) {
   }
 }
 
-export function storeAnalysisResult(input: {
+export async function storeAnalysisResult(input: {
   chart: ChartAnalysisPayload;
   csvSchemas: CsvSchemaSummary[];
   inputFiles: string[];
@@ -176,46 +291,71 @@ export function storeAnalysisResult(input: {
   turnId: string;
   userId: string;
 }) {
-  cleanupExpiredAnalysisResults();
+  await cleanupExpiredAnalysisResults();
 
+  const { payloadBytes, payloadJson, pointCount } = serializeChartPayload(input.chart);
+  const createdAt = Date.now();
+  const expiresAt = createdAt + ANALYSIS_RESULT_TTL_MS;
   const id = randomUUID();
-  const result: StoredAnalysisResult = {
-    chart: input.chart,
-    createdAt: Date.now(),
-    csvSchemas: input.csvSchemas,
+  const normalizedInputFiles = normalizeInputFiles(input.inputFiles);
+  const db = await getAppDatabase();
+
+  await db.insert(analysisResults).values({
+    chartJson: payloadJson,
+    createdAt,
+    csvSchemasJson: JSON.stringify(input.csvSchemas),
+    expiresAt,
     id,
-    inputFiles: [...new Set(input.inputFiles.map((value) => value.trim()).filter(Boolean))],
+    inputFilesJson: JSON.stringify(normalizedInputFiles),
     organizationId: input.organizationId,
+    payloadBytes,
+    pointCount,
     turnId: input.turnId,
     userId: input.userId,
-  };
+  });
 
-  storedAnalysisResults.set(id, result);
-
-  return result;
+  return {
+    chart: input.chart,
+    createdAt,
+    csvSchemas: input.csvSchemas,
+    expiresAt,
+    id,
+    inputFiles: normalizedInputFiles,
+    organizationId: input.organizationId,
+    payloadBytes,
+    pointCount,
+    turnId: input.turnId,
+    userId: input.userId,
+  } satisfies StoredAnalysisResult;
 }
 
-export function getStoredAnalysisResult(input: {
+export async function getStoredAnalysisResult(input: {
   analysisResultId: string;
   organizationId: string;
   turnId: string;
   userId: string;
 }) {
-  cleanupExpiredAnalysisResults();
+  const now = Date.now();
+  await cleanupExpiredAnalysisResults(now);
 
-  const stored = storedAnalysisResults.get(input.analysisResultId) ?? null;
+  const db = await getAppDatabase();
+  const row = await db.query.analysisResults.findFirst({
+    where: and(
+      eq(analysisResults.id, input.analysisResultId),
+      eq(analysisResults.organizationId, input.organizationId),
+      eq(analysisResults.turnId, input.turnId),
+      eq(analysisResults.userId, input.userId),
+      gt(analysisResults.expiresAt, now),
+    ),
+  });
 
-  if (!stored) {
+  if (!row) {
     return null;
   }
 
-  if (
-    stored.organizationId !== input.organizationId ||
-    stored.turnId !== input.turnId ||
-    stored.userId !== input.userId
-  ) {
+  try {
+    return mapStoredAnalysisResultRow(row);
+  } catch {
     return null;
   }
-
-  return stored;
 }

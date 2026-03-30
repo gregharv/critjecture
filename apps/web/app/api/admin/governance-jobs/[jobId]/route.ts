@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 import { getSessionUser } from "@/lib/auth-state";
 import { getGovernanceJob } from "@/lib/governance";
 import {
