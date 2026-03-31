@@ -12,6 +12,8 @@ describe("hosted documentation boundary", () => {
       readFile(path.join(process.cwd(), "docs", "hosted_launch.md"), "utf8"),
       readFile(path.join(process.cwd(), "docs", "hosted_provisioning.md"), "utf8"),
       readFile(path.join(process.cwd(), "docs", "runbooks", "hosted-first-deployment.md"), "utf8"),
+      readFile(path.join(process.cwd(), "docs", "runbooks", "railway-demo-deployment.md"), "utf8"),
+      readFile(path.join(process.cwd(), "docs", "runbooks", "railway-hosted-deployment.md"), "utf8"),
       readFile(path.join(process.cwd(), "docs", "runbooks", "hosted-restore-drill.md"), "utf8"),
       readFile(path.join(process.cwd(), "docs", "runbooks", "hosted-routine-upgrade.md"), "utf8"),
       readFile(path.join(process.cwd(), "docs", "security_review.md"), "utf8"),
@@ -25,6 +27,13 @@ describe("hosted documentation boundary", () => {
     expect(combined).toContain("Hosted Launch Package");
     expect(combined).toContain("pnpm release:proof:hosted");
     expect(combined).toContain("customer administrator");
+    expect(combined).toContain("one Railway project or equivalent isolated service set per organization");
+    expect(combined).toContain("the owner of each organization manages only that organization's users");
+    expect(combined).toContain("one `owner` account for the operator only");
+    expect(combined).toContain("one or more `admin` accounts for technical evaluators");
+    expect(combined).toContain("one or more `member` accounts for general product viewers");
+    expect(combined).toContain("The supervisor must be bound to the same organization slug as the Railway web service.");
+    expect(combined).toContain("Do not place multiple organizations into one hosted Railway web service or one hosted Railway database.");
     expect(combined).toContain(`target RPO: \`${HOSTED_PERSISTENCE_ENVELOPE.targetRpoHours}\` hours`);
     expect(combined).toContain(`target RTO: \`${HOSTED_PERSISTENCE_ENVELOPE.targetRtoHours}\` hours`);
     expect(combined).not.toContain("one deployment can contain multiple organizations");

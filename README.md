@@ -315,6 +315,7 @@ The supported current deployment envelope is SQLite-backed in both current modes
 - one writable app instance per hosted cell
 - signed hosted supervisor auth plus matching bound-organization health
 - operator-managed provisioning, restore-drill evidence, and release-proof evidence
+- on Railway, multiple orgs means multiple hosted deployment cells, each with its own owner
 
 Start with:
 

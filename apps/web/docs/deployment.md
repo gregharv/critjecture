@@ -190,6 +190,7 @@ Runbooks:
 - `apps/web/docs/runbooks/backup-restore-failures.md`
 - `apps/web/docs/runbooks/hosted-first-deployment.md`
 - `apps/web/docs/runbooks/hosted-operations.md`
+- `apps/web/docs/runbooks/railway-hosted-deployment.md`
 - `apps/web/docs/runbooks/hosted-restore-drill.md`
 - `apps/web/docs/runbooks/hosted-routine-upgrade.md`
 - `apps/web/docs/runbooks/onprem-operations.md`

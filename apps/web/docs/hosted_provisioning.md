@@ -40,6 +40,18 @@ Provisioning guardrails:
   - `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID`
   - `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 
+## Multiple Organizations On Railway
+
+- one hosted Railway deployment serves one organization only
+- to serve multiple organizations on Railway, deploy one hosted cell per organization
+- each organization should get its own:
+  - Railway project or equivalent isolated deployment cell
+  - persistent volume
+  - `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
+  - first owner account
+  - hosted supervisor binding
+- after handoff, the owner of each organization manages only that organization's users through `/admin/settings`
+
 ## Operational Notes
 
 - on-prem and local environments should continue using `single_org`
