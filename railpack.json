@@ -14,7 +14,7 @@
         {
           "path": "/root/.local/bin"
         },
-        "cd packages/python-sandbox && uv sync --frozen"
+        "cd /app/packages/python-sandbox && /root/.local/bin/uv sync --frozen"
       ]
     }
   },
