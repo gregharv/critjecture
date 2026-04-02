@@ -11,7 +11,9 @@
       "commands": [
         "...",
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "PATH:/root/.local/bin",
+        {
+          "path": "/root/.local/bin"
+        },
         "cd packages/python-sandbox && uv sync --frozen"
       ]
     }
