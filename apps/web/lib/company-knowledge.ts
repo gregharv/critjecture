@@ -13,6 +13,7 @@ import { getAppDatabase } from "@/lib/app-db";
 import { documentChunks, documents } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
+import { isRipgrepAvailable } from "@/lib/runtime-toolchain";
 import type {
   CompanyKnowledgeCandidateFile,
   CompanyKnowledgeMatch,
@@ -38,6 +39,16 @@ const STOPWORDS = new Set([
   "to",
   "what",
   "with",
+]);
+
+const SEARCHABLE_TEXT_EXTENSIONS = new Set([
+  ".csv",
+  ".json",
+  ".log",
+  ".md",
+  ".txt",
+  ".yaml",
+  ".yml",
 ]);
 
 type CandidateAccumulator = {
@@ -118,6 +129,77 @@ function previewContainsYear(preview: CompanyKnowledgePreview, year: string) {
   return preview.lines.some((line) => line.includes(year));
 }
 
+function isTextSearchableFile(relativePath: string) {
+  const extension = path.extname(relativePath).toLowerCase();
+
+  return SEARCHABLE_TEXT_EXTENSIONS.has(extension);
+}
+
+function isCommandNotFoundError(caughtError: unknown) {
+  return (
+    typeof caughtError === "object" &&
+    caughtError !== null &&
+    "code" in caughtError &&
+    (caughtError.code === "ENOENT" || caughtError.code === 127)
+  );
+}
+
+async function runFallbackSearch(
+  pattern: string,
+  companyDataRoot: string,
+  searchedDirectory: string,
+  maxMatches: number,
+) {
+  const loweredPattern = pattern.toLowerCase();
+  const matches: CompanyKnowledgeMatch[] = [];
+  const relativeFiles = await listRelativeFiles(companyDataRoot, searchedDirectory);
+
+  for (const relativeFile of relativeFiles) {
+    if (!isTextSearchableFile(relativeFile)) {
+      continue;
+    }
+
+    const absolutePath = path.join(companyDataRoot, relativeFile);
+    const stream = createReadStream(absolutePath, { encoding: "utf8" });
+    const lineReader = readline.createInterface({
+      crlfDelay: Infinity,
+      input: stream,
+    });
+    let lineNumber = 0;
+
+    try {
+      for await (const line of lineReader) {
+        lineNumber += 1;
+
+        if (!line.trim()) {
+          continue;
+        }
+
+        if (!line.toLowerCase().includes(loweredPattern)) {
+          continue;
+        }
+
+        matches.push({
+          file: relativeFile,
+          line: lineNumber,
+          text: line.trim(),
+        });
+
+        if (matches.length >= maxMatches) {
+          return matches;
+        }
+      }
+    } catch {
+      continue;
+    } finally {
+      lineReader.close();
+      stream.destroy();
+    }
+  }
+
+  return matches;
+}
+
 async function runRipgrepSearch(
   pattern: string,
   companyDataRoot: string,
@@ -136,6 +218,10 @@ async function runRipgrepSearch(
     pattern,
     searchedDirectory,
   ];
+
+  if (!(await isRipgrepAvailable())) {
+    return runFallbackSearch(pattern, companyDataRoot, searchedDirectory, maxMatches);
+  }
 
   try {
     const { stdout } = await execFileAsync("rg", args, {
@@ -177,6 +263,10 @@ async function runRipgrepSearch(
 
     if (code === 1) {
       return [];
+    }
+
+    if (isCommandNotFoundError(caughtError)) {
+      return runFallbackSearch(pattern, companyDataRoot, searchedDirectory, maxMatches);
     }
 
     throw caughtError;

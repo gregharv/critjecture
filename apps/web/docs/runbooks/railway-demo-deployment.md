@@ -51,6 +51,8 @@ Set these on the Railway web service:
 - `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET=<shared-secret>`
 - `CRITJECTURE_ALERT_WEBHOOK_URL=<webhook>`
 
+Note: company knowledge search falls back to a built-in Node scanner if `rg` is not installed, so a custom Railway image is no longer required for search-only demos. PDF uploads still need `pdftotext` if you plan to show PDF ingestion.
+
 ## Hosted Supervisor Environment
 
 Set these on the hosted sandbox supervisor:

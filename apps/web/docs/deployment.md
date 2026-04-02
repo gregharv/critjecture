@@ -95,6 +95,7 @@ Current characteristics:
 - explicit backups for both the database and tenant storage
 - operator-managed secrets for auth, model access, and sandbox connectivity
 - `pdftotext` on the host for PDF ingestion
+- `ripgrep` is optional; company knowledge search falls back to a built-in Node scanner when `rg` is unavailable
 
 ## Backup And Restore
 

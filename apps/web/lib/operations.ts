@@ -40,6 +40,10 @@ import {
 } from "@/lib/governance";
 import { getHostedDeploymentValidation } from "@/lib/hosted-deployment";
 import {
+  getKnowledgeSearchToolchainHealth,
+  getPdfIngestionToolchainHealth,
+} from "@/lib/runtime-toolchain";
+import {
   CHAT_MAX_TOKENS_HARD_CAP,
   getOperationsPoliciesSnapshot,
   getRetentionWindowMs,
@@ -1279,10 +1283,18 @@ export async function getHealthSummary(): Promise<HealthSummary> {
   const checks: HealthCheckResult[] = [];
   const now = Date.now();
   let persistence: HealthSummary["persistence"] | null = null;
-  const [hostedValidation, sandboxBackendHealth, sandboxSnapshot] = await Promise.all([
+  const [
+    hostedValidation,
+    sandboxBackendHealth,
+    sandboxSnapshot,
+    knowledgeSearchToolchainHealth,
+    pdfIngestionToolchainHealth,
+  ] = await Promise.all([
     getHostedDeploymentValidation(),
     getSandboxBackendHealth(),
     getSandboxHealthSnapshot(),
+    getKnowledgeSearchToolchainHealth(),
+    getPdfIngestionToolchainHealth(),
   ]);
 
   if (hostedValidation.code !== "disabled") {
@@ -1379,6 +1391,18 @@ export async function getHealthSummary(): Promise<HealthSummary> {
       status: "ok",
     });
   }
+
+  checks.push({
+    detail: knowledgeSearchToolchainHealth.detail,
+    name: "knowledge-search",
+    status: knowledgeSearchToolchainHealth.ripgrepAvailable ? "ok" : "degraded",
+  });
+
+  checks.push({
+    detail: pdfIngestionToolchainHealth.detail,
+    name: "pdf-ingestion",
+    status: pdfIngestionToolchainHealth.available ? "ok" : "degraded",
+  });
 
   try {
     const db = await getAppDatabase();

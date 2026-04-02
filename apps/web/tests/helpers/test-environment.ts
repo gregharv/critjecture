@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { resetOperationsMaintenanceStateForTests } from "@/lib/operations";
 import { resetAppDatabaseForTests } from "@/lib/app-db";
+import { resetRuntimeToolchainStateForTests } from "@/lib/runtime-toolchain";
 import { resetUserSeedStateForTests } from "@/lib/users";
 
 type TestUserConfig = {
@@ -64,6 +65,7 @@ const ENV_KEYS = [
 
 export async function resetTestAppState() {
   resetOperationsMaintenanceStateForTests();
+  resetRuntimeToolchainStateForTests();
   resetUserSeedStateForTests();
   await resetAppDatabaseForTests();
 }
