@@ -9,14 +9,11 @@
   "steps": {
     "install": {
       "commands": [
-        "pnpm install --frozen-lockfile",
+        "...",
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
         "PATH:/root/.local/bin",
         "cd packages/python-sandbox && uv sync --frozen"
       ]
-    },
-    "build": {
-      "commands": ["pnpm build"]
     }
   },
   "deploy": {
