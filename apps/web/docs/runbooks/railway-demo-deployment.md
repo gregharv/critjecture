@@ -35,6 +35,11 @@ Suggested demo values:
 - volume mount path: `/data`
 - environment label for proof records: `railway-demo`
 
+Build note:
+
+- deploy from the repository root, not `apps/web`
+- new Railway services should use the repo-root `railpack.json` so Railpack builds the Node workspace instead of auto-detecting Python from `packages/python-sandbox/pyproject.toml`
+
 ## Railway Web Service Environment
 
 Set these on the Railway web service:
@@ -70,7 +75,7 @@ The supervisor must be bound to the same organization slug as the Railway web se
 ## Deployment Steps
 
 1. Create the Railway project and attach a persistent volume mounted at `/data`.
-2. Deploy the web app service and set the hosted Railway env vars above.
+2. Deploy the web app service from the repo root and set the hosted Railway env vars above.
 3. Deploy the hosted sandbox supervisor on a Docker-capable host and bind it to `demo-org`.
 4. Run database migrations for the web app.
 5. Provision the demo organization and first owner:

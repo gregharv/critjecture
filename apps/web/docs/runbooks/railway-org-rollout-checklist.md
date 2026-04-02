@@ -16,9 +16,14 @@ Use this checklist for each hosted organization rollout.
 
 - [ ] Create a dedicated Railway project for this org.
 - [ ] Attach and mount persistent volume at `/data`.
-- [ ] Confirm deployment uses repo root with `nixpacks.toml`.
+- [ ] Confirm deployment uses the repo root with `railpack.json`.
 - [ ] Confirm one target `CRITJECTURE_HOSTED_ORGANIZATION_SLUG` for this org.
 - [ ] Confirm this org is not sharing a hosted cell with another org.
+
+Build note:
+
+- New Railway services in this repo should use Railpack from the repo root.
+- `railpack.json` forces the Node workspace build and avoids incorrect Python autodetection from `packages/python-sandbox/pyproject.toml`.
 
 ---
 
@@ -42,6 +47,7 @@ Notes:
 
 - Do **not** use Postgres for `DATABASE_URL` in this repo’s current envelope.
 - Do **not** set remote supervisor vars in Phase 1.
+- Keep `AUTH_SECRET` and any operator credentials in Railway secret storage, not in checked-in env files.
 
 ---
 

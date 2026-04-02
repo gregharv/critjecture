@@ -30,6 +30,11 @@ Suggested naming pattern:
 - web service: `critjecture-web`
 - volume mount path: `/data`
 
+Build note:
+
+- deploy from the repository root, not `apps/web`
+- new Railway services should use the repo-root `railpack.json` so Railpack builds the Node workspace instead of auto-detecting Python from `packages/python-sandbox/pyproject.toml`
+
 ## Per-Org Environment
 
 Set these on the Railway web service for each organization:
@@ -49,7 +54,7 @@ Set these on the Railway web service for each organization:
 ## Per-Org Deployment Checklist
 
 1. Create the Railway project and attach a persistent volume.
-2. Deploy the web app service and set the hosted env vars for that one organization.
+2. Deploy the web app service from the repo root and set the hosted env vars for that one organization.
 3. Deploy the hosted sandbox supervisor on a Docker-capable host and bind it to the same organization slug.
 4. Run database migrations for the web app.
 5. Provision the organization and first owner:

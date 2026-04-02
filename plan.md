@@ -54,27 +54,43 @@ Install at runtime/build:
 - `util-linux` (`prlimit`)
 - Python runtime + uv-managed sandbox venv (`packages/python-sandbox/.venv`)
 
-## 2.4 Suggested `nixpacks.toml` (Phase 1)
+## 2.4 Suggested `railpack.json` (Phase 1)
 
 Create at repo root:
 
-```toml
-[phases.setup]
-nixPkgs = ["bubblewrap", "util-linux", "python313", "curl"]
-
-[phases.install]
-cmds = [
-  "npm install -g pnpm",
-  "pnpm install --frozen-lockfile",
-  "curl -LsSf https://astral.sh/uv/install.sh | sh",
-  "cd packages/python-sandbox && ~/.local/bin/uv sync --frozen"
-]
-
-[start]
-cmd = "pnpm start"
+```json
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "buildAptPackages": ["bubblewrap", "util-linux", "curl"],
+  "packages": {
+    "node": "20",
+    "python": "3.13"
+  },
+  "steps": {
+    "install": {
+      "commands": [
+        "pnpm install --frozen-lockfile",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        "PATH:/root/.local/bin",
+        "cd packages/python-sandbox && uv sync --frozen"
+      ]
+    },
+    "build": {
+      "commands": ["pnpm build"]
+    }
+  },
+  "deploy": {
+    "startCommand": "pnpm start",
+    "aptPackages": ["bubblewrap", "util-linux"]
+  }
+}
 ```
 
-> If your Railway image does not preserve `~/.local/bin` in PATH, use full path to `uv` as shown.
+Why this is needed:
+
+- new Railway services use Railpack by default
+- this repo includes `packages/python-sandbox/pyproject.toml`, so autodetection can incorrectly treat the repo as a Python app unless the repo-root build is pinned explicitly
 
 ## 2.5 Required env vars (Phase 1)
 
@@ -98,7 +114,7 @@ Do **not** set remote supervisor vars in this phase.
 
 1. Create Railway project/service for org.
 2. Attach persistent volume at `/data`.
-3. Deploy with env vars above.
+3. Deploy from the repo root with `railpack.json` and the env vars above.
 4. Run migrations:
    - `pnpm db:migrate`
 5. Provision hosted org + owner:

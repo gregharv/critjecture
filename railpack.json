@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "buildAptPackages": ["bubblewrap", "util-linux", "curl"],
+  "packages": {
+    "node": "20",
+    "python": "3.13"
+  },
+  "steps": {
+    "install": {
+      "commands": [
+        "pnpm install --frozen-lockfile",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        "PATH:/root/.local/bin",
+        "cd packages/python-sandbox && uv sync --frozen"
+      ]
+    },
+    "build": {
+      "commands": ["pnpm build"]
+    }
+  },
+  "deploy": {
+    "startCommand": "pnpm start",
+    "aptPackages": ["bubblewrap", "util-linux"]
+  }
+}
