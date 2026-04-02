@@ -8,13 +8,13 @@
   },
   "steps": {
     "install": {
+      "commands": ["..."]
+    },
+    "build": {
       "commands": [
-        "...",
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
-        {
-          "path": "/root/.local/bin"
-        },
-        "cd /app/packages/python-sandbox && /root/.local/bin/uv sync --frozen"
+        "cd /app/packages/python-sandbox && /root/.local/bin/uv sync --frozen",
+        "..."
       ]
     }
   },
