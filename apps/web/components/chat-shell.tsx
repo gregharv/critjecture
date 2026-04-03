@@ -1444,7 +1444,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
         const braveSearchTool = {
           name: "brave_search",
-          label: "Brave Search",
+          label: "Web Search",
           description:
             "Web search via Brave Search API. Returns snippets and can optionally fetch page content.",
           parameters: Type.Object({

@@ -411,6 +411,7 @@ function renderBraveSearchToolCard(
   const query = getStringValue(details, "query") || getStringValue(parsedParams, "query");
   const summary = getToolSummary(result);
   const braveResults = getBraveResults(details).slice(0, 6);
+  const savedCount = braveResults.filter((entry) => getStringValue(entry, "contentFilePath")).length;
 
   return {
     content: html`
@@ -418,7 +419,7 @@ function renderBraveSearchToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">Web Search</span>
-            <div class="crit-tool__title">Brave Search</div>
+            <div class="crit-tool__title">Web Search</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -439,8 +440,10 @@ function renderBraveSearchToolCard(
           : nothing}
 
         ${braveResults.length > 0
-          ? html`<section class="crit-tool__section">
-              <div class="crit-tool__label">Top Results</div>
+          ? html`<details class="crit-tool__disclosure">
+              <summary class="crit-tool__disclosure-summary">
+                <span class="crit-tool__label">Top Results (${braveResults.length})</span>
+              </summary>
               <div class="crit-tool__files">
                 ${braveResults.map((entry) => {
                   const title = getStringValue(entry, "title");
@@ -465,14 +468,25 @@ function renderBraveSearchToolCard(
                   `;
                 })}
               </div>
+            </details>`
+          : state === "running"
+            ? html`<div class="crit-tool__empty">Searching the web…</div>`
+            : nothing}
+
+        ${result?.isError && summary
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Error</div>
+              <p class="crit-tool__summary">${summary}</p>
             </section>`
           : nothing}
 
-        ${summary
-          ? html`<section class="crit-tool__section">
-              <div class="crit-tool__label">Summary</div>
-              <p class="crit-tool__summary">${summary}</p>
-            </section>`
+        ${(braveResults.length > 0 || savedCount > 0) && !result?.isError
+          ? html`<div class="crit-tool__meta">
+              <span>${braveResults.length} result${braveResults.length === 1 ? "" : "s"}</span>
+              ${savedCount > 0
+                ? html`<span>${savedCount} saved clip${savedCount === 1 ? "" : "s"}</span>`
+                : nothing}
+            </div>`
           : nothing}
       </div>
     `,
