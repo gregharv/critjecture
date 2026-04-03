@@ -2208,32 +2208,37 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   return (
     <div className="chat-shell">
       <div className="chat-toolbar">
-        <div className="chat-toolbar__title-group">
-          <span className="chat-toolbar__eyebrow">Conversation</span>
-          <span className="chat-toolbar__title">
-            {activeConversationTitle || "New conversation"}
-          </span>
-        </div>
-        <div className="chat-toolbar__actions">
-          <button
-            className="chat-toolbar__button"
-            disabled={isStreaming || !conversationBootstrap}
-            onClick={() => {
-              void handleOpenHistory();
-            }}
-            type="button"
-          >
-            History
-          </button>
-          <button
-            className="chat-toolbar__button chat-toolbar__button--primary"
-            disabled={isStreaming || !conversationBootstrap}
-            onClick={handleNewChat}
-            type="button"
-          >
-            New chat
-          </button>
-        </div>
+        <details className="chat-toolbar__menu">
+          <summary className="chat-toolbar__summary">
+            <span className="chat-toolbar__title">
+              {activeConversationTitle || "New conversation"}
+            </span>
+            <span aria-hidden="true" className="chat-toolbar__caret">
+              ⌄
+            </span>
+          </summary>
+
+          <div className="chat-toolbar__actions">
+            <button
+              className="chat-toolbar__button"
+              disabled={isStreaming || !conversationBootstrap}
+              onClick={() => {
+                void handleOpenHistory();
+              }}
+              type="button"
+            >
+              History
+            </button>
+            <button
+              className="chat-toolbar__button chat-toolbar__button--primary"
+              disabled={isStreaming || !conversationBootstrap}
+              onClick={handleNewChat}
+              type="button"
+            >
+              New chat
+            </button>
+          </div>
+        </details>
       </div>
       <div className="chat-host" ref={hostRef} />
       {!ready ? (

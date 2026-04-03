@@ -89,12 +89,50 @@ a {
   padding: 18px 24px 14px;
 }
 
-.shell-topline {
-  display: flex;
+.shell-menu {
+  display: grid;
+  gap: 12px;
+}
+
+.shell-menu__summary {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  list-style: none;
+}
+
+.shell-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
+.shell-menu__summary:focus-visible,
+.chat-toolbar__summary:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 72%, white 28%);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.shell-menu__caret {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.shell-menu[open] .shell-menu__caret {
+  transform: rotate(180deg);
+}
+
+.shell-menu__panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 64%, transparent 36%);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
 }
 
 .brand-lockup {
@@ -177,25 +215,38 @@ a {
 }
 
 .chat-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   padding: 0 24px 14px;
 }
 
-.chat-toolbar__title-group {
+.chat-toolbar__menu {
   display: grid;
-  gap: 4px;
-  min-width: 0;
+  gap: 12px;
 }
 
-.chat-toolbar__eyebrow {
+.chat-toolbar__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-toolbar__summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-toolbar__caret {
   color: var(--muted-foreground);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.chat-toolbar__menu[open] .chat-toolbar__caret {
+  transform: rotate(180deg);
 }
 
 .chat-toolbar__title {
@@ -203,15 +254,22 @@ a {
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  min-width: 0;
+  max-width: min(100%, 60ch);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chat-toolbar__actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 64%, transparent 36%);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
 }
 
 .chat-toolbar__button {
@@ -951,9 +1009,12 @@ a {
   }
 
   .chat-toolbar {
-    flex-direction: column;
-    align-items: stretch;
     padding: 0 16px 12px;
+  }
+
+  .chat-toolbar__summary {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .chat-toolbar__actions {
@@ -987,9 +1048,13 @@ a {
     word-break: break-word;
   }
 
-  .shell-topline {
-    flex-direction: column;
-    align-items: flex-start;
+  .shell-menu__summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .shell-menu__panel {
+    padding: 10px;
   }
 
   .shell-nav {
