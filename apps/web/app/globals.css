@@ -957,15 +957,34 @@ a {
   }
 
   .chat-toolbar__actions {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
     justify-content: stretch;
   }
 
   .chat-toolbar__button {
-    flex: 1 1 0;
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: center;
   }
 
   .chat-history-backdrop {
     padding: 16px;
+  }
+
+  .chat-history-card__header,
+  .chat-history-card__meta {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .chat-history-card__title,
+  .chat-history-card__date {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .shell-topline {

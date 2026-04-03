@@ -102,12 +102,15 @@
   display: inline-flex;
   align-items: center;
   min-height: 28px;
+  max-width: 100%;
   padding: 4px 10px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
   border-radius: 999px;
   color: var(--foreground);
   font-size: 0.74rem;
   line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .crit-selection__query-chip {
@@ -389,6 +392,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   cursor: pointer;
   list-style: none;
 }
@@ -538,6 +542,18 @@
 }
 
 @media (max-width: 640px) {
+  .markdown-content table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .crit-tool__header,
   .crit-selection__card-header,
   .crit-tool__asset-footer,
@@ -550,5 +566,16 @@
   .crit-tool__asset-link,
   .crit-tool__download-button {
     min-width: 0;
+    white-space: normal;
+  }
+
+  .crit-tool__status {
+    max-width: 100%;
+  }
+
+  .crit-selection__query-chip,
+  .crit-selection__meta-chip,
+  .crit-tool__disclosure-summary {
+    white-space: normal;
   }
 }
