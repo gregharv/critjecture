@@ -347,6 +347,7 @@ a {
   color: var(--muted-foreground);
 }
 
+
 .audit-page {
   display: grid;
   gap: 18px;

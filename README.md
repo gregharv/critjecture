@@ -34,9 +34,12 @@ This is aimed at teams that want governed business-data answers for the whole co
 
 The main app lives at `http://localhost:3000/chat`.
 
-The chat UI uses `@mariozechner/pi-web-ui` with Critjecture-owned styling. The assistant can call four primary tools:
+The chat UI uses `@mariozechner/pi-web-ui` with Critjecture-owned styling. The assistant can call these primary tools:
 
 - `search_company_knowledge`
+- `brave_search`
+- `brave_grounding`
+- `ask_user`
 - `run_data_analysis`
 - `generate_visual_graph`
 - `generate_document`
@@ -238,6 +241,9 @@ Open:
 AUTH_SECRET=replace-with-a-long-random-string
 OPENAI_API_KEY=your-key-here
 OPENAI_MODEL=gpt-5.4-mini
+BRAVE_API_KEY=
+BRAVE_API_KEY_PAID=
+BRAVE_API_KEY_AI_GROUNDING=
 DATABASE_URL=./storage/critjecture.sqlite
 CRITJECTURE_STORAGE_ROOT=./storage
 CRITJECTURE_DEPLOYMENT_MODE=single_org

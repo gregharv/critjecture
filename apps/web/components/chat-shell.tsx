@@ -9,6 +9,14 @@ import type {
   CompanyKnowledgeMatch,
 } from "@/lib/company-knowledge-types";
 import {
+  createAskUserSelectionMessage,
+  markAskUserSelectionSubmitted,
+  registerAskUserMessageRenderers,
+  ASK_USER_EVENT,
+  type AskUserOption,
+  type AskUserSelectionEventDetail,
+} from "@/lib/ask-user-messages";
+import {
   buildFileSelectionPrompt,
   createFileSelectionMessage,
   critjectureConvertToLlm,
@@ -63,6 +71,48 @@ type SearchToolResponse = {
   selectionRequired: boolean;
   scopeDescription: string;
   summary: string;
+};
+
+type BraveSearchToolResponse = {
+  count: number;
+  country: string;
+  fetchContent: boolean;
+  format: "one_line" | "raw_json" | "short";
+  freshness?: "pd" | "pm" | "pw" | "py";
+  query: string;
+  results: Array<{
+    age?: string;
+    content?: string;
+    contentFilePath?: string;
+    snippet: string;
+    title: string;
+    url: string;
+  }>;
+  text: string;
+};
+
+type BraveGroundingToolResponse = {
+  answer: string;
+  citations: Array<{
+    label: string;
+    url: string;
+  }>;
+  enableCitations: boolean;
+  enableEntities: boolean;
+  enableResearch: boolean;
+  maxAnswerChars: number;
+  question: string;
+  text: string;
+  usage: unknown;
+};
+
+type AskUserToolResponse = {
+  answer: string | null;
+  cancelled: boolean;
+  context?: string;
+  options: AskUserOption[];
+  question: string;
+  wasCustom?: boolean;
 };
 
 type PendingChatTurn = {
@@ -214,6 +264,30 @@ function getUniqueStrings(values: string[]) {
 
 function getActiveModelId(model: unknown) {
   return getSessionModelId(model) ?? DEFAULT_CHAT_MODEL_ID;
+}
+
+type AskUserOptionInput = AskUserOption | string;
+
+function normalizeAskUserOptions(options: AskUserOptionInput[]) {
+  return options
+    .map((option) => {
+      if (typeof option === "string") {
+        const title = option.trim();
+
+        return title ? { title } : null;
+      }
+
+      if (typeof option !== "object" || option === null) {
+        return null;
+      }
+
+      const title = typeof option.title === "string" ? option.title.trim() : "";
+      const description =
+        typeof option.description === "string" ? option.description.trim() : undefined;
+
+      return title ? { description, title } : null;
+    })
+    .filter((option): option is AskUserOption => option !== null);
 }
 
 function createPlannerSelectionMessage(searches: PendingPlannerSearch[]) {
@@ -504,6 +578,9 @@ function getSystemPrompt(role: UserRole) {
     `Current user role: ${roleLabel}.`,
     "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
+    "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
+    "If the user explicitly asks for grounded web citations, use brave_grounding.",
+    "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
     "After generate_visual_graph returns, inspect the tool result image before finalizing your response. If readability, labels, or chart choice are weak, run generate_visual_graph one more time with improved plotting code; limit this self-revision to one extra pass.",
@@ -848,6 +925,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
         registerCritjectureToolRenderers(webUi);
         registerCritjectureMessageRenderers(webUi);
+        registerAskUserMessageRenderers(webUi);
 
         const postAuditJson = async <TResponse,>(
           url: string,
@@ -1084,6 +1162,90 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           );
         };
 
+        let activeAskUserSelectionId: string | null = null;
+        let askUserAbortCleanup: (() => void) | null = null;
+        let askUserTimeoutHandle: number | null = null;
+        let resolveAskUserSelection:
+          | ((result: { answer: string | null; wasCustom: boolean }) => void)
+          | null = null;
+
+        const finalizeAskUserSelection = (result: {
+          answer: string | null;
+          wasCustom: boolean;
+        }) => {
+          if (askUserTimeoutHandle) {
+            window.clearTimeout(askUserTimeoutHandle);
+            askUserTimeoutHandle = null;
+          }
+
+          if (askUserAbortCleanup) {
+            askUserAbortCleanup();
+            askUserAbortCleanup = null;
+          }
+
+          const resolver = resolveAskUserSelection;
+          resolveAskUserSelection = null;
+          activeAskUserSelectionId = null;
+          resolver?.(result);
+        };
+
+        const requestAskUserInput = (
+          prompt: {
+            allowFreeform: boolean;
+            allowMultiple: boolean;
+            context?: string;
+            options: AskUserOption[];
+            question: string;
+            timeout?: number;
+          },
+          signal?: AbortSignal,
+        ) => {
+          if (!agent) {
+            return Promise.resolve({ answer: null, wasCustom: false });
+          }
+
+          if (resolveAskUserSelection) {
+            finalizeAskUserSelection({ answer: null, wasCustom: false });
+          }
+
+          const selectionMessage = createAskUserSelectionMessage({
+            allowFreeform: prompt.allowFreeform,
+            allowMultiple: prompt.allowMultiple,
+            context: prompt.context,
+            options: prompt.options,
+            question: prompt.question,
+          });
+
+          activeAskUserSelectionId = selectionMessage.selectionId;
+          agent.appendMessage(selectionMessage);
+          scheduleConversationSave(true);
+
+          return new Promise<{ answer: string | null; wasCustom: boolean }>((resolve) => {
+            resolveAskUserSelection = resolve;
+
+            if (typeof prompt.timeout === "number") {
+              const timeout = Math.max(0, Math.trunc(prompt.timeout));
+
+              if (timeout > 0) {
+                askUserTimeoutHandle = window.setTimeout(() => {
+                  finalizeAskUserSelection({ answer: null, wasCustom: false });
+                }, timeout);
+              }
+            }
+
+            if (signal) {
+              const abortListener = () => {
+                finalizeAskUserSelection({ answer: null, wasCustom: false });
+              };
+
+              signal.addEventListener("abort", abortListener, { once: true });
+              askUserAbortCleanup = () => {
+                signal.removeEventListener("abort", abortListener);
+              };
+            }
+          });
+        };
+
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
@@ -1280,6 +1442,269 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           },
         };
 
+        const braveSearchTool = {
+          name: "brave_search",
+          label: "Brave Search",
+          description:
+            "Web search via Brave Search API. Returns snippets and can optionally fetch page content.",
+          parameters: Type.Object({
+            query: Type.String({
+              description: "Search query.",
+              minLength: 1,
+            }),
+            count: Type.Optional(
+              Type.Integer({
+                description: "Number of results (1-20).",
+                maximum: 20,
+                minimum: 1,
+              }),
+            ),
+            country: Type.Optional(
+              Type.String({
+                description: "Country code, for example US.",
+                minLength: 2,
+              }),
+            ),
+            freshness: Type.Optional(
+              Type.Union([
+                Type.Literal("pd"),
+                Type.Literal("pw"),
+                Type.Literal("pm"),
+                Type.Literal("py"),
+              ]),
+            ),
+            fetchContent: Type.Optional(Type.Boolean()),
+            format: Type.Optional(
+              Type.Union([
+                Type.Literal("one_line"),
+                Type.Literal("short"),
+                Type.Literal("raw_json"),
+              ]),
+            ),
+          }),
+          async execute(
+            _runtimeToolCallId: string,
+            params: {
+              count?: number;
+              country?: string;
+              fetchContent?: boolean;
+              format?: "one_line" | "raw_json" | "short";
+              freshness?: "pd" | "pm" | "pw" | "py";
+              query: string;
+            },
+            signal?: AbortSignal,
+          ) {
+            const response = await fetch("/api/brave/search", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(params),
+              signal,
+            });
+            const data = (await response.json()) as BraveSearchToolResponse | { error: string };
+
+            if (!response.ok) {
+              throw new Error(getErrorMessage(data, "Brave search failed."));
+            }
+
+            const result = data as BraveSearchToolResponse;
+
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: result.text,
+                },
+              ],
+              details: result,
+            };
+          },
+        };
+
+        const braveGroundingTool = {
+          name: "brave_grounding",
+          label: "Brave Grounding",
+          description: "Grounded answer from Brave Search with optional citations.",
+          parameters: Type.Object({
+            question: Type.String({
+              description: "Question to answer.",
+              minLength: 1,
+            }),
+            enableResearch: Type.Optional(Type.Boolean()),
+            enableCitations: Type.Optional(Type.Boolean()),
+            enableEntities: Type.Optional(Type.Boolean()),
+            maxAnswerChars: Type.Optional(
+              Type.Integer({
+                maximum: 10_000,
+                minimum: 200,
+              }),
+            ),
+          }),
+          async execute(
+            _runtimeToolCallId: string,
+            params: {
+              enableCitations?: boolean;
+              enableEntities?: boolean;
+              enableResearch?: boolean;
+              maxAnswerChars?: number;
+              question: string;
+            },
+            signal?: AbortSignal,
+          ) {
+            const response = await fetch("/api/brave/grounding", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(params),
+              signal,
+            });
+            const data = (await response.json()) as BraveGroundingToolResponse | { error: string };
+
+            if (!response.ok) {
+              throw new Error(getErrorMessage(data, "Brave grounding failed."));
+            }
+
+            const result = data as BraveGroundingToolResponse;
+
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: result.text,
+                },
+              ],
+              details: result,
+            };
+          },
+        };
+
+        const askUserTool = {
+          name: "ask_user",
+          label: "Ask User",
+          description:
+            "Ask the user a question with optional multiple-choice options to resolve ambiguity.",
+          parameters: Type.Object({
+            question: Type.String({
+              description: "The question to ask the user.",
+              minLength: 1,
+            }),
+            context: Type.Optional(
+              Type.String({
+                description: "Relevant context summary to show before the question.",
+              }),
+            ),
+            options: Type.Optional(
+              Type.Array(
+                Type.Union([
+                  Type.String(),
+                  Type.Object({
+                    title: Type.String(),
+                    description: Type.Optional(Type.String()),
+                  }),
+                ]),
+              ),
+            ),
+            allowMultiple: Type.Optional(Type.Boolean()),
+            allowFreeform: Type.Optional(Type.Boolean()),
+            timeout: Type.Optional(Type.Number()),
+          }),
+          async execute(
+            _runtimeToolCallId: string,
+            params: {
+              allowFreeform?: boolean;
+              allowMultiple?: boolean;
+              context?: string;
+              options?: AskUserOptionInput[];
+              question: string;
+              timeout?: number;
+            },
+            signal?: AbortSignal,
+          ) {
+            const question = typeof params.question === "string" ? params.question.trim() : "";
+            const context = typeof params.context === "string" ? params.context.trim() : "";
+            const options = normalizeAskUserOptions(Array.isArray(params.options) ? params.options : []);
+            const allowMultiple = Boolean(params.allowMultiple ?? false);
+            const allowFreeform = Boolean(params.allowFreeform ?? true);
+            const timeout =
+              typeof params.timeout === "number" && Number.isFinite(params.timeout)
+                ? Math.max(0, Math.trunc(params.timeout))
+                : undefined;
+
+            if (!question) {
+              return {
+                content: [{ type: "text" as const, text: "Error: question is required." }],
+                details: {
+                  answer: null,
+                  cancelled: true,
+                  context: context || undefined,
+                  options,
+                  question,
+                } satisfies AskUserToolResponse,
+                isError: true,
+              };
+            }
+
+            if (options.length === 0 && !allowFreeform) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: "ask_user requires options or allowFreeform=true.",
+                  },
+                ],
+                details: {
+                  answer: null,
+                  cancelled: true,
+                  context: context || undefined,
+                  options,
+                  question,
+                } satisfies AskUserToolResponse,
+                isError: true,
+              };
+            }
+
+            const selection = await requestAskUserInput(
+              {
+                allowFreeform,
+                allowMultiple,
+                context: context || undefined,
+                options,
+                question,
+                timeout,
+              },
+              signal,
+            );
+            const answer = selection.answer?.trim() ?? "";
+
+            if (!answer) {
+              return {
+                content: [{ type: "text" as const, text: "User cancelled the question." }],
+                details: {
+                  answer: null,
+                  cancelled: true,
+                  context: context || undefined,
+                  options,
+                  question,
+                } satisfies AskUserToolResponse,
+              };
+            }
+
+            return {
+              content: [{ type: "text" as const, text: `User answered: ${answer}` }],
+              details: {
+                answer,
+                cancelled: false,
+                context: context || undefined,
+                options,
+                question,
+                wasCustom: selection.wasCustom,
+              } satisfies AskUserToolResponse,
+            };
+          },
+        };
+
         const runDataAnalysisTool = createSandboxTool<
           { code: string; inputFiles?: string[] },
           DataAnalysisToolResponse
@@ -1357,6 +1782,9 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             messages: initialConversation.initialSessionData?.messages ?? [],
             tools: [
               searchCompanyKnowledgeTool,
+              braveSearchTool,
+              braveGroundingTool,
+              askUserTool,
               runDataAnalysisTool,
               generateVisualGraphTool,
               generateDocumentTool,
@@ -1588,9 +2016,39 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           );
         };
 
+        const handleAskUserSelection = (event: Event) => {
+          if (!(event instanceof CustomEvent) || !agent) {
+            return;
+          }
+
+          const selection = event.detail as AskUserSelectionEventDetail;
+
+          if (!activeAskUserSelectionId || selection.selectionId !== activeAskUserSelectionId) {
+            return;
+          }
+
+          agent.replaceMessages(
+            markAskUserSelectionSubmitted(
+              agent.state.messages as AgentMessage[],
+              selection.selectionId,
+              selection.answer,
+              selection.wasCustom,
+            ),
+          );
+          scheduleConversationSave(true);
+          finalizeAskUserSelection({
+            answer: selection.answer,
+            wasCustom: selection.wasCustom,
+          });
+        };
+
         window.addEventListener(FILE_SELECTION_EVENT, handleFileSelection as EventListener);
+        window.addEventListener(ASK_USER_EVENT, handleAskUserSelection as EventListener);
         agent.setTools([
           searchCompanyKnowledgeTool,
+          braveSearchTool,
+          braveGroundingTool,
+          askUserTool,
           runDataAnalysisTool,
           generateVisualGraphTool,
           generateDocumentTool,
@@ -1601,10 +2059,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             FILE_SELECTION_EVENT,
             handleFileSelection as EventListener,
           );
+          window.removeEventListener(ASK_USER_EVENT, handleAskUserSelection as EventListener);
           if (saveTimerRef.current) {
             window.clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
           }
+          finalizeAskUserSelection({ answer: null, wasCustom: false });
           unsubscribe();
           agent?.abort();
           element.remove();

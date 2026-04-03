@@ -264,6 +264,8 @@ export function critjectureConvertToLlm(
   defaultConvertToLlm: (messages: AgentMessage[]) => Message[],
 ): Message[] {
   return defaultConvertToLlm(
-    messages.filter((message) => message.role !== "file-selection"),
+    messages.filter(
+      (message) => message.role !== "file-selection" && message.role !== "ask-user-selection",
+    ),
   );
 }

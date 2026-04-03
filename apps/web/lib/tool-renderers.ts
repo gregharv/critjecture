@@ -8,6 +8,8 @@ import type {
 } from "@/lib/sandbox-tool-types";
 
 type SandboxToolDetails = SandboxToolResponse | GeneratedAssetToolResponse;
+type AnyToolDetails = Record<string, unknown>;
+type ToolRendererResult = ToolResultMessage<AnyToolDetails>;
 
 type ToolRendererRegistry = {
   registerToolRenderer: (
@@ -15,7 +17,7 @@ type ToolRendererRegistry = {
     renderer: {
       render: (
         params: unknown,
-        result?: ToolResultMessage<SandboxToolDetails>,
+        result?: ToolResultMessage<AnyToolDetails>,
         isStreaming?: boolean,
       ) => { content: ReturnType<typeof html>; isCustom: boolean };
     },
@@ -83,10 +85,7 @@ function getCodeParam(params: unknown) {
   return parsed.code.trim();
 }
 
-function getToolState(
-  result: ToolResultMessage<SandboxToolDetails> | undefined,
-  isStreaming: boolean | undefined,
-) {
+function getToolState(result: ToolRendererResult | undefined, isStreaming: boolean | undefined) {
   if (result) {
     return result.isError ? "error" : "complete";
   }
@@ -94,7 +93,7 @@ function getToolState(
   return isStreaming ? "running" : "pending";
 }
 
-function getToolSummary(result: ToolResultMessage<SandboxToolDetails> | undefined) {
+function getToolSummary(result: ToolRendererResult | undefined) {
   return (
     result?.content
       ?.filter((content) => content.type === "text")
@@ -104,8 +103,14 @@ function getToolSummary(result: ToolResultMessage<SandboxToolDetails> | undefine
   );
 }
 
-function getToolDetails(result: ToolResultMessage<SandboxToolDetails> | undefined) {
-  return isRecord(result?.details) ? (result.details as SandboxToolDetails) : undefined;
+function getToolDetails(result: ToolRendererResult | undefined) {
+  return isRecord(result?.details) ? (result.details as AnyToolDetails) : undefined;
+}
+
+function getSandboxToolDetails(result: ToolRendererResult | undefined) {
+  const details = getToolDetails(result);
+
+  return details ? (details as SandboxToolDetails) : undefined;
 }
 
 function getToolStagedFiles(details: SandboxToolDetails | undefined) {
@@ -186,11 +191,11 @@ function renderGeneratedAsset(asset: SandboxGeneratedAsset, kind: "image" | "pdf
 function renderSandboxToolCard(
   options: SandboxCardOptions,
   params: unknown,
-  result: ToolResultMessage<SandboxToolDetails> | undefined,
+  result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
   const code = getCodeParam(params);
-  const details = getToolDetails(result);
+  const details = getSandboxToolDetails(result);
   const stagedFiles = getToolStagedFiles(details);
   const exitCode = getToolExitCode(details);
   const stdout = formatBlockContent(details?.stdout);
@@ -355,7 +360,378 @@ function renderSandboxToolCard(
   };
 }
 
+function getStringValue(source: unknown, key: string) {
+  if (!isRecord(source)) {
+    return "";
+  }
+
+  const value = source[key];
+
+  return typeof value === "string" ? value : "";
+}
+
+function getBooleanValue(source: unknown, key: string) {
+  if (!isRecord(source)) {
+    return false;
+  }
+
+  return Boolean(source[key]);
+}
+
+function getStringArrayValue(source: unknown, key: string) {
+  if (!isRecord(source) || !Array.isArray(source[key])) {
+    return [] as string[];
+  }
+
+  return source[key].filter((entry): entry is string => typeof entry === "string");
+}
+
+function getBraveResults(source: unknown) {
+  if (!isRecord(source) || !Array.isArray(source.results)) {
+    return [] as Array<{
+      content?: string;
+      contentFilePath?: string;
+      snippet?: string;
+      title?: string;
+      url?: string;
+    }>;
+  }
+
+  return source.results.filter((entry) => isRecord(entry));
+}
+
+function renderBraveSearchToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const query = getStringValue(details, "query") || getStringValue(parsedParams, "query");
+  const summary = getToolSummary(result);
+  const braveResults = getBraveResults(details).slice(0, 6);
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">Web Search</span>
+            <div class="crit-tool__title">Brave Search</div>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? "Complete"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Running"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${query
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Query</div>
+              <p class="crit-tool__summary">${query}</p>
+            </section>`
+          : nothing}
+
+        ${braveResults.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Top Results</div>
+              <div class="crit-tool__files">
+                ${braveResults.map((entry) => {
+                  const title = getStringValue(entry, "title");
+                  const url = getStringValue(entry, "url");
+                  const snippet = getStringValue(entry, "snippet");
+                  const savedPath = getStringValue(entry, "contentFilePath");
+
+                  return html`
+                    <div class="crit-tool__file">
+                      <div class="crit-tool__file-source">
+                        ${url
+                          ? html`<a href=${url} rel="noreferrer" target="_blank">${title || url}</a>`
+                          : title || "Untitled result"}
+                      </div>
+                      ${snippet
+                        ? html`<div class="crit-tool__file-stage">${snippet}</div>`
+                        : nothing}
+                      ${savedPath
+                        ? html`<div class="crit-tool__file-stage">Saved: ${savedPath}</div>`
+                        : nothing}
+                    </div>
+                  `;
+                })}
+              </div>
+            </section>`
+          : nothing}
+
+        ${summary
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Summary</div>
+              <p class="crit-tool__summary">${summary}</p>
+            </section>`
+          : nothing}
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
+function renderBraveGroundingToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const question =
+    getStringValue(details, "question") || getStringValue(parsedParams, "question");
+  const summary = getToolSummary(result);
+  const citations =
+    isRecord(details) && Array.isArray(details.citations)
+      ? details.citations.filter((entry) => isRecord(entry)).slice(0, 8)
+      : [];
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">Grounded Web Answer</span>
+            <div class="crit-tool__title">Brave Grounding</div>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? "Complete"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Running"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${question
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Question</div>
+              <p class="crit-tool__summary">${question}</p>
+            </section>`
+          : nothing}
+
+        ${summary
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Answer</div>
+              <p class="crit-tool__summary">${summary}</p>
+            </section>`
+          : nothing}
+
+        ${citations.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Citations</div>
+              <div class="crit-tool__files">
+                ${citations.map((citation) => {
+                  const label = getStringValue(citation, "label");
+                  const url = getStringValue(citation, "url");
+
+                  return html`
+                    <div class="crit-tool__file">
+                      <div class="crit-tool__file-source">${label || url}</div>
+                      ${url
+                        ? html`<div class="crit-tool__file-stage">
+                            <a href=${url} rel="noreferrer" target="_blank">${url}</a>
+                          </div>`
+                        : nothing}
+                    </div>
+                  `;
+                })}
+              </div>
+            </section>`
+          : nothing}
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
+function renderAskUserToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const question =
+    getStringValue(details, "question") || getStringValue(parsedParams, "question");
+  const context = getStringValue(details, "context") || getStringValue(parsedParams, "context");
+  const answer = getStringValue(details, "answer");
+  const cancelled = getBooleanValue(details, "cancelled");
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">User Decision Gate</span>
+            <div class="crit-tool__title">Ask User</div>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? "Complete"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Waiting"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${question
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Question</div>
+              <p class="crit-tool__summary">${question}</p>
+            </section>`
+          : nothing}
+
+        ${context
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Context</div>
+              <p class="crit-tool__summary">${context}</p>
+            </section>`
+          : nothing}
+
+        ${state === "running"
+          ? html`<div class="crit-tool__empty">Waiting for user selection…</div>`
+          : cancelled
+            ? html`<div class="crit-tool__empty">User cancelled the prompt.</div>`
+            : answer
+              ? html`<section class="crit-tool__section">
+                  <div class="crit-tool__label">Selected Answer</div>
+                  <p class="crit-tool__summary">${answer}</p>
+                </section>`
+              : nothing}
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
+function renderCompanyKnowledgeSearchToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const query = getStringValue(parsedParams, "query");
+  const scopeDescription = getStringValue(details, "scopeDescription");
+  const selectedFiles = getStringArrayValue(details, "selectedFiles");
+  const recommendedFiles = getStringArrayValue(details, "recommendedFiles");
+  const selectionRequired = getBooleanValue(details, "selectionRequired");
+  const summary = getToolSummary(result);
+  const candidateFiles =
+    isRecord(details) && Array.isArray(details.candidateFiles)
+      ? details.candidateFiles.filter((entry) => isRecord(entry)).slice(0, 8)
+      : [];
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">Knowledge Search</span>
+            <div class="crit-tool__title">Search Company Knowledge</div>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? "Complete"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Running"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${query
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Query</div>
+              <p class="crit-tool__summary">${query}</p>
+            </section>`
+          : nothing}
+
+        ${scopeDescription
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Scope</div>
+              <p class="crit-tool__summary">${scopeDescription}</p>
+            </section>`
+          : nothing}
+
+        ${candidateFiles.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Candidate Files</div>
+              <div class="crit-tool__files">
+                ${candidateFiles.map((candidate) => {
+                  const file = getStringValue(candidate, "file") || "Unknown file";
+                  const matchedTerms = getStringArrayValue(candidate, "matchedTerms");
+
+                  return html`
+                    <div class="crit-tool__file">
+                      <div class="crit-tool__file-source">${file}</div>
+                      ${matchedTerms.length > 0
+                        ? html`<div class="crit-tool__file-stage">
+                            Matched terms: ${matchedTerms.join(", ")}
+                          </div>`
+                        : nothing}
+                    </div>
+                  `;
+                })}
+              </div>
+            </section>`
+          : nothing}
+
+        ${selectedFiles.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Selected Files</div>
+              <p class="crit-tool__summary">${selectedFiles.join(", ")}</p>
+            </section>`
+          : recommendedFiles.length > 0
+            ? html`<section class="crit-tool__section">
+                <div class="crit-tool__label">Recommended Files</div>
+                <p class="crit-tool__summary">${recommendedFiles.join(", ")}</p>
+              </section>`
+            : nothing}
+
+        ${selectionRequired
+          ? html`<div class="crit-tool__empty">
+              File confirmation is required before analysis can continue.
+            </div>`
+          : nothing}
+
+        ${summary
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Summary</div>
+              <p class="crit-tool__summary">${summary}</p>
+            </section>`
+          : nothing}
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
 export function registerCritjectureToolRenderers(registry: ToolRendererRegistry) {
+  registry.registerToolRenderer("search_company_knowledge", {
+    render(params, result, isStreaming) {
+      return renderCompanyKnowledgeSearchToolCard(params, result, isStreaming);
+    },
+  });
+
   registry.registerToolRenderer("run_data_analysis", {
     render(params, result, isStreaming) {
       return renderSandboxToolCard(
@@ -403,6 +779,24 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
         result,
         isStreaming,
       );
+    },
+  });
+
+  registry.registerToolRenderer("brave_search", {
+    render(params, result, isStreaming) {
+      return renderBraveSearchToolCard(params, result, isStreaming);
+    },
+  });
+
+  registry.registerToolRenderer("brave_grounding", {
+    render(params, result, isStreaming) {
+      return renderBraveGroundingToolCard(params, result, isStreaming);
+    },
+  });
+
+  registry.registerToolRenderer("ask_user", {
+    render(params, result, isStreaming) {
+      return renderAskUserToolCard(params, result, isStreaming);
     },
   });
 }

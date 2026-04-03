@@ -232,6 +232,42 @@
   color: var(--shell-copy);
 }
 
+.crit-ask__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.crit-ask__option-input {
+  margin-top: 2px;
+}
+
+.crit-ask__option-description {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.crit-ask__custom-label {
+  display: grid;
+  gap: 8px;
+  color: var(--foreground);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.crit-ask__custom-answer {
+  width: 100%;
+  min-height: 98px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 86%, transparent 14%);
+  color: var(--foreground);
+  font: inherit;
+}
+
 .crit-tool {
   display: grid;
   gap: 14px;
