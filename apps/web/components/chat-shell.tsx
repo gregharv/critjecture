@@ -770,6 +770,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const syntheticContinuationRef = useRef(false);
+  const toolbarMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState("");
   const [conversationBootstrap, setConversationBootstrap] =
     useState<ConversationBootstrapState | null>(null);
@@ -2208,7 +2209,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   return (
     <div className="chat-shell">
       <div className="chat-toolbar">
-        <details className="chat-toolbar__menu">
+        <details className="chat-toolbar__menu" ref={toolbarMenuRef}>
           <summary className="chat-toolbar__summary">
             <span className="chat-toolbar__title">
               {activeConversationTitle || "New conversation"}
@@ -2223,6 +2224,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               className="chat-toolbar__button"
               disabled={isStreaming || !conversationBootstrap}
               onClick={() => {
+                toolbarMenuRef.current?.removeAttribute("open");
                 void handleOpenHistory();
               }}
               type="button"
@@ -2232,7 +2234,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             <button
               className="chat-toolbar__button chat-toolbar__button--primary"
               disabled={isStreaming || !conversationBootstrap}
-              onClick={handleNewChat}
+              onClick={() => {
+                toolbarMenuRef.current?.removeAttribute("open");
+                handleNewChat();
+              }}
               type="button"
             >
               New chat
