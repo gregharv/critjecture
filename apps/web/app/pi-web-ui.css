@@ -298,10 +298,7 @@
 }
 
 .crit-tool__title {
-  color: var(--foreground);
-  font-size: 0.98rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  display: none;
 }
 
 .crit-tool__status {

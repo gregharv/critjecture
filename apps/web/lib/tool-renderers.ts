@@ -28,7 +28,6 @@ type SandboxCardOptions = {
   assetKind?: "image" | "pdf";
   emptyCopy: string;
   eyebrow: string;
-  title: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +90,17 @@ function getToolState(result: ToolRendererResult | undefined, isStreaming: boole
   }
 
   return isStreaming ? "running" : "pending";
+}
+
+function renderCollapsedToolError(eyebrow: string) {
+  return {
+    content: html`
+      <div class="crit-tool crit-tool--error-collapsed">
+        <div class="crit-tool__empty">Error (${eyebrow})</div>
+      </div>
+    `,
+    isCustom: false,
+  };
 }
 
 function getToolSummary(result: ToolRendererResult | undefined) {
@@ -194,6 +204,10 @@ function renderSandboxToolCard(
   result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
+  if (result?.isError) {
+    return renderCollapsedToolError(options.eyebrow);
+  }
+
   const code = getCodeParam(params);
   const details = getSandboxToolDetails(result);
   const stagedFiles = getToolStagedFiles(details);
@@ -216,7 +230,6 @@ function renderSandboxToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">${options.eyebrow}</span>
-            <div class="crit-tool__title">${options.title}</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -405,11 +418,14 @@ function renderBraveSearchToolCard(
   result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
+  if (result?.isError) {
+    return renderCollapsedToolError("Web Search");
+  }
+
   const parsedParams = parseToolParams(params);
   const details = getToolDetails(result);
   const state = getToolState(result, isStreaming);
   const query = getStringValue(details, "query") || getStringValue(parsedParams, "query");
-  const summary = getToolSummary(result);
   const braveResults = getBraveResults(details).slice(0, 6);
   const savedCount = braveResults.filter((entry) => getStringValue(entry, "contentFilePath")).length;
 
@@ -419,7 +435,6 @@ function renderBraveSearchToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">Web Search</span>
-            <div class="crit-tool__title">Web Search</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -473,14 +488,7 @@ function renderBraveSearchToolCard(
             ? html`<div class="crit-tool__empty">Searching the web…</div>`
             : nothing}
 
-        ${result?.isError && summary
-          ? html`<section class="crit-tool__section">
-              <div class="crit-tool__label">Error</div>
-              <p class="crit-tool__summary">${summary}</p>
-            </section>`
-          : nothing}
-
-        ${(braveResults.length > 0 || savedCount > 0) && !result?.isError
+        ${(braveResults.length > 0 || savedCount > 0)
           ? html`<div class="crit-tool__meta">
               <span>${braveResults.length} result${braveResults.length === 1 ? "" : "s"}</span>
               ${savedCount > 0
@@ -499,6 +507,10 @@ function renderBraveGroundingToolCard(
   result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
+  if (result?.isError) {
+    return renderCollapsedToolError("Grounded Web Answer");
+  }
+
   const parsedParams = parseToolParams(params);
   const details = getToolDetails(result);
   const state = getToolState(result, isStreaming);
@@ -516,7 +528,6 @@ function renderBraveGroundingToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">Grounded Web Answer</span>
-            <div class="crit-tool__title">Brave Grounding</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -576,6 +587,10 @@ function renderAskUserToolCard(
   result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
+  if (result?.isError) {
+    return renderCollapsedToolError("User Decision Gate");
+  }
+
   const parsedParams = parseToolParams(params);
   const details = getToolDetails(result);
   const state = getToolState(result, isStreaming);
@@ -591,7 +606,6 @@ function renderAskUserToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">User Decision Gate</span>
-            <div class="crit-tool__title">Ask User</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -639,6 +653,10 @@ function renderCompanyKnowledgeSearchToolCard(
   result: ToolRendererResult | undefined,
   isStreaming?: boolean,
 ) {
+  if (result?.isError) {
+    return renderCollapsedToolError("Knowledge Search");
+  }
+
   const parsedParams = parseToolParams(params);
   const details = getToolDetails(result);
   const state = getToolState(result, isStreaming);
@@ -659,7 +677,6 @@ function renderCompanyKnowledgeSearchToolCard(
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
             <span class="crit-tool__eyebrow">Knowledge Search</span>
-            <div class="crit-tool__title">Search Company Knowledge</div>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -753,7 +770,6 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
           emptyCopy:
             "No stdout captured. The Python code should use print(...) for the final answer.",
           eyebrow: "Python Sandbox",
-          title: "Run Data Analysis",
         },
         params,
         result,
@@ -770,7 +786,6 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
           emptyCopy:
             "No stdout captured. Save the PNG to outputs/chart.png and print a short summary.",
           eyebrow: "Chart Generator",
-          title: "Generate Visual Graph",
         },
         params,
         result,
@@ -787,7 +802,6 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
           emptyCopy:
             "No stdout captured. Save the PDF to outputs/notice.pdf and print a short summary.",
           eyebrow: "Document Generator",
-          title: "Generate Document",
         },
         params,
         result,
