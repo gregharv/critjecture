@@ -201,6 +201,9 @@ function renderSandboxToolCard(
   const sandboxRunId = getToolSandboxRunId(details);
   const runner = getToolRunner(details);
   const limits = getToolLimits(details);
+  const shouldCollapseLogsByDefault =
+    state === "complete" && (Boolean(generatedAsset) || Boolean(summary));
+  const hasLogOutput = !stdout.empty || !stderr.empty || result?.isError;
 
   return {
     content: html`
@@ -261,37 +264,52 @@ function renderSandboxToolCard(
                     : nothing
                 }
 
-                <div class="crit-tool__split">
-                  <section class="crit-tool__section">
-                    <div class="crit-tool__label">stdout</div>
-                    ${
-                      stdout.empty
-                        ? html`<div class="crit-tool__empty">${options.emptyCopy}</div>`
-                        : html`<code-block
-                            .code=${stdout.code}
-                            language=${stdout.language}
-                          ></code-block>`
-                    }
-                  </section>
+                ${
+                  hasLogOutput
+                    ? html`
+                        <details
+                          class="crit-tool__disclosure"
+                          ?open=${!shouldCollapseLogsByDefault}
+                        >
+                          <summary class="crit-tool__disclosure-summary">
+                            <span class="crit-tool__label">Execution Logs</span>
+                          </summary>
 
-                  ${
-                    !stderr.empty || result.isError
-                      ? html`
-                          <section class="crit-tool__section">
-                            <div class="crit-tool__label">stderr</div>
+                          <div class="crit-tool__split">
+                            <section class="crit-tool__section">
+                              <div class="crit-tool__label">stdout</div>
+                              ${
+                                stdout.empty
+                                  ? html`<div class="crit-tool__empty">${options.emptyCopy}</div>`
+                                  : html`<code-block
+                                      .code=${stdout.code}
+                                      language=${stdout.language}
+                                    ></code-block>`
+                              }
+                            </section>
+
                             ${
-                              stderr.empty
-                                ? html`<div class="crit-tool__empty">No stderr output.</div>`
-                                : html`<code-block
-                                    .code=${stderr.code}
-                                    language=${stderr.language}
-                                  ></code-block>`
+                              !stderr.empty || result.isError
+                                ? html`
+                                    <section class="crit-tool__section">
+                                      <div class="crit-tool__label">stderr</div>
+                                      ${
+                                        stderr.empty
+                                          ? html`<div class="crit-tool__empty">No stderr output.</div>`
+                                          : html`<code-block
+                                              .code=${stderr.code}
+                                              language=${stderr.language}
+                                            ></code-block>`
+                                      }
+                                    </section>
+                                  `
+                                : nothing
                             }
-                          </section>
-                        `
-                      : nothing
-                  }
-                </div>
+                          </div>
+                        </details>
+                      `
+                    : nothing
+                }
               `
             : html`
                 <div class="crit-tool__empty">

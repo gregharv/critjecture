@@ -346,6 +346,36 @@
   min-width: 0;
 }
 
+.crit-tool__disclosure {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.crit-tool__disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.crit-tool__disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+
+.crit-tool__disclosure-summary::before {
+  content: "▸";
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: transform 0.16s ease;
+}
+
+.crit-tool__disclosure[open] .crit-tool__disclosure-summary::before {
+  transform: rotate(90deg);
+}
+
 .crit-tool code-block {
   display: block;
   max-width: 100%;
