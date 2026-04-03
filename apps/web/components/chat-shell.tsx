@@ -84,6 +84,8 @@ type ConversationBootstrapState = {
   initialSessionData: SessionData | null;
 };
 
+const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
+
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
 }
@@ -407,6 +409,89 @@ function createToolRouteError(
   return error;
 }
 
+function isImageMimeType(mimeType: string) {
+  return mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
+}
+
+async function convertBlobToBase64(blob: Blob) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("Unable to read generated image for graph review."));
+    };
+
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Generated image did not produce a valid data URL."));
+        return;
+      }
+
+      resolve(reader.result);
+    };
+
+    reader.readAsDataURL(blob);
+  });
+
+  const commaIndex = dataUrl.indexOf(",");
+
+  return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : null;
+}
+
+function getGraphReviewAsset(
+  result: SandboxToolResponse,
+): GeneratedAssetToolResponse["generatedAsset"] | null {
+  if (!("generatedAsset" in result)) {
+    return null;
+  }
+
+  const generatedAsset = (result as GeneratedAssetToolResponse).generatedAsset;
+
+  if (!generatedAsset || !isImageMimeType(generatedAsset.mimeType)) {
+    return null;
+  }
+
+  if (generatedAsset.byteSize > GRAPH_REVIEW_IMAGE_MAX_BYTES) {
+    return null;
+  }
+
+  return generatedAsset;
+}
+
+async function buildGraphReviewImageContent(
+  result: SandboxToolResponse,
+  signal?: AbortSignal,
+) {
+  const generatedAsset = getGraphReviewAsset(result);
+
+  if (!generatedAsset) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(generatedAsset.downloadUrl, { signal });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const blob = await response.blob();
+    const data = await convertBlobToBase64(blob);
+
+    if (!data) {
+      return null;
+    }
+
+    return {
+      data,
+      mimeType: generatedAsset.mimeType,
+      type: "image" as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function getSystemPrompt(role: UserRole) {
   const roleLabel = getRoleLabel(role);
   const scopeRule =
@@ -421,6 +506,7 @@ function getSystemPrompt(role: UserRole) {
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
+    "After generate_visual_graph returns, inspect the tool result image before finalizing your response. If readability, labels, or chart choice are weak, run generate_visual_graph one more time with improved plotting code; limit this self-revision to one extra pass.",
     "For most CSV-backed charts, prefer a single generate_visual_graph call with inputFiles and complete matplotlib code that reads inputs/<same-relative-path> with Polars and saves outputs/chart.png.",
     "Use run_data_analysis before generate_visual_graph only when you first need a non-visual computed answer, schema inspection, or reusable chart-ready JSON. If you do that, print exactly one JSON object via json.dumps(...). Use either {\"chart\":{\"type\":\"bar\",\"x\":[...],\"y\":[...],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for one series or {\"chart\":{\"type\":\"line\",\"series\":[{\"name\":\"Queue A\",\"x\":[...],\"y\":[...]}],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for multiple colored series.",
     "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
@@ -1056,6 +1142,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           TResponse extends SandboxToolResponse,
         >(
           options: {
+            attachGraphImageForReview?: boolean;
             buildRequestBody: (runtimeToolCallId: string, params: TParams) => Record<string, unknown>;
             description: string;
             label: string;
@@ -1098,14 +1185,33 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             }
 
             const result = data as TResponse;
+            const content: Array<
+              | {
+                  text: string;
+                  type: "text";
+                }
+              | {
+                  data: string;
+                  mimeType: string;
+                  type: "image";
+                }
+            > = [
+              {
+                type: "text",
+                text: result.summary,
+              },
+            ];
+
+            if (options.attachGraphImageForReview) {
+              const imageContent = await buildGraphReviewImageContent(result, signal);
+
+              if (imageContent) {
+                content.push(imageContent);
+              }
+            }
 
             return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: result.summary,
-                },
-              ],
+              content,
               details: result,
             };
           },
@@ -1219,6 +1325,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             "Generate exactly one PNG chart inside outputs/. This can either render a stored chart via analysisResultId or run arbitrary matplotlib code directly against staged company files passed in inputFiles.",
           parameters: generateVisualGraphParameters,
           route: "/api/visual-graph/run",
+          attachGraphImageForReview: true,
         });
 
         const generateDocumentTool = createSandboxTool<
