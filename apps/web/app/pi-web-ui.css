@@ -405,6 +405,12 @@
   transition: transform 0.16s ease;
 }
 
+.crit-tool__error-summary {
+  color: var(--destructive);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .crit-tool__disclosure[open] .crit-tool__disclosure-summary::before {
   transform: rotate(90deg);
 }

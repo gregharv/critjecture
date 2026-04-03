@@ -92,11 +92,39 @@ function getToolState(result: ToolRendererResult | undefined, isStreaming: boole
   return isStreaming ? "running" : "pending";
 }
 
-function renderCollapsedToolError(eyebrow: string) {
+function renderCollapsedToolError(eyebrow: string, result?: ToolRendererResult) {
+  const summary = getToolSummary(result);
+  const details = getToolDetails(result);
+  const detailsJson = details ? JSON.stringify(details, null, 2) : "";
+
   return {
     content: html`
       <div class="crit-tool crit-tool--error-collapsed">
-        <div class="crit-tool__empty">Error (${eyebrow})</div>
+        <details class="crit-tool__disclosure">
+          <summary class="crit-tool__disclosure-summary">
+            <span class="crit-tool__error-summary">Error (${eyebrow})</span>
+          </summary>
+
+          <div class="crit-tool__split">
+            ${summary
+              ? html`<section class="crit-tool__section">
+                  <div class="crit-tool__label">Message</div>
+                  <p class="crit-tool__summary">${summary}</p>
+                </section>`
+              : nothing}
+
+            ${detailsJson
+              ? html`<section class="crit-tool__section">
+                  <div class="crit-tool__label">Details</div>
+                  <code-block .code=${detailsJson} language="json"></code-block>
+                </section>`
+              : nothing}
+
+            ${!summary && !detailsJson
+              ? html`<div class="crit-tool__empty">No additional error details were provided.</div>`
+              : nothing}
+          </div>
+        </details>
       </div>
     `,
     isCustom: false,
@@ -205,7 +233,7 @@ function renderSandboxToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError(options.eyebrow);
+    return renderCollapsedToolError(options.eyebrow, result);
   }
 
   const code = getCodeParam(params);
@@ -419,7 +447,7 @@ function renderBraveSearchToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("Web Search");
+    return renderCollapsedToolError("Web Search", result);
   }
 
   const parsedParams = parseToolParams(params);
@@ -508,7 +536,7 @@ function renderBraveGroundingToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("Grounded Web Answer");
+    return renderCollapsedToolError("Grounded Web Answer", result);
   }
 
   const parsedParams = parseToolParams(params);
@@ -588,7 +616,7 @@ function renderAskUserToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("User Decision Gate");
+    return renderCollapsedToolError("User Decision Gate", result);
   }
 
   const parsedParams = parseToolParams(params);
@@ -654,7 +682,7 @@ function renderCompanyKnowledgeSearchToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("Knowledge Search");
+    return renderCollapsedToolError("Knowledge Search", result);
   }
 
   const parsedParams = parseToolParams(params);
