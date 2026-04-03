@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import http from "node:http";
-import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -420,12 +420,19 @@ async function executeRun(payload) {
 
   const limits = payload.limits ?? {};
   const workspaceDir = path.join(WORKSPACE_ROOT, payload.runId);
+  const outputsDir = path.join(workspaceDir, OUTPUTS_DIR);
+  const matplotlibDir = path.join(workspaceDir, ".matplotlib");
   const containerName = `critjecture-sandbox-${payload.runId}`;
   let stagedFiles = [];
 
   await ensureDockerAvailable();
-  await mkdir(path.join(workspaceDir, OUTPUTS_DIR), { recursive: true });
-  await mkdir(path.join(workspaceDir, ".matplotlib"), { recursive: true });
+  await mkdir(outputsDir, { recursive: true });
+  await mkdir(matplotlibDir, { recursive: true });
+  // Some Docker hosts run containers with user namespace remapping, so make
+  // the bind-mounted workspace writeable to any container user.
+  await chmod(workspaceDir, 0o777);
+  await chmod(outputsDir, 0o777);
+  await chmod(matplotlibDir, 0o777);
 
   try {
     stagedFiles = await stageWorkspaceFiles(payload, workspaceDir);

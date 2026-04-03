@@ -23,11 +23,21 @@ export type CsvSchemaSummary = {
 export type ChartAnalysisPayload = {
   chartType: "bar" | "line" | "scatter";
   title: string | null;
-  x: Array<string | number>;
   xLabel: string | null;
-  y: number[];
   yLabel: string | null;
-};
+} & (
+  | {
+      x: Array<string | number>;
+      y: number[];
+    }
+  | {
+      series: Array<{
+        name: string | null;
+        x: Array<string | number>;
+        y: number[];
+      }>;
+    }
+);
 
 export type StoredAnalysisResult = {
   chart: ChartAnalysisPayload;
@@ -80,6 +90,37 @@ function isNumericArray(value: unknown): value is number[] {
   );
 }
 
+function isChartSeriesArray(
+  value: unknown,
+): value is Array<{
+  name: string | null;
+  x: Array<string | number>;
+  y: number[];
+}> {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => {
+      if (typeof entry !== "object" || entry === null) {
+        return false;
+      }
+
+      const series = entry as Record<string, unknown>;
+      const x = series.x;
+      const y = series.y;
+
+      return (
+        isChartAxisArray(x) &&
+        isNumericArray(y) &&
+        x.length === y.length &&
+        (!("name" in series) ||
+          series.name === null ||
+          (typeof series.name === "string" && series.name.trim().length > 0))
+      );
+    })
+  );
+}
+
 function parseChartPayload(value: unknown): ChartAnalysisPayload | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -94,28 +135,62 @@ function parseChartPayload(value: unknown): ChartAnalysisPayload | null {
     return null;
   }
 
-  if (!("x" in payload) || !("y" in payload)) {
-    return null;
-  }
-
   const payloadRecord = payload as Record<string, unknown>;
-  const x = payloadRecord.x;
-  const y = payloadRecord.y;
+  const chartType = normalizeChartType(
+    "chartType" in payloadRecord ? payloadRecord.chartType : payloadRecord.type,
+  );
+  const title = normalizeStringOrNull(payloadRecord.title);
+  const xLabel = normalizeStringOrNull(payloadRecord.xLabel);
+  const yLabel = normalizeStringOrNull(payloadRecord.yLabel);
 
-  if (!isChartAxisArray(x) || !isNumericArray(y) || x.length !== y.length) {
-    return null;
+  if ("series" in payloadRecord) {
+    const series = payloadRecord.series;
+
+    if (!isChartSeriesArray(series)) {
+      return null;
+    }
+
+    return {
+      chartType,
+      series: series.map((entry) => ({
+        name:
+          typeof entry.name === "string" && entry.name.trim().length > 0
+            ? entry.name.trim()
+            : null,
+        x: entry.x,
+        y: entry.y,
+      })),
+      title,
+      xLabel,
+      yLabel,
+    };
   }
 
-  return {
-    chartType: normalizeChartType(
-      "chartType" in payloadRecord ? payloadRecord.chartType : payloadRecord.type,
-    ),
-    title: normalizeStringOrNull(payloadRecord.title),
-    x,
-    xLabel: normalizeStringOrNull(payloadRecord.xLabel),
-    y,
-    yLabel: normalizeStringOrNull(payloadRecord.yLabel),
-  };
+  if ("x" in payloadRecord && "y" in payloadRecord) {
+    const x = payloadRecord.x;
+    const y = payloadRecord.y;
+
+    if (!isChartAxisArray(x) || !isNumericArray(y) || x.length !== y.length) {
+      return null;
+    }
+
+    return {
+      chartType,
+      title,
+      x,
+      xLabel,
+      y,
+      yLabel,
+    };
+  }
+
+  return null;
+}
+
+function countChartPoints(chart: ChartAnalysisPayload) {
+  return "series" in chart
+    ? chart.series.reduce((sum, series) => sum + series.x.length, 0)
+    : chart.x.length;
 }
 
 function parseStringArray(value: string) {
@@ -176,7 +251,7 @@ function normalizeInputFiles(inputFiles: string[]) {
 function serializeChartPayload(chart: ChartAnalysisPayload) {
   const payloadJson = JSON.stringify(chart);
   const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
-  const pointCount = chart.x.length;
+  const pointCount = countChartPoints(chart);
 
   if (pointCount > ANALYSIS_RESULT_MAX_POINT_COUNT) {
     throw new AnalysisResultValidationError(
@@ -279,8 +354,248 @@ export function parseChartAnalysisStdout(stdout: string) {
   try {
     return parseChartPayload(JSON.parse(trimmed));
   } catch {
-    return null;
+    try {
+      return parseChartPayload(parsePythonLikeLiteral(trimmed));
+    } catch {
+      return null;
+    }
   }
+}
+
+function parsePythonLikeLiteral(source: string) {
+  let index = 0;
+
+  function skipWhitespace() {
+    while (index < source.length && /\s/.test(source[index]!)) {
+      index += 1;
+    }
+  }
+
+  function parseString() {
+    const quote = source[index];
+
+    if (quote !== "'" && quote !== '"') {
+      throw new Error("Expected string literal.");
+    }
+
+    index += 1;
+    let result = "";
+
+    while (index < source.length) {
+      const character = source[index]!;
+
+      if (character === "\\") {
+        const next = source[index + 1];
+
+        if (next === undefined) {
+          throw new Error("Unterminated escape sequence.");
+        }
+
+        switch (next) {
+          case "\\":
+          case "'":
+          case '"':
+            result += next;
+            break;
+          case "n":
+            result += "\n";
+            break;
+          case "r":
+            result += "\r";
+            break;
+          case "t":
+            result += "\t";
+            break;
+          default:
+            result += next;
+            break;
+        }
+
+        index += 2;
+        continue;
+      }
+
+      if (character === quote) {
+        index += 1;
+        return result;
+      }
+
+      result += character;
+      index += 1;
+    }
+
+    throw new Error("Unterminated string literal.");
+  }
+
+  function parseNumber() {
+    const start = index;
+
+    if (source[index] === "-") {
+      index += 1;
+    }
+
+    while (index < source.length && /[0-9]/.test(source[index]!)) {
+      index += 1;
+    }
+
+    if (source[index] === ".") {
+      index += 1;
+      while (index < source.length && /[0-9]/.test(source[index]!)) {
+        index += 1;
+      }
+    }
+
+    if (source[index] === "e" || source[index] === "E") {
+      index += 1;
+      if (source[index] === "+" || source[index] === "-") {
+        index += 1;
+      }
+      while (index < source.length && /[0-9]/.test(source[index]!)) {
+        index += 1;
+      }
+    }
+
+    const parsed = Number(source.slice(start, index));
+
+    if (!Number.isFinite(parsed)) {
+      throw new Error("Invalid numeric literal.");
+    }
+
+    return parsed;
+  }
+
+  function parseIdentifier() {
+    const start = index;
+
+    while (index < source.length && /[A-Za-z_]/.test(source[index]!)) {
+      index += 1;
+    }
+
+    const identifier = source.slice(start, index);
+
+    switch (identifier) {
+      case "True":
+        return true;
+      case "False":
+        return false;
+      case "None":
+        return null;
+      default:
+        throw new Error(`Unsupported identifier ${identifier}.`);
+    }
+  }
+
+  function parseArray() {
+    index += 1;
+    const result: unknown[] = [];
+    skipWhitespace();
+
+    if (source[index] === "]") {
+      index += 1;
+      return result;
+    }
+
+    while (index < source.length) {
+      result.push(parseValue());
+      skipWhitespace();
+
+      if (source[index] === "]") {
+        index += 1;
+        return result;
+      }
+
+      if (source[index] !== ",") {
+        throw new Error("Expected comma in array literal.");
+      }
+
+      index += 1;
+      skipWhitespace();
+    }
+
+    throw new Error("Unterminated array literal.");
+  }
+
+  function parseObject() {
+    index += 1;
+    const result: Record<string, unknown> = {};
+    skipWhitespace();
+
+    if (source[index] === "}") {
+      index += 1;
+      return result;
+    }
+
+    while (index < source.length) {
+      skipWhitespace();
+      const keyValue = parseValue();
+
+      if (typeof keyValue !== "string") {
+        throw new Error("Object keys must be strings.");
+      }
+
+      skipWhitespace();
+
+      if (source[index] !== ":") {
+        throw new Error("Expected colon in object literal.");
+      }
+
+      index += 1;
+      skipWhitespace();
+      result[keyValue] = parseValue();
+      skipWhitespace();
+
+      if (source[index] === "}") {
+        index += 1;
+        return result;
+      }
+
+      if (source[index] !== ",") {
+        throw new Error("Expected comma in object literal.");
+      }
+
+      index += 1;
+      skipWhitespace();
+    }
+
+    throw new Error("Unterminated object literal.");
+  }
+
+  function parseValue(): unknown {
+    skipWhitespace();
+
+    const character = source[index];
+
+    if (character === "{") {
+      return parseObject();
+    }
+
+    if (character === "[") {
+      return parseArray();
+    }
+
+    if (character === "'" || character === '"') {
+      return parseString();
+    }
+
+    if (character === "-" || (character !== undefined && /[0-9]/.test(character))) {
+      return parseNumber();
+    }
+
+    if (character !== undefined && /[A-Za-z_]/.test(character)) {
+      return parseIdentifier();
+    }
+
+    throw new Error(`Unexpected token ${character ?? "<eof>"}.`);
+  }
+
+  const parsed = parseValue();
+  skipWhitespace();
+
+  if (index !== source.length) {
+    throw new Error("Unexpected trailing content.");
+  }
+
+  return parsed;
 }
 
 export async function storeAnalysisResult(input: {

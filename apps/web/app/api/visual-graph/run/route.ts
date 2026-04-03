@@ -116,10 +116,16 @@ function buildStoredChartPayload(
   return {
     chartType: overrides.chartType ?? chart.chartType,
     title: overrides.title ?? chart.title,
-    x: chart.x,
     xLabel: overrides.xLabel ?? chart.xLabel,
-    y: chart.y,
     yLabel: overrides.yLabel ?? chart.yLabel,
+    ...("series" in chart
+      ? {
+          series: chart.series,
+        }
+      : {
+          x: chart.x,
+          y: chart.y,
+        }),
   };
 }
 
@@ -130,20 +136,60 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 payload = json.loads(Path("chart_payload.json").read_text(encoding="utf-8"))
-x_values = payload["x"]
-y_values = payload["y"]
-positions = list(range(len(x_values)))
-
 plt.figure(figsize=(10, 6))
+plotted_value_count = 0
 
-if payload["chartType"] == "line":
-    plt.plot(positions, y_values, marker="o", color="#4C78A8")
-elif payload["chartType"] == "scatter":
-    plt.scatter(positions, y_values, color="#4C78A8")
+if "series" in payload:
+    axis_labels = []
+    axis_positions = {}
+
+    for series in payload["series"]:
+        for value in series["x"]:
+            label = str(value)
+            if label not in axis_positions:
+                axis_positions[label] = len(axis_labels)
+                axis_labels.append(label)
+
+    positions = list(range(len(axis_labels)))
+    series_count = max(len(payload["series"]), 1)
+
+    if payload["chartType"] == "bar":
+        width = min(0.8 / series_count, 0.35)
+        offset_origin = ((series_count - 1) / 2) * width
+
+        for index, series in enumerate(payload["series"]):
+            series_positions = [axis_positions[str(value)] - offset_origin + index * width for value in series["x"]]
+            label = series.get("name") or f"Series {index + 1}"
+            plt.bar(series_positions, series["y"], width=width, label=label)
+            plotted_value_count += len(series["x"])
+    else:
+        for index, series in enumerate(payload["series"]):
+            series_positions = [axis_positions[str(value)] for value in series["x"]]
+            label = series.get("name") or f"Series {index + 1}"
+            plotted_value_count += len(series["x"])
+
+            if payload["chartType"] == "scatter":
+                plt.scatter(series_positions, series["y"], label=label)
+            else:
+                plt.plot(series_positions, series["y"], marker="o", label=label)
+
+    plt.xticks(positions, axis_labels, rotation=45, ha="right")
+    if len(payload["series"]) > 1:
+        plt.legend()
 else:
-    plt.bar(positions, y_values, color="#4C78A8")
+    x_values = payload["x"]
+    y_values = payload["y"]
+    positions = list(range(len(x_values)))
+    plotted_value_count = len(x_values)
 
-plt.xticks(positions, [str(value) for value in x_values], rotation=45, ha="right")
+    if payload["chartType"] == "line":
+        plt.plot(positions, y_values, marker="o", color="#4C78A8")
+    elif payload["chartType"] == "scatter":
+        plt.scatter(positions, y_values, color="#4C78A8")
+    else:
+        plt.bar(positions, y_values, color="#4C78A8")
+
+    plt.xticks(positions, [str(value) for value in x_values], rotation=45, ha="right")
 
 if payload.get("title"):
     plt.title(payload["title"])
@@ -156,7 +202,7 @@ if payload.get("yLabel"):
 
 plt.tight_layout()
 plt.savefig("outputs/chart.png", dpi=200)
-print(f"Created chart.png with {len(x_values)} plotted values.")
+print(f"Created chart.png with {plotted_value_count} plotted values.")
 `);
 }
 
@@ -246,23 +292,6 @@ export async function POST(request: Request) {
     });
   }
 
-  if (
-    parsedRequest.inputFiles.some((filePath) => filePath.toLowerCase().endsWith(".csv")) &&
-    !parsedRequest.analysisResultId
-  ) {
-    return finalizeObservedRequest(observed, {
-      errorCode: "csv_chart_requires_analysis_result",
-      outcome: "error",
-      response: buildObservedErrorResponse(
-        "CSV-backed charts must use run_data_analysis first. Produce chart-ready JSON there, then call generate_visual_graph with analysisResultId instead of rescanning CSV files.",
-        400,
-        {
-          status: "failed",
-        },
-      ),
-    });
-  }
-
   const storedAnalysisResult =
     parsedRequest.analysisResultId && parsedRequest.turnId
       ? await getStoredAnalysisResult({
@@ -300,7 +329,7 @@ export async function POST(request: Request) {
       code: storedChartPayload
         ? buildStoredChartRenderCode()
         : buildVisualGraphCode(parsedRequest.code ?? ""),
-      inputFiles: [],
+      inputFiles: storedChartPayload ? [] : parsedRequest.inputFiles,
       inlineWorkspaceFiles: storedChartPayload
         ? [
             {

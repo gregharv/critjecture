@@ -420,9 +420,9 @@ function getSystemPrompt(role: UserRole) {
     "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
-    "For any chart that depends on company CSV files, use run_data_analysis first to confirm the exact CSV headers and print one JSON object shaped like {\"chart\":{\"type\":\"bar\",\"x\":[...],\"y\":[...],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}}.",
-    "Use the generate_visual_graph tool after that analysis step by passing the returned analysisResultId. Do not rescan CSV files inside generate_visual_graph when analysisResultId is available.",
-    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. Use matplotlib only, save exactly one PNG file inside outputs/chart.png, and print a short summary.",
+    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
+    "For most CSV-backed charts, prefer a single generate_visual_graph call with inputFiles and complete matplotlib code that reads inputs/<same-relative-path> with Polars and saves outputs/chart.png.",
+    "Use run_data_analysis before generate_visual_graph only when you first need a non-visual computed answer, schema inspection, or reusable chart-ready JSON. If you do that, print exactly one JSON object via json.dumps(...). Use either {\"chart\":{\"type\":\"bar\",\"x\":[...],\"y\":[...],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for one series or {\"chart\":{\"type\":\"line\",\"series\":[{\"name\":\"Queue A\",\"x\":[...],\"y\":[...]}],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for multiple colored series.",
     "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
     "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
     "When you use generate_document on company files, pass those same relative paths in inputFiles.",
@@ -1001,7 +1001,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-              "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If you are preparing a chart, print a single JSON object with chart-ready arrays under a chart key.",
+                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
@@ -1019,7 +1019,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           analysisResultId: Type.Optional(
             Type.String({
               description:
-                "The analysisResultId returned by run_data_analysis for chart-ready data. Use this for any chart based on company CSV files instead of rescanning the CSV.",
+                "Optional analysisResultId returned by run_data_analysis for chart-ready data. If present, the server renders the stored chart without rerunning analysis code.",
               minLength: 1,
             }),
           ),
@@ -1033,7 +1033,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           code: Type.Optional(
             Type.String({
               description:
-                "Optional fallback Python plotting code for manual or synthetic charts only. Do not rescan company CSV files here when analysisResultId is available.",
+                "Python plotting code to execute inside the sandbox. This may read staged company CSV files from inputs/<same-relative-path> or render a manual/synthetic chart. Save exactly one PNG to outputs/chart.png and print a short summary.",
               minLength: 1,
             }),
           ),
@@ -1041,7 +1041,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             Type.Array(
               Type.String({
                 description:
-                  "Only use inputFiles here for manual fallback charts. CSV-backed charts should use analysisResultId instead.",
+                  "Optional company_data-relative paths to stage for plotting code, such as admin/contractors_new.csv. These are ignored when analysisResultId is used.",
                 minLength: 1,
               }),
             ),
@@ -1186,7 +1186,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. For any CSV-backed chart, run this first and print one JSON object with chart-ready arrays under chart.",
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
           parameters: sandboxToolParameters,
           route: "/api/data-analysis/run",
         });
@@ -1216,7 +1216,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "generate_visual_graph",
           label: "Generate Visual Graph",
           description:
-            "Generate exactly one PNG chart inside outputs/. For company CSV charts, pass analysisResultId from run_data_analysis so the server renders the chart from chart-ready data without rescanning CSV files. Use code only for manual or synthetic charts.",
+            "Generate exactly one PNG chart inside outputs/. This can either render a stored chart via analysisResultId or run arbitrary matplotlib code directly against staged company files passed in inputFiles.",
           parameters: generateVisualGraphParameters,
           route: "/api/visual-graph/run",
         });

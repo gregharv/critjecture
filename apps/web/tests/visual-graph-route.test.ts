@@ -194,16 +194,24 @@ describe("POST /api/visual-graph/run", () => {
     expect(response.status).toBe(429);
   });
 
-  it("returns 400 when a CSV-backed chart skips analysisResultId", async () => {
+  it("runs direct plotting code against staged CSV input files", async () => {
     const response = await POST(createJsonRequest("http://localhost/api/visual-graph/run", {
-      code: "print('ok')",
+      code: "import polars as pl\nprint('ok')",
       inputFiles: ["admin/contractors_2026.csv"],
       turnId: "turn-1",
     }));
-    const body = await readJson<{ error: string }>(response);
+    const body = await readJson<{ generatedAsset: { relativePath: string } }>(response);
 
-    expect(response.status).toBe(400);
-    expect(body.error).toContain("CSV-backed charts must use run_data_analysis first");
+    expect(response.status).toBe(200);
+    expect(body.generatedAsset.relativePath).toBe("outputs/chart.png");
+    expect(mocks.executeSandboxedCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: expect.stringContaining('matplotlib.use("Agg")'),
+        inputFiles: ["admin/contractors_2026.csv"],
+        inlineWorkspaceFiles: [],
+        toolName: "generate_visual_graph",
+      }),
+    );
   });
 
   it("returns 400 when analysisResultId is unknown for the turn", async () => {
@@ -246,25 +254,92 @@ describe("POST /api/visual-graph/run", () => {
 
     expect(response.status).toBe(200);
     expect(body.generatedAsset.relativePath).toBe("outputs/chart.png");
-    expect(mocks.executeSandboxedCommand).toHaveBeenCalledWith(
+    const sandboxCall = mocks.executeSandboxedCommand.mock.calls[0]?.[0];
+
+    expect(sandboxCall).toEqual(
       expect.objectContaining({
         code: expect.stringContaining('Path("chart_payload.json").read_text'),
-        inlineWorkspaceFiles: [
-          {
-            content: JSON.stringify({
-              chartType: "line",
-              title: "Updated title",
-              x: ["Acme"],
-              xLabel: "Contractor",
-              y: [1200],
-              yLabel: "Payout",
-            }),
-            relativePath: "chart_payload.json",
-          },
-        ],
         inputFiles: [],
         toolName: "generate_visual_graph",
       }),
     );
+    expect(sandboxCall?.inlineWorkspaceFiles).toEqual([
+      {
+        content: JSON.stringify({
+          chartType: "line",
+          title: "Updated title",
+          xLabel: "Contractor",
+          yLabel: "Payout",
+          x: ["Acme"],
+          y: [1200],
+        }),
+        relativePath: "chart_payload.json",
+      },
+    ]);
+  });
+
+  it("renders a stored multi-series chart from an inline workspace payload file", async () => {
+    mocks.getStoredAnalysisResult.mockResolvedValue({
+      chart: {
+        chartType: "line",
+        title: "Weekly volume by queue",
+        xLabel: "Datetime",
+        yLabel: "Volume",
+        series: [
+          {
+            name: "Queue A",
+            x: ["2026-04-06 07:00", "2026-04-06 07:15"],
+            y: [10, 12],
+          },
+          {
+            name: "Queue B",
+            x: ["2026-04-06 07:00", "2026-04-06 07:15"],
+            y: [7, 9],
+          },
+        ],
+      },
+      id: "analysis-1",
+    });
+
+    const response = await POST(createJsonRequest("http://localhost/api/visual-graph/run", {
+      analysisResultId: "analysis-1",
+      turnId: "turn-1",
+    }));
+    const body = await readJson<{ generatedAsset: { relativePath: string } }>(response);
+
+    expect(response.status).toBe(200);
+    expect(body.generatedAsset.relativePath).toBe("outputs/chart.png");
+    const sandboxCall = mocks.executeSandboxedCommand.mock.calls[0]?.[0];
+
+    expect(sandboxCall).toEqual(
+      expect.objectContaining({
+        code: expect.stringContaining('if "series" in payload:'),
+        inputFiles: [],
+        toolName: "generate_visual_graph",
+      }),
+    );
+    expect(sandboxCall?.inlineWorkspaceFiles).toEqual([
+      {
+        content: JSON.stringify({
+          chartType: "line",
+          title: "Weekly volume by queue",
+          xLabel: "Datetime",
+          yLabel: "Volume",
+          series: [
+            {
+              name: "Queue A",
+              x: ["2026-04-06 07:00", "2026-04-06 07:15"],
+              y: [10, 12],
+            },
+            {
+              name: "Queue B",
+              x: ["2026-04-06 07:00", "2026-04-06 07:15"],
+              y: [7, 9],
+            },
+          ],
+        }),
+        relativePath: "chart_payload.json",
+      },
+    ]);
   });
 });

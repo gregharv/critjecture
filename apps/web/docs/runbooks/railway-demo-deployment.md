@@ -23,7 +23,7 @@ Use this deployment shape:
 - one Railway project for the demo org
 - one Railway web service for `apps/web`
 - one persistent volume mounted at `/data`
-- one external hosted sandbox supervisor endpoint on a Docker-capable host
+- one external hosted sandbox supervisor endpoint on a locally owned server or managed VM
 - one hosted organization slug bound on both the web app and the supervisor
 - fake business data only
 
@@ -76,7 +76,7 @@ The supervisor must be bound to the same organization slug as the Railway web se
 
 1. Create the Railway project and attach a persistent volume mounted at `/data`.
 2. Deploy the web app service from the repo root and set the hosted Railway env vars above.
-3. Deploy the hosted sandbox supervisor on a Docker-capable host and bind it to `demo-org`.
+3. Deploy the hosted sandbox supervisor on a locally owned server or managed VM and bind it to `demo-org`.
 4. Run database migrations for the web app.
 5. Provision the demo organization and first owner:
 

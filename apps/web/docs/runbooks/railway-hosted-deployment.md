@@ -21,7 +21,7 @@ For each organization, provision:
 
 - one Railway web service for `apps/web`
 - one persistent volume mounted for SQLite and storage
-- one dedicated hosted supervisor endpoint bound to the same organization slug
+- one dedicated hosted supervisor endpoint on a locally owned server or managed VM, bound to the same organization slug
 - one owner credential handoff for that organization
 
 Suggested naming pattern:
@@ -55,7 +55,7 @@ Set these on the Railway web service for each organization:
 
 1. Create the Railway project and attach a persistent volume.
 2. Deploy the web app service from the repo root and set the hosted env vars for that one organization.
-3. Deploy the hosted sandbox supervisor on a Docker-capable host and bind it to the same organization slug.
+3. Deploy the hosted sandbox supervisor on a locally owned server or managed VM and bind it to the same organization slug.
 4. Run database migrations for the web app.
 5. Provision the organization and first owner:
 

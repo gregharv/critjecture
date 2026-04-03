@@ -132,7 +132,7 @@ Optional cleanup:
 
 ## H) Phase 2 Supervisor Host Checklist
 
-- [ ] Docker-capable Linux host deployed.
+- [ ] Locally owned server or managed VM with Docker deployed.
 - [ ] Supervisor service configured with matching org slug.
 - [ ] TLS/reverse proxy in front of supervisor endpoint.
 - [ ] Network/firewall policy restricts access appropriately.
