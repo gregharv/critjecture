@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 
+import { cookies } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
 
 import { logoutAction } from "@/app/auth-actions";
+import { setThemePreferenceAction } from "@/app/theme-actions";
 import type { SessionUser } from "@/lib/auth-state";
 import { getRoleLabel } from "@/lib/roles";
+import { THEME_COOKIE_NAME, normalizeThemePreference } from "@/lib/theme";
 
 type WorkspaceShellProps = {
   activePage: "chat" | "knowledge" | "logs" | "operations" | "settings";
@@ -13,12 +16,24 @@ type WorkspaceShellProps = {
   user: SessionUser;
 };
 
-export function WorkspaceShell({
+export async function WorkspaceShell({
   activePage,
   children,
   user,
 }: WorkspaceShellProps) {
   const displayName = user.name || user.email;
+  const cookieStore = await cookies();
+  const themePreference = normalizeThemePreference(cookieStore.get(THEME_COOKIE_NAME)?.value);
+  const returnTo =
+    activePage === "chat"
+      ? "/chat"
+      : activePage === "knowledge"
+        ? "/knowledge"
+        : activePage === "logs"
+          ? "/admin/logs"
+          : activePage === "operations"
+            ? "/admin/operations"
+            : "/admin/settings";
 
   return (
     <main className="shell-page">
@@ -95,6 +110,33 @@ export function WorkspaceShell({
                     {" · "}
                     {user.email}
                   </span>
+                </div>
+                <div className="shell-theme" role="group" aria-label="Appearance">
+                  <span className="shell-theme__label">Appearance</span>
+                  <div className="shell-theme__actions">
+                    <form action={setThemePreferenceAction}>
+                      <input name="returnTo" type="hidden" value={returnTo} />
+                      <input name="theme" type="hidden" value="dark" />
+                      <button
+                        className={`shell-theme__button ${themePreference === "dark" ? "is-active" : ""}`}
+                        disabled={themePreference === "dark"}
+                        type="submit"
+                      >
+                        Dark
+                      </button>
+                    </form>
+                    <form action={setThemePreferenceAction}>
+                      <input name="returnTo" type="hidden" value={returnTo} />
+                      <input name="theme" type="hidden" value="light" />
+                      <button
+                        className={`shell-theme__button ${themePreference === "light" ? "is-active" : ""}`}
+                        disabled={themePreference === "light"}
+                        type="submit"
+                      >
+                        Light
+                      </button>
+                    </form>
+                  </div>
                 </div>
                 <form action={logoutAction}>
                   <button className="shell-signout" type="submit">

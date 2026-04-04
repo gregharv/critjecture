@@ -1,4 +1,51 @@
 :root {
+  color-scheme: light;
+  --background: oklch(0.97 0.005 95);
+  --foreground: oklch(0.3 0.02 255);
+  --card: oklch(0.99 0.002 95);
+  --card-foreground: oklch(0.25 0.01 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.28 0.02 255);
+  --primary: oklch(0.6 0.13 248);
+  --primary-foreground: oklch(0.99 0.002 95);
+  --secondary: oklch(0.92 0.01 255);
+  --secondary-foreground: oklch(0.35 0.02 255);
+  --muted: oklch(0.94 0.006 255);
+  --muted-foreground: oklch(0.52 0.02 255);
+  --accent: oklch(0.92 0.01 248);
+  --accent-foreground: oklch(0.3 0.02 255);
+  --destructive: oklch(0.63 0.2 24);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.84 0.01 255);
+  --input: oklch(0.82 0.01 255);
+  --ring: oklch(0.6 0.13 248);
+  --sidebar: oklch(0.95 0.005 255);
+  --sidebar-foreground: oklch(0.3 0.02 255);
+  --sidebar-primary: oklch(0.6 0.13 248);
+  --sidebar-primary-foreground: oklch(0.99 0.002 95);
+  --sidebar-accent: oklch(0.92 0.01 248);
+  --sidebar-accent-foreground: oklch(0.3 0.02 255);
+  --sidebar-border: oklch(0.86 0.01 255);
+  --sidebar-ring: oklch(0.6 0.13 248);
+  --font-sans:
+    "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  --font-mono:
+    "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --radius: 0.7rem;
+  --shell-page-background:
+    radial-gradient(circle at top center, rgb(59 130 246 / 0.1), transparent 28%),
+    linear-gradient(180deg, #f9fbff 0%, #eff4fb 45%, #e8eef7 100%);
+  --shell-panel: color-mix(in oklab, var(--background) 92%, white 8%);
+  --shell-panel-raised: color-mix(in oklab, var(--card) 90%, white 10%);
+  --shell-panel-border: color-mix(in oklab, var(--border) 88%, transparent 12%);
+  --shell-rule: color-mix(in oklab, var(--primary) 22%, var(--border) 78%);
+  --shell-panel-shadow: rgb(15 23 42 / 0.12);
+  --shell-kicker: color-mix(in oklab, var(--primary) 72%, black 28%);
+  --shell-title-ink: oklch(0.24 0.02 255);
+  --shell-copy: oklch(0.39 0.015 255);
+}
+
+.dark {
   color-scheme: dark;
   --background: oklch(0.17 0.01 255);
   --foreground: oklch(0.94 0.01 255);
@@ -27,11 +74,6 @@
   --sidebar-accent-foreground: oklch(0.95 0.01 255);
   --sidebar-border: oklch(0.35 0.015 255);
   --sidebar-ring: oklch(0.7 0.12 248);
-  --font-sans:
-    "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
-  --font-mono:
-    "SFMono-Regular", "Menlo", "Consolas", monospace;
-  --radius: 0.7rem;
   --shell-page-background:
     radial-gradient(circle at top center, rgb(59 130 246 / 0.14), transparent 22%),
     linear-gradient(180deg, #0a0d12 0%, #0e131a 38%, #0b1016 100%);
@@ -809,7 +851,7 @@ a {
   overflow-y: auto;
   padding: 14px;
   border-radius: 14px;
-  background: rgb(5 10 18 / 0.78);
+  background: color-mix(in oklab, var(--card) 90%, var(--background) 10%);
   color: var(--card-foreground);
   font-family: var(--font-mono);
   font-size: 0.88rem;
@@ -822,8 +864,8 @@ a {
 .audit-tool__code--python {
   border: 1px solid color-mix(in oklab, var(--primary) 28%, var(--border) 72%);
   background:
-    linear-gradient(180deg, rgb(96 165 250 / 0.08), transparent 55%),
-    rgb(5 10 18 / 0.86);
+    linear-gradient(180deg, color-mix(in oklab, var(--primary) 20%, transparent 80%), transparent 55%),
+    color-mix(in oklab, var(--card) 88%, var(--background) 12%);
   white-space: pre;
   word-break: normal;
 }
@@ -860,6 +902,54 @@ a {
   color: var(--muted-foreground);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
+}
+
+.shell-theme {
+  display: grid;
+  gap: 6px;
+}
+
+.shell-theme__label {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.shell-theme__actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.shell-theme__actions form {
+  margin: 0;
+}
+
+.shell-theme__button {
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 7px 11px;
+}
+
+.shell-theme__button:hover {
+  background: color-mix(in oklab, var(--card) 82%, transparent 18%);
+}
+
+.shell-theme__button.is-active {
+  border-color: color-mix(in oklab, var(--primary) 58%, var(--border) 42%);
+  background: color-mix(in oklab, var(--primary) 16%, transparent 84%);
+}
+
+.shell-theme__button:disabled {
+  cursor: default;
 }
 
 .shell-signout {
@@ -952,7 +1042,7 @@ a {
   padding: 12px 14px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
   border-radius: 14px;
-  background: rgb(5 10 18 / 0.78);
+  background: color-mix(in oklab, var(--card) 90%, var(--background) 10%);
   color: var(--card-foreground);
   font: inherit;
 }
