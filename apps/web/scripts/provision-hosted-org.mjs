@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -54,25 +54,11 @@ function hashPassword(password) {
   return `scrypt:${salt}:${derivedKey.toString("hex")}`;
 }
 
-async function directoryHasEntries(targetPath) {
-  try {
-    const entries = await readdir(targetPath);
-    return entries.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function ensureOrganizationCompanyDataRoot(repositoryRoot, storageRoot, organizationSlug) {
+async function ensureOrganizationCompanyDataRoot(storageRoot, organizationSlug) {
   const organizationRoot = path.join(storageRoot, "organizations", organizationSlug);
   const companyDataRoot = path.join(organizationRoot, "company_data");
-  const templateRoot = path.join(repositoryRoot, "sample_company_data");
 
-  await mkdir(organizationRoot, { recursive: true });
-
-  if (!(await directoryHasEntries(companyDataRoot))) {
-    await cp(templateRoot, companyDataRoot, { recursive: true });
-  }
+  await mkdir(companyDataRoot, { recursive: true });
 }
 
 async function main() {
@@ -191,7 +177,7 @@ async function main() {
   });
 
   tx();
-  await ensureOrganizationCompanyDataRoot(repositoryRoot, storageRoot, organizationSlug);
+  await ensureOrganizationCompanyDataRoot(storageRoot, organizationSlug);
 
   console.log(
     JSON.stringify({

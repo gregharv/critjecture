@@ -1,6 +1,6 @@
 import "server-only";
 
-import { access, cp, mkdir, readdir, readFile } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,16 +11,6 @@ async function pathExists(targetPath: string) {
   } catch {
     return false;
   }
-}
-
-async function directoryHasEntries(targetPath: string) {
-  if (!(await pathExists(targetPath))) {
-    return false;
-  }
-
-  const entries = await readdir(targetPath);
-
-  return entries.length > 0;
 }
 
 function normalizeSlugSegment(value: string) {
@@ -136,17 +126,6 @@ export function getDefaultOrganizationSlug() {
   );
 }
 
-export async function resolveBundledCompanyDataTemplateRoot() {
-  const repositoryRoot = await resolveRepositoryRoot();
-  const templateRoot = path.join(repositoryRoot, "sample_company_data");
-
-  if (!(await pathExists(templateRoot))) {
-    throw new Error("Unable to locate bundled sample_company_data.");
-  }
-
-  return templateRoot;
-}
-
 export async function resolveOrganizationStorageRoot(organizationSlug: string) {
   const normalizedSlug = slugifyOrganizationName(organizationSlug);
   const storageRoot = await ensureStorageRoot();
@@ -157,13 +136,8 @@ export async function resolveOrganizationStorageRoot(organizationSlug: string) {
 export async function ensureOrganizationCompanyDataRoot(organizationSlug: string) {
   const organizationRoot = await resolveOrganizationStorageRoot(organizationSlug);
   const companyDataRoot = path.join(organizationRoot, "company_data");
-  const templateRoot = await resolveBundledCompanyDataTemplateRoot();
 
-  await mkdir(organizationRoot, { recursive: true });
-
-  if (!(await directoryHasEntries(companyDataRoot))) {
-    await cp(templateRoot, companyDataRoot, { recursive: true });
-  }
+  await mkdir(companyDataRoot, { recursive: true });
 
   return companyDataRoot;
 }

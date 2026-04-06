@@ -163,7 +163,7 @@ The runtime storage model is:
 - governance/export artifacts: `<CRITJECTURE_STORAGE_ROOT>/organizations/<organization-slug>/governance`
 - ephemeral sandbox workspaces: `/tmp/workspace/<run-id>`
 
-The repo-root `sample_company_data/` directory is bundled demo data. On first boot, Critjecture copies that sample data into the active organization's storage directory if needed.
+Critjecture no longer auto-seeds demo files into organization storage. Instead, the Knowledge page includes external demo dataset downloads that you can pull into your browser and then upload through the single-file or directory import flows.
 
 ### Sandbox
 
@@ -192,7 +192,6 @@ Installed Python tooling includes:
 ```text
 apps/web                  Next.js app, API routes, audit UI, chat UI
 apps/web/docs             Canonical customer-review, deployment, and runbook documentation
-sample_company_data       Bundled sample company data copied into org storage on first boot
 deployment.md             Compatibility wrapper pointing at the canonical deployment guide
 compliance_controls.md    Compatibility wrapper pointing at the canonical compliance guide
 hosted_provisioning.md    Compatibility wrapper pointing at the canonical hosted guide
@@ -348,14 +347,15 @@ Read [single-org-routine-upgrade.md](/home/hard2vary/projects/critjecture/apps/w
 
 ## Demo Data
 
-The repo includes bundled sample company data under `sample_company_data`, including:
+Critjecture now ships without bundled demo files in org storage. Use the Knowledge page's external dataset downloads to grab a few public samples, then upload them with the file picker or the directory importer.
 
-- public schedules
-- admin profit data
-- contractor ledgers
-- rent delinquency records
+Recommended demo flow:
 
-Useful example prompts:
+1. Download a single CSV such as Superstore sales for quick upload and charting.
+2. Download the ZIP bundle to demonstrate directory upload with multiple files.
+3. Use the Knowledge page's owner-only "Delete managed files" control to clear the library and repeat the upload flow with a fresh user.
+
+Useful example prompts after upload:
 
 - `What is our profit?`
 - `What is the average payout in our 2026 contractor ledger?`

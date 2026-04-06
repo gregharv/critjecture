@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import type { AccessSnapshot } from "@/lib/access-control";
+import { DEMO_DATASETS } from "@/lib/demo-datasets";
 import type {
   CreateKnowledgeImportJobResponse,
   GetKnowledgeImportJobResponse,
@@ -159,7 +160,7 @@ function getProgress(job: KnowledgeImportJobRecord) {
   );
 }
 
-export function KnowledgePageClient({ access, role }: KnowledgePageClientProps) {
+export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
@@ -205,7 +206,7 @@ export function KnowledgePageClient({ access, role }: KnowledgePageClientProps) 
     }
 
     return data.files;
-  }, [role, scopeFilter, statusFilter]);
+  }, [access.visibleKnowledgeScopes, scopeFilter, statusFilter]);
 
   const loadJobs = useCallback(async () => {
     const response = await fetch("/api/knowledge/import-jobs", {
@@ -479,6 +480,45 @@ export function KnowledgePageClient({ access, role }: KnowledgePageClientProps) 
     }
   }
 
+  async function handleDeleteManagedFiles() {
+    if (!access.canManageGovernance) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "This will permanently delete all managed knowledge files for the current organization. Continue?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      error: null,
+      submitting: true,
+    }));
+
+    try {
+      const response = await fetch("/api/knowledge/managed-files/reset", {
+        method: "POST",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to delete managed files."));
+      }
+
+      await refreshAll({ selectedJobId: null });
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Failed to delete managed files.",
+        submitting: false,
+      }));
+    }
+  }
+
   if (!access.canViewKnowledgeLibrary) {
     return (
       <section className="knowledge-page">
@@ -612,6 +652,59 @@ export function KnowledgePageClient({ access, role }: KnowledgePageClientProps) 
         </div>
 
         {state.error ? <div className="knowledge-banner knowledge-banner--error">{state.error}</div> : null}
+      </div>
+
+      <div className="knowledge-panel">
+        <div className="knowledge-toolbar">
+          <div>
+            <p className="knowledge-panel__eyebrow">Demo Downloads</p>
+            <h2 className="knowledge-subtitle">Public datasets for upload and directory-import demos</h2>
+          </div>
+          <p className="knowledge-panel__copy">
+            Download a single-file CSV for a quick upload demo, or grab the ZIP bundle and extract
+            it to show the directory picker.
+          </p>
+        </div>
+
+        <div className="knowledge-demo-grid">
+          {DEMO_DATASETS.map((dataset) => (
+            <article className="knowledge-demo-card" key={dataset.id}>
+              <div>
+                <p className="knowledge-panel__eyebrow">
+                  {dataset.downloadMode === "zip-bundle" ? "ZIP bundle" : "Single file"}
+                </p>
+                <h3 className="knowledge-demo-card__title">{dataset.title}</h3>
+              </div>
+              <p className="knowledge-demo-card__copy">{dataset.description}</p>
+              <p className="knowledge-demo-card__hint">{dataset.uploadHint}</p>
+              <a
+                className="knowledge-button knowledge-button--primary"
+                href={`/api/knowledge/demo-datasets/${dataset.id}`}
+              >
+                Download {dataset.downloadMode === "zip-bundle" ? "ZIP" : "CSV"}
+              </a>
+            </article>
+          ))}
+        </div>
+
+        <div className="knowledge-demo-reset">
+          <div>
+            <p className="knowledge-panel__eyebrow">Clean slate</p>
+            <h3 className="knowledge-demo-card__title">Delete managed files for a fresh demo</h3>
+            <p className="knowledge-demo-card__copy">
+              Owner-only. This uses the existing governance path to remove uploaded knowledge files
+              and import metadata so you can re-run the upload flow from scratch.
+            </p>
+          </div>
+          <button
+            className="knowledge-button knowledge-button--danger"
+            disabled={state.submitting || !access.canManageGovernance}
+            onClick={() => void handleDeleteManagedFiles()}
+            type="button"
+          >
+            {state.submitting ? "Working..." : "Delete managed files"}
+          </button>
+        </div>
       </div>
 
       <div className="knowledge-panel">
