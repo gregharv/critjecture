@@ -9,16 +9,21 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getSessionUser();
 
   if (!user) {
     return jsonError("Authentication required.", 401);
   }
 
+  const requestUrl = new URL(request.url);
+  const rawSearchQuery = requestUrl.searchParams.get("q") ?? "";
+  const searchQuery = rawSearchQuery.trim().slice(0, 200);
+
   try {
     const conversations = await listUserConversations({
       organizationId: user.organizationId,
+      searchQuery: searchQuery.length > 0 ? searchQuery : null,
       userId: user.id,
       userRole: user.role,
     });

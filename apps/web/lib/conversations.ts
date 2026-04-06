@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import type { AgentMessage, SessionData, SessionMetadata } from "@mariozechner/pi-web-ui";
 
@@ -324,10 +324,21 @@ export async function upsertConversation(input: {
 
 export async function listUserConversations(input: {
   organizationId: string;
+  searchQuery?: string | null;
   userId: string;
   userRole: UserRole;
 }) {
   const db = await getAppDatabase();
+  const normalizedSearchQuery = input.searchQuery?.trim().toLowerCase() ?? "";
+  const searchPattern = normalizedSearchQuery ? `%${normalizedSearchQuery}%` : null;
+  const searchFilter =
+    searchPattern === null
+      ? undefined
+      : sql`(
+          lower(${conversations.title}) like ${searchPattern}
+          or lower(${conversations.previewText}) like ${searchPattern}
+        )`;
+
   const rows = await db
     .select()
     .from(conversations)
@@ -335,6 +346,7 @@ export async function listUserConversations(input: {
       and(
         eq(conversations.organizationId, input.organizationId),
         eq(conversations.userId, input.userId),
+        searchFilter,
       ),
     )
     .orderBy(desc(conversations.updatedAt));

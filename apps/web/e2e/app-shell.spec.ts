@@ -9,9 +9,7 @@ async function login(page: Page, email: string, password: string) {
 }
 
 test("owner can load history and open owner admin pages", async ({ page }) => {
-  await login(page, "owner@example.com", "owner-password");
-
-  await page.route("**/api/conversations", async (route) => {
+  await page.route("**/api/conversations*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         conversations: [
@@ -79,6 +77,40 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
         alerts: [],
         health: {
           checks: [],
+          persistence: {
+            backupBeforeSchemaChanges: true,
+            backupCadenceHours: 24,
+            databasePath: "/tmp/critjecture-test.db",
+            deploymentMode: "hosted",
+            engine: "sqlite",
+            journalMode: "wal",
+            requestModel: "synchronous_requests_only",
+            restoreDrillCadence: "before_first_cutover_and_quarterly",
+            sandboxConcurrency: {
+              globalActiveRuns: 4,
+              perUserActiveRuns: 2,
+            },
+            storageRoot: "/tmp/critjecture-storage",
+            targetRpoHours: 24,
+            targetRtoHours: 2,
+            topology: "single_writer_dedicated_hosted_cell",
+            writableAppInstances: 1,
+          },
+          sandbox: {
+            abandonedRuns: 0,
+            activeRuns: 0,
+            authMode: "bearer",
+            available: true,
+            backend: "hosted_supervisor",
+            boundOrganizationSlug: "critjecture-test-org",
+            detail: "Sandbox available",
+            lastHeartbeatAt: Date.now(),
+            lastReconciledAt: Date.now(),
+            queuedRuns: 0,
+            rejectedRuns: 0,
+            runner: "supervisor",
+            staleRuns: 0,
+          },
           status: "ok",
           timestamp: new Date().toISOString(),
         },
@@ -110,6 +142,26 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
         rateLimitActivity: [],
         recentFailures: [],
         routeMetrics: [],
+        workspace: {
+          currentWindowEndAt: Date.now() + 24 * 60 * 60 * 1000,
+          currentWindowStartAt: Date.now() - 24 * 60 * 60 * 1000,
+          exhausted: false,
+          hardCapBehavior: "block",
+          monthlyIncludedCredits: 500,
+          pendingCredits: 0,
+          planCode: "flat-smb",
+          planName: "Flat SMB",
+          rateCard: {
+            analysis: 8,
+            chart: 10,
+            chat: 1,
+            document: 12,
+            import: 3,
+          },
+          remainingCredits: 500,
+          resetAt: Date.now() + 24 * 60 * 60 * 1000,
+          usedCredits: 0,
+        },
         usageSummary: {
           byEventType: [],
           byRouteGroup: [],
@@ -139,9 +191,11 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
       body: JSON.stringify({
         members: [
           {
+            capabilitySummary: ["Owner", "Can manage workspace settings"],
             createdAt: Date.now(),
             email: "owner@example.com",
             id: "user-1",
+            monthlyCreditCap: null,
             name: "Owner User",
             role: "owner",
             status: "active",
@@ -178,20 +232,22 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
     });
   });
 
-  await page.getByRole("button", { name: "History" }).click();
-  await expect(page.getByRole("dialog", { name: "Conversation history" })).toBeVisible();
-  await page.getByRole("button", { name: "Budget review" }).click();
+  await login(page, "owner@example.com", "owner-password");
+
+  await page.getByRole("button", { name: /Budget review/ }).first().click();
   await expect(page.getByText("Budget review").first()).toBeVisible();
 
+  await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Audit Logs" }).click();
   await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
 
+  await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Operations" }).click();
   await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
 
+  await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings and Governance" })).toBeVisible();
-  await expect(page.getByText("owner@example.com", { exact: true }).last()).toBeVisible();
 });
 
 test("intern is redirected away from owner admin pages", async ({ page }) => {

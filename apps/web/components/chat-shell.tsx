@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Agent, AgentMessage, SessionData } from "@mariozechner/pi-web-ui";
 
@@ -678,50 +678,101 @@ function formatRelativeDate(value: string) {
   return date.toLocaleDateString();
 }
 
-type ChatHistoryDialogProps = {
+type ConversationHistoryGroupId = "today" | "yesterday" | "last7" | "older";
+
+type ConversationHistoryGroup = {
+  conversations: ConversationMetadata[];
+  id: ConversationHistoryGroupId;
+  label: string;
+};
+
+function groupConversationHistory(conversations: ConversationMetadata[]) {
+  const grouped: Record<ConversationHistoryGroupId, ConversationMetadata[]> = {
+    today: [],
+    yesterday: [],
+    last7: [],
+    older: [],
+  };
+
+  const now = Date.now();
+
+  conversations.forEach((conversation) => {
+    const modifiedAt = new Date(conversation.lastModified).getTime();
+
+    if (Number.isNaN(modifiedAt)) {
+      grouped.older.push(conversation);
+      return;
+    }
+
+    const ageInDays = Math.floor((now - modifiedAt) / (1000 * 60 * 60 * 24));
+
+    if (ageInDays <= 0) {
+      grouped.today.push(conversation);
+      return;
+    }
+
+    if (ageInDays === 1) {
+      grouped.yesterday.push(conversation);
+      return;
+    }
+
+    if (ageInDays < 7) {
+      grouped.last7.push(conversation);
+      return;
+    }
+
+    grouped.older.push(conversation);
+  });
+
+  const groups: ConversationHistoryGroup[] = [
+    { id: "today", label: "Today", conversations: grouped.today },
+    { id: "yesterday", label: "Yesterday", conversations: grouped.yesterday },
+    { id: "last7", label: "Last 7 days", conversations: grouped.last7 },
+    { id: "older", label: "Older", conversations: grouped.older },
+  ];
+
+  return groups.filter((group) => group.conversations.length > 0);
+}
+
+type ConversationHistoryListProps = {
   activeConversationId: string | null;
   conversations: ConversationMetadata[];
+  disabled: boolean;
+  emptyMessage: string;
   loading: boolean;
-  onClose: () => void;
   onSelect: (conversationId: string) => void;
 };
 
-function ChatHistoryDialog({
+function ConversationHistoryList({
   activeConversationId,
   conversations,
+  disabled,
+  emptyMessage,
   loading,
-  onClose,
   onSelect,
-}: ChatHistoryDialogProps) {
+}: ConversationHistoryListProps) {
+  if (loading) {
+    return <div className="chat-history-empty">Loading conversation history...</div>;
+  }
+
+  const groups = groupConversationHistory(conversations);
+
+  if (groups.length === 0) {
+    return <div className="chat-history-empty">{emptyMessage}</div>;
+  }
+
   return (
-    <div className="chat-history-backdrop" onClick={onClose} role="presentation">
-      <div
-        aria-label="Conversation history"
-        aria-modal="true"
-        className="chat-history-dialog"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-      >
-        <div className="chat-history-dialog__header">
-          <div>
-            <p className="chat-history-dialog__eyebrow">History</p>
-            <h2 className="chat-history-dialog__title">Load a prior conversation</h2>
-          </div>
-          <button className="chat-toolbar__button" onClick={onClose} type="button">
-            Close
-          </button>
-        </div>
-        <div className="chat-history-dialog__list">
-          {loading ? (
-            <div className="chat-history-empty">Loading conversation history...</div>
-          ) : conversations.length === 0 ? (
-            <div className="chat-history-empty">No saved conversations yet.</div>
-          ) : (
-            conversations.map((conversation) => (
+    <div className="chat-history-list">
+      {groups.map((group) => (
+        <section className="chat-history-group" key={group.id}>
+          <h3 className="chat-history-group__title">{group.label}</h3>
+          <div className="chat-history-group__items">
+            {group.conversations.map((conversation) => (
               <button
                 className={`chat-history-card ${
                   conversation.id === activeConversationId ? "is-active" : ""
                 }`}
+                disabled={disabled}
                 key={conversation.id}
                 onClick={() => onSelect(conversation.id)}
                 type="button"
@@ -742,8 +793,141 @@ function ChatHistoryDialog({
                   <span>${conversation.usage.cost.total.toFixed(4)}</span>
                 </div>
               </button>
-            ))
-          )}
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+type ChatHistorySidebarProps = {
+  activeConversationId: string | null;
+  conversations: ConversationMetadata[];
+  loading: boolean;
+  onNewChat: () => void;
+  onQueryChange: (query: string) => void;
+  onSelect: (conversationId: string) => void;
+  query: string;
+  streaming: boolean;
+};
+
+function ChatHistorySidebar({
+  activeConversationId,
+  conversations,
+  loading,
+  onNewChat,
+  onQueryChange,
+  onSelect,
+  query,
+  streaming,
+}: ChatHistorySidebarProps) {
+  const emptyMessage = query.trim()
+    ? "No conversations match your search."
+    : "No saved conversations yet.";
+
+  return (
+    <aside aria-label="Conversation history" className="chat-history-sidebar">
+      <div className="chat-history-sidebar__header">
+        <div>
+          <p className="chat-history-dialog__eyebrow">History</p>
+          <h2 className="chat-history-sidebar__title">Conversations</h2>
+        </div>
+        <button
+          className="chat-history-sidebar__new-chat"
+          disabled={streaming}
+          onClick={onNewChat}
+          type="button"
+        >
+          New chat
+        </button>
+      </div>
+      <input
+        aria-label="Search conversation history"
+        className="chat-history-search"
+        onChange={(event) => {
+          onQueryChange(event.target.value);
+        }}
+        placeholder="Search conversations"
+        type="search"
+        value={query}
+      />
+      <div className="chat-history-sidebar__list">
+        <ConversationHistoryList
+          activeConversationId={activeConversationId}
+          conversations={conversations}
+          disabled={streaming}
+          emptyMessage={emptyMessage}
+          loading={loading}
+          onSelect={onSelect}
+        />
+      </div>
+    </aside>
+  );
+}
+
+type ChatHistoryDialogProps = {
+  activeConversationId: string | null;
+  conversations: ConversationMetadata[];
+  loading: boolean;
+  onClose: () => void;
+  onQueryChange: (query: string) => void;
+  onSelect: (conversationId: string) => void;
+  query: string;
+  streaming: boolean;
+};
+
+function ChatHistoryDialog({
+  activeConversationId,
+  conversations,
+  loading,
+  onClose,
+  onQueryChange,
+  onSelect,
+  query,
+  streaming,
+}: ChatHistoryDialogProps) {
+  const emptyMessage = query.trim()
+    ? "No conversations match your search."
+    : "No saved conversations yet.";
+
+  return (
+    <div className="chat-history-backdrop" onClick={onClose} role="presentation">
+      <div
+        aria-label="Conversation history"
+        aria-modal="true"
+        className="chat-history-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="chat-history-dialog__header">
+          <div>
+            <p className="chat-history-dialog__eyebrow">History</p>
+            <h2 className="chat-history-dialog__title">Load a prior conversation</h2>
+          </div>
+          <button className="chat-toolbar__button" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        <input
+          aria-label="Search conversation history"
+          className="chat-history-search"
+          onChange={(event) => {
+            onQueryChange(event.target.value);
+          }}
+          placeholder="Search conversations"
+          type="search"
+          value={query}
+        />
+        <div className="chat-history-dialog__list">
+          <ConversationHistoryList
+            activeConversationId={activeConversationId}
+            conversations={conversations}
+            disabled={streaming}
+            emptyMessage={emptyMessage}
+            loading={loading}
+            onSelect={onSelect}
+          />
         </div>
       </div>
     </div>
@@ -763,6 +947,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const conversationCreatedAtRef = useRef("");
   const conversationIdRef = useRef<string | null>(null);
   const conversationPersistedRef = useRef(false);
+  const historyQueryRef = useRef("");
+  const historyRequestIdRef = useRef(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const messageIndexRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
@@ -776,6 +962,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     useState<ConversationBootstrapState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
   const [historyConversations, setHistoryConversations] = useState<ConversationMetadata[]>(
     [],
   );
@@ -784,6 +971,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     error: null,
     ready: false,
   });
+
+  useEffect(() => {
+    historyQueryRef.current = historyQuery;
+  }, [historyQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1011,9 +1202,25 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
             conversationPersistedRef.current = true;
             setActiveConversationTitle(result.metadata.title);
-            setHistoryConversations((current) =>
-              upsertConversationMetadata(current, result.metadata),
-            );
+            setHistoryConversations((current) => {
+              const normalizedQuery = historyQueryRef.current.trim().toLowerCase();
+
+              if (!normalizedQuery) {
+                return upsertConversationMetadata(current, result.metadata);
+              }
+
+              const searchableText = `${result.metadata.title}\n${result.metadata.preview}`
+                .trim()
+                .toLowerCase();
+
+              if (!searchableText.includes(normalizedQuery)) {
+                return current.filter(
+                  (conversation) => conversation.id !== result.metadata.id,
+                );
+              }
+
+              return upsertConversationMetadata(current, result.metadata);
+            });
 
             const url = new URL(window.location.href);
             url.searchParams.set("conversation", result.conversationId);
@@ -2104,11 +2311,22 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     };
   }, [conversationBootstrap, organizationSlug, role, userId]);
 
-  async function loadConversationHistory() {
+  const loadConversationHistory = useCallback(async (query: string) => {
+    const requestId = historyRequestIdRef.current + 1;
+    historyRequestIdRef.current = requestId;
     setHistoryLoading(true);
 
+    const normalizedQuery = query.trim();
+    const params = new URLSearchParams();
+
+    if (normalizedQuery) {
+      params.set("q", normalizedQuery);
+    }
+
+    const requestUrl = params.size > 0 ? `/api/conversations?${params.toString()}` : "/api/conversations";
+
     try {
-      const response = await fetch("/api/conversations");
+      const response = await fetch(requestUrl);
       const data = (await response.json()) as
         | ListConversationsResponse
         | {
@@ -2123,21 +2341,37 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         throw new Error("Conversation list payload was missing from the response.");
       }
 
-      setHistoryConversations(data.conversations);
+      if (requestId === historyRequestIdRef.current) {
+        setHistoryConversations(data.conversations);
+      }
     } catch (caughtError) {
-      console.error("Failed to load conversation history.", caughtError);
+      if (requestId === historyRequestIdRef.current) {
+        console.error("Failed to load conversation history.", caughtError);
+      }
     } finally {
-      setHistoryLoading(false);
+      if (requestId === historyRequestIdRef.current) {
+        setHistoryLoading(false);
+      }
     }
-  }
+  }, []);
 
-  async function handleOpenHistory() {
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadConversationHistory(historyQuery);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [historyQuery, loadConversationHistory]);
+
+  function handleOpenHistory() {
     if (isStreaming) {
       return;
     }
 
     setHistoryOpen(true);
-    await loadConversationHistory();
+    void loadConversationHistory(historyQuery);
   }
 
   async function handleSelectConversation(conversationId: string) {
@@ -2208,58 +2442,75 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
   return (
     <div className="chat-shell">
-      <div className="chat-toolbar">
-        <details className="chat-toolbar__menu" ref={toolbarMenuRef}>
-          <summary className="chat-toolbar__summary">
-            <span className="chat-toolbar__title">
-              {activeConversationTitle || "New conversation"}
-            </span>
-            <span aria-hidden="true" className="chat-toolbar__caret">
-              ⌄
-            </span>
-          </summary>
+      <ChatHistorySidebar
+        activeConversationId={conversationIdRef.current}
+        conversations={historyConversations}
+        loading={historyLoading}
+        onNewChat={handleNewChat}
+        onQueryChange={setHistoryQuery}
+        onSelect={(conversationId) => {
+          void handleSelectConversation(conversationId);
+        }}
+        query={historyQuery}
+        streaming={isStreaming}
+      />
+      <div className="chat-main">
+        <div className="chat-toolbar">
+          <details className="chat-toolbar__menu" ref={toolbarMenuRef}>
+            <summary className="chat-toolbar__summary">
+              <span className="chat-toolbar__title">
+                {activeConversationTitle || "New conversation"}
+              </span>
+              <span aria-hidden="true" className="chat-toolbar__caret">
+                ⌄
+              </span>
+            </summary>
 
-          <div className="chat-toolbar__actions">
-            <button
-              className="chat-toolbar__button"
-              disabled={isStreaming || !conversationBootstrap}
-              onClick={() => {
-                toolbarMenuRef.current?.removeAttribute("open");
-                void handleOpenHistory();
-              }}
-              type="button"
-            >
-              History
-            </button>
-            <button
-              className="chat-toolbar__button chat-toolbar__button--primary"
-              disabled={isStreaming || !conversationBootstrap}
-              onClick={() => {
-                toolbarMenuRef.current?.removeAttribute("open");
-                handleNewChat();
-              }}
-              type="button"
-            >
-              New chat
-            </button>
-          </div>
-        </details>
-      </div>
-      <div className="chat-host" ref={hostRef} />
-      {!ready ? (
-        <div className="chat-fallback chat-fallback-overlay">
-          Loading chat shell...
+            <div className="chat-toolbar__actions">
+              <button
+                className="chat-toolbar__button chat-toolbar__button--mobile-only"
+                disabled={isStreaming || !conversationBootstrap}
+                onClick={() => {
+                  toolbarMenuRef.current?.removeAttribute("open");
+                  handleOpenHistory();
+                }}
+                type="button"
+              >
+                History
+              </button>
+              <button
+                className="chat-toolbar__button chat-toolbar__button--primary"
+                disabled={isStreaming || !conversationBootstrap}
+                onClick={() => {
+                  toolbarMenuRef.current?.removeAttribute("open");
+                  handleNewChat();
+                }}
+                type="button"
+              >
+                New chat
+              </button>
+            </div>
+          </details>
         </div>
-      ) : null}
+        <div className="chat-host" ref={hostRef} />
+        {!ready ? (
+          <div className="chat-fallback chat-fallback-overlay">
+            Loading chat shell...
+          </div>
+        ) : null}
+      </div>
       {historyOpen ? (
         <ChatHistoryDialog
           activeConversationId={conversationIdRef.current}
           conversations={historyConversations}
           loading={historyLoading}
           onClose={() => setHistoryOpen(false)}
+          onQueryChange={setHistoryQuery}
           onSelect={(conversationId) => {
             void handleSelectConversation(conversationId);
           }}
+          query={historyQuery}
+          streaming={isStreaming}
         />
       ) : null}
     </div>

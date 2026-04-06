@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.railpack.com",
   "provider": "node",
-  "buildAptPackages": ["bubblewrap", "util-linux", "curl"],
+  "buildAptPackages": ["curl", "ripgrep"],
   "packages": {
     "node": "20",
     "python": "3.13"
@@ -20,6 +20,6 @@
   },
   "deploy": {
     "startCommand": "pnpm start",
-    "aptPackages": ["bubblewrap", "util-linux"]
+    "aptPackages": ["ripgrep"]
   }
 }
