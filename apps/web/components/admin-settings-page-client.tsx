@@ -30,6 +30,133 @@ type AdminSettingsState = {
   workspacePlan: OrganizationWorkspacePlanSummary | null;
 };
 
+type RetentionFieldKey =
+  | "alertRetentionDays"
+  | "chatHistoryRetentionDays"
+  | "exportArtifactRetentionDays"
+  | "knowledgeImportRetentionDays"
+  | "requestLogRetentionDays"
+  | "usageRetentionDays";
+
+type RetentionPolicyPreset = "30_days" | "90_days" | "1_year" | "custom";
+
+type RetentionFieldState = Record<RetentionFieldKey, string>;
+
+const RETENTION_FIELD_KEYS: RetentionFieldKey[] = [
+  "alertRetentionDays",
+  "chatHistoryRetentionDays",
+  "exportArtifactRetentionDays",
+  "knowledgeImportRetentionDays",
+  "requestLogRetentionDays",
+  "usageRetentionDays",
+];
+
+const RETENTION_FIELD_LABELS: Record<RetentionFieldKey, string> = {
+  alertRetentionDays: "Alerts retention (days)",
+  chatHistoryRetentionDays: "Chat history retention (days)",
+  exportArtifactRetentionDays: "Export artifacts retention (days)",
+  knowledgeImportRetentionDays: "Knowledge imports retention (days)",
+  requestLogRetentionDays: "Request logs retention (days)",
+  usageRetentionDays: "Usage events retention (days)",
+};
+
+const RETENTION_POLICY_OPTIONS: Array<{
+  description: string;
+  label: string;
+  value: RetentionPolicyPreset;
+}> = [
+  {
+    description: "Set all retention windows to 30 days.",
+    label: "30 Days",
+    value: "30_days",
+  },
+  {
+    description: "Set all retention windows to 90 days.",
+    label: "90 Days",
+    value: "90_days",
+  },
+  {
+    description: "Set all retention windows to 1 year.",
+    label: "1 Year",
+    value: "1_year",
+  },
+  {
+    description: "Set each retention window independently.",
+    label: "Custom",
+    value: "custom",
+  },
+];
+
+const RETENTION_PRESET_DAYS: Record<Exclude<RetentionPolicyPreset, "custom">, number> = {
+  "30_days": 30,
+  "90_days": 90,
+  "1_year": 365,
+};
+
+const DEFAULT_RETENTION_FIELDS: RetentionFieldState = {
+  alertRetentionDays: "",
+  chatHistoryRetentionDays: "",
+  exportArtifactRetentionDays: "7",
+  knowledgeImportRetentionDays: "",
+  requestLogRetentionDays: "",
+  usageRetentionDays: "",
+};
+
+function buildUniformRetentionFields(days: number): RetentionFieldState {
+  const value = `${Math.max(1, Math.trunc(days))}`;
+
+  return {
+    alertRetentionDays: value,
+    chatHistoryRetentionDays: value,
+    exportArtifactRetentionDays: value,
+    knowledgeImportRetentionDays: value,
+    requestLogRetentionDays: value,
+    usageRetentionDays: value,
+  };
+}
+
+function toRetentionFieldState(settings: OrganizationComplianceSettings): RetentionFieldState {
+  return {
+    alertRetentionDays: settings.alertRetentionDays?.toString() ?? "",
+    chatHistoryRetentionDays: settings.chatHistoryRetentionDays?.toString() ?? "",
+    exportArtifactRetentionDays: settings.exportArtifactRetentionDays.toString(),
+    knowledgeImportRetentionDays: settings.knowledgeImportRetentionDays?.toString() ?? "",
+    requestLogRetentionDays: settings.requestLogRetentionDays?.toString() ?? "",
+    usageRetentionDays: settings.usageRetentionDays?.toString() ?? "",
+  };
+}
+
+function inferRetentionPolicy(fields: RetentionFieldState): RetentionPolicyPreset {
+  const parsedValues = RETENTION_FIELD_KEYS.map((key) => {
+    const trimmed = fields[key].trim();
+    return trimmed.length > 0 ? Number(trimmed) : Number.NaN;
+  });
+
+  if (!parsedValues.every((value) => Number.isFinite(value))) {
+    return "custom";
+  }
+
+  const [firstValue, ...restValues] = parsedValues;
+
+  if (!restValues.every((value) => value === firstValue)) {
+    return "custom";
+  }
+
+  if (firstValue === RETENTION_PRESET_DAYS["30_days"]) {
+    return "30_days";
+  }
+
+  if (firstValue === RETENTION_PRESET_DAYS["90_days"]) {
+    return "90_days";
+  }
+
+  if (firstValue === RETENTION_PRESET_DAYS["1_year"]) {
+    return "1_year";
+  }
+
+  return "custom";
+}
+
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -94,15 +221,21 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
     password: "",
     role: "member",
   });
-  const [retentionFields, setRetentionFields] = useState<Record<string, string>>({
-    alertRetentionDays: "",
-    chatHistoryRetentionDays: "",
-    exportArtifactRetentionDays: "7",
-    knowledgeImportRetentionDays: "",
-    requestLogRetentionDays: "",
-    usageRetentionDays: "",
-  });
+  const [retentionPolicy, setRetentionPolicy] = useState<RetentionPolicyPreset>("custom");
+  const [retentionFields, setRetentionFields] =
+    useState<RetentionFieldState>(DEFAULT_RETENTION_FIELDS);
   const [cutoffDate, setCutoffDate] = useState("");
+  const [showDataDeletionModal, setShowDataDeletionModal] = useState(false);
+
+  const applyRetentionPreset = (preset: RetentionPolicyPreset) => {
+    setRetentionPolicy(preset);
+
+    if (preset === "custom") {
+      return;
+    }
+
+    setRetentionFields(buildUniformRetentionFields(RETENTION_PRESET_DAYS[preset]));
+  };
 
   const refresh = async () => {
     setState((current) => ({
@@ -152,15 +285,11 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
       const settings = settingsData.settings as OrganizationComplianceSettings;
       const jobs = jobsData.jobs as GovernanceJobRecord[];
 
+      const nextRetentionFields = toRetentionFieldState(settings);
+
       setOrganizationName(organization.name);
-      setRetentionFields({
-        alertRetentionDays: settings.alertRetentionDays?.toString() ?? "",
-        chatHistoryRetentionDays: settings.chatHistoryRetentionDays?.toString() ?? "",
-        exportArtifactRetentionDays: settings.exportArtifactRetentionDays.toString(),
-        knowledgeImportRetentionDays: settings.knowledgeImportRetentionDays?.toString() ?? "",
-        requestLogRetentionDays: settings.requestLogRetentionDays?.toString() ?? "",
-        usageRetentionDays: settings.usageRetentionDays?.toString() ?? "",
-      });
+      setRetentionFields(nextRetentionFields);
+      setRetentionPolicy(inferRetentionPolicy(nextRetentionFields));
       setState({
         error: null,
         jobs,
@@ -200,7 +329,32 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
     return () => window.clearTimeout(timeout);
   }, [state.jobs]);
 
+  useEffect(() => {
+    if (!showDataDeletionModal) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowDataDeletionModal(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showDataDeletionModal]);
+
   const latestExportJob = useMemo(() => getLatestCompletedExportJob(state.jobs), [state.jobs]);
+  const activeExportJob = useMemo(
+    () =>
+      state.jobs.find(
+        (job) =>
+          job.jobType === "organization_export" &&
+          (job.status === "queued" || job.status === "running"),
+      ) ?? null,
+    [state.jobs],
+  );
+  const canQueueDeletionJobs = Boolean(latestExportJob && cutoffDate);
 
   const updateMember = async (
     memberId: string,
@@ -343,17 +497,28 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
       return trimmed ? Number(trimmed) : null;
     };
 
+    const normalizedRetentionFields =
+      retentionPolicy === "custom"
+        ? retentionFields
+        : buildUniformRetentionFields(RETENTION_PRESET_DAYS[retentionPolicy]);
+
     try {
       const response = await fetch("/api/admin/compliance-settings", {
         body: JSON.stringify({
-          alertRetentionDays: toNullableNumber(retentionFields.alertRetentionDays),
-          chatHistoryRetentionDays: toNullableNumber(retentionFields.chatHistoryRetentionDays),
-          exportArtifactRetentionDays: Number(retentionFields.exportArtifactRetentionDays || "7"),
-          knowledgeImportRetentionDays: toNullableNumber(
-            retentionFields.knowledgeImportRetentionDays,
+          alertRetentionDays: toNullableNumber(normalizedRetentionFields.alertRetentionDays),
+          chatHistoryRetentionDays: toNullableNumber(
+            normalizedRetentionFields.chatHistoryRetentionDays,
           ),
-          requestLogRetentionDays: toNullableNumber(retentionFields.requestLogRetentionDays),
-          usageRetentionDays: toNullableNumber(retentionFields.usageRetentionDays),
+          exportArtifactRetentionDays: Number(
+            normalizedRetentionFields.exportArtifactRetentionDays || "7",
+          ),
+          knowledgeImportRetentionDays: toNullableNumber(
+            normalizedRetentionFields.knowledgeImportRetentionDays,
+          ),
+          requestLogRetentionDays: toNullableNumber(
+            normalizedRetentionFields.requestLogRetentionDays,
+          ),
+          usageRetentionDays: toNullableNumber(normalizedRetentionFields.usageRetentionDays),
         }),
         headers: {
           "Content-Type": "application/json",
@@ -620,79 +785,209 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
                 Updated {formatTimestamp(state.settings?.updatedAt ?? null)}
               </span>
             </div>
-            <form className="settings-form settings-form--grid" onSubmit={handleRetentionSubmit}>
-              {Object.entries(retentionFields).map(([key, value]) => (
-                <label className="settings-field" key={key}>
-                  <span>{key}</span>
-                  <input
-                    disabled={!access.canManageGovernance}
-                    onChange={(event) =>
-                      setRetentionFields((current) => ({
-                        ...current,
-                        [key]: event.target.value,
-                      }))
-                    }
-                    type="number"
-                    value={value}
-                  />
-                </label>
-              ))}
+            <form className="settings-form" onSubmit={handleRetentionSubmit}>
+              <label className="settings-field">
+                <span>Data retention policy</span>
+                <select
+                  disabled={!access.canManageGovernance}
+                  onChange={(event) =>
+                    applyRetentionPreset(event.target.value as RetentionPolicyPreset)
+                  }
+                  value={retentionPolicy}
+                >
+                  {RETENTION_POLICY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <p className="settings-panel__meta">
+                {RETENTION_POLICY_OPTIONS.find((option) => option.value === retentionPolicy)
+                  ?.description ?? "Configure how long governance data is kept."}
+              </p>
+
+              {retentionPolicy === "custom" ? (
+                <div className="settings-form settings-form--grid">
+                  {RETENTION_FIELD_KEYS.map((key) => (
+                    <label className="settings-field" key={key}>
+                      <span>{RETENTION_FIELD_LABELS[key]}</span>
+                      <input
+                        disabled={!access.canManageGovernance}
+                        onChange={(event) =>
+                          setRetentionFields((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))
+                        }
+                        type="number"
+                        value={retentionFields[key]}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="settings-panel__meta">
+                  All retention categories will be saved as {RETENTION_PRESET_DAYS[retentionPolicy]} days.
+                </p>
+              )}
+
               <button
                 className="settings-button"
                 disabled={state.saving || !access.canManageGovernance}
                 type="submit"
               >
-                Save retention rules
+                Save retention policy
               </button>
             </form>
-            <div className="settings-job-controls">
+            <div className="settings-data-deletion">
+              <p className="settings-panel__meta">
+                Need to remove historical data? Open a guided flow that explains the required export
+                step before permanent deletion actions.
+              </p>
               <button
-                className="settings-button"
+                className="settings-button settings-button--ghost"
                 disabled={state.saving || !access.canManageGovernance}
-                onClick={() => void queueJob("organization_export")}
+                onClick={() => setShowDataDeletionModal(true)}
                 type="button"
               >
-                Queue full export
-              </button>
-              <label className="settings-field">
-                <span>Deletion cutoff</span>
-                <input
-                  onChange={(event) => setCutoffDate(event.target.value)}
-                  type="date"
-                  value={cutoffDate}
-                />
-              </label>
-              <button
-                className="settings-button settings-button--ghost"
-                disabled={
-                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
-                }
-                onClick={() => void queueJob("history_purge")}
-                type="button"
-              >
-                Purge chat history
-              </button>
-              <button
-                className="settings-button settings-button--ghost"
-                disabled={
-                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
-                }
-                onClick={() => void queueJob("import_metadata_purge")}
-                type="button"
-              >
-                Purge import metadata
-              </button>
-              <button
-                className="settings-button settings-button--ghost"
-                disabled={
-                  state.saving || !access.canManageGovernance || !latestExportJob || !cutoffDate
-                }
-                onClick={() => void queueJob("knowledge_delete")}
-                type="button"
-              >
-                Delete managed files
+                Manage Data Deletion
               </button>
             </div>
+
+            {showDataDeletionModal ? (
+              <div
+                className="settings-dialog-backdrop"
+                onClick={() => setShowDataDeletionModal(false)}
+                role="presentation"
+              >
+                <div
+                  aria-label="Data deletion workflow"
+                  aria-modal="true"
+                  className="settings-dialog"
+                  onClick={(event) => event.stopPropagation()}
+                  role="dialog"
+                >
+                  <div className="settings-dialog__header">
+                    <div>
+                      <p className="settings-dialog__eyebrow">Data Deletion</p>
+                      <h3 className="settings-dialog__title">Guided compliance workflow</h3>
+                    </div>
+                    <button
+                      className="settings-button settings-button--ghost"
+                      onClick={() => setShowDataDeletionModal(false)}
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <p className="settings-panel__meta">
+                    To maintain an audit trail, queue and complete a full export before deletion.
+                    Then choose a cutoff date and select what to purge.
+                  </p>
+
+                  <div className="settings-dialog__steps">
+                    <article className="settings-dialog__step">
+                      <div className="settings-dialog__step-header">
+                        <strong>Step 1 · Queue a full export</strong>
+                        {activeExportJob ? (
+                          <span className={`settings-status settings-status--${activeExportJob.status}`}>
+                            {activeExportJob.status}
+                          </span>
+                        ) : latestExportJob ? (
+                          <span className="settings-status settings-status--completed">ready</span>
+                        ) : (
+                          <span className="settings-dialog__required">required</span>
+                        )}
+                      </div>
+                      <p className="settings-panel__meta">
+                        {activeExportJob
+                          ? `An export is currently ${activeExportJob.status}.`
+                          : latestExportJob
+                            ? `Latest completed export: ${formatTimestamp(latestExportJob.completedAt ?? latestExportJob.updatedAt)}.`
+                            : "No completed full export is available yet."}
+                      </p>
+                      <button
+                        className="settings-button"
+                        disabled={state.saving || !access.canManageGovernance}
+                        onClick={() => void queueJob("organization_export")}
+                        type="button"
+                      >
+                        Queue full export
+                      </button>
+                    </article>
+
+                    <article className="settings-dialog__step">
+                      <div className="settings-dialog__step-header">
+                        <strong>Step 2 · Choose deletion cutoff</strong>
+                        {cutoffDate ? (
+                          <span className="settings-status settings-status--completed">set</span>
+                        ) : (
+                          <span className="settings-dialog__required">required</span>
+                        )}
+                      </div>
+                      <label className="settings-field">
+                        <span>Delete data created before</span>
+                        <input
+                          disabled={!access.canManageGovernance}
+                          onChange={(event) => setCutoffDate(event.target.value)}
+                          type="date"
+                          value={cutoffDate}
+                        />
+                      </label>
+                    </article>
+
+                    <article className="settings-dialog__step">
+                      <div className="settings-dialog__step-header">
+                        <strong>Step 3 · Queue deletion task</strong>
+                        {canQueueDeletionJobs ? (
+                          <span className="settings-status settings-status--completed">ready</span>
+                        ) : (
+                          <span className="settings-dialog__required">blocked</span>
+                        )}
+                      </div>
+                      <p className="settings-panel__meta">
+                        Choose one deletion action after export + cutoff are both ready.
+                      </p>
+                      <div className="settings-job-controls">
+                        <button
+                          className="settings-button settings-button--ghost"
+                          disabled={
+                            state.saving || !access.canManageGovernance || !canQueueDeletionJobs
+                          }
+                          onClick={() => void queueJob("history_purge")}
+                          type="button"
+                        >
+                          Purge chat history
+                        </button>
+                        <button
+                          className="settings-button settings-button--ghost"
+                          disabled={
+                            state.saving || !access.canManageGovernance || !canQueueDeletionJobs
+                          }
+                          onClick={() => void queueJob("import_metadata_purge")}
+                          type="button"
+                        >
+                          Purge import metadata
+                        </button>
+                        <button
+                          className="settings-button settings-button--ghost"
+                          disabled={
+                            state.saving || !access.canManageGovernance || !canQueueDeletionJobs
+                          }
+                          onClick={() => void queueJob("knowledge_delete")}
+                          type="button"
+                        >
+                          Delete managed files
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="settings-panel">
