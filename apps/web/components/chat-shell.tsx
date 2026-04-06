@@ -657,27 +657,6 @@ function upsertConversationMetadata(
   return next.sort((left, right) => right.lastModified.localeCompare(left.lastModified));
 }
 
-function formatRelativeDate(value: string) {
-  const date = new Date(value);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-  if (days <= 0) {
-    return "Today";
-  }
-
-  if (days === 1) {
-    return "Yesterday";
-  }
-
-  if (days < 7) {
-    return `${days} days ago`;
-  }
-
-  return date.toLocaleDateString();
-}
-
 type ConversationHistoryGroupId = "today" | "yesterday" | "last7" | "older";
 
 type ConversationHistoryGroup = {
@@ -777,21 +756,9 @@ function ConversationHistoryList({
                 onClick={() => onSelect(conversation.id)}
                 type="button"
               >
-                <div className="chat-history-card__header">
-                  <span className="chat-history-card__title">
-                    {conversation.title || "Untitled conversation"}
-                  </span>
-                  <span className="chat-history-card__date">
-                    {formatRelativeDate(conversation.lastModified)}
-                  </span>
-                </div>
-                <p className="chat-history-card__preview">
-                  {conversation.preview || "No preview available yet."}
-                </p>
-                <div className="chat-history-card__meta">
-                  <span>{conversation.messageCount} messages</span>
-                  <span>${conversation.usage.cost.total.toFixed(4)}</span>
-                </div>
+                <span className="chat-history-card__title">
+                  {conversation.title || "Untitled conversation"}
+                </span>
               </button>
             ))}
           </div>

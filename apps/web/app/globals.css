@@ -513,12 +513,11 @@ a {
 }
 
 .chat-history-card {
-  display: grid;
-  gap: 10px;
+  display: block;
   width: 100%;
-  padding: 16px;
+  padding: 12px 14px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
-  border-radius: 18px;
+  border-radius: 14px;
   background: color-mix(in oklab, var(--card) 88%, transparent 12%);
   color: inherit;
   cursor: pointer;
@@ -537,34 +536,15 @@ a {
   opacity: 0.75;
 }
 
-.chat-history-card__header,
-.chat-history-card__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .chat-history-card__title {
+  display: block;
   color: var(--shell-title-ink);
-  font-weight: 700;
-}
-
-.chat-history-card__date,
-.chat-history-card__meta {
-  color: var(--muted-foreground);
-  font-size: 0.82rem;
-}
-
-.chat-history-card__preview {
-  margin: 0;
-  color: var(--shell-copy);
   font-size: 0.9rem;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  font-weight: 700;
+  line-height: 1.35;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-history-empty {
@@ -1264,14 +1244,7 @@ a {
     padding: 16px;
   }
 
-  .chat-history-card__header,
-  .chat-history-card__meta {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-
-  .chat-history-card__title,
-  .chat-history-card__date {
+  .chat-history-card__title {
     min-width: 0;
     overflow-wrap: anywhere;
     word-break: break-word;
