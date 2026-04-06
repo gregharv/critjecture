@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { logoutAction } from "@/app/auth-actions";
 import { setThemePreferenceAction } from "@/app/theme-actions";
+import { DetailsOutsideDismiss } from "@/components/details-outside-dismiss";
 import type { SessionUser } from "@/lib/auth-state";
 import { getRoleLabel } from "@/lib/roles";
 import { THEME_COOKIE_NAME, normalizeThemePreference } from "@/lib/theme";
@@ -37,9 +38,10 @@ export async function WorkspaceShell({
 
   return (
     <main className="shell-page">
+      <DetailsOutsideDismiss />
       <section className="shell-frame">
         <header className="shell-header">
-          <details className="shell-menu">
+          <details className="shell-menu" data-dismiss-on-outside="true">
             <summary className="shell-menu__summary">
               <div className="brand-lockup">
                 <Image

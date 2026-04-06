@@ -326,6 +326,7 @@ a {
 }
 
 .chat-history-sidebar__list {
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -510,11 +511,14 @@ a {
 .chat-history-group__items {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .chat-history-card {
   display: block;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 12px 14px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
   border-radius: 14px;
@@ -538,6 +542,7 @@ a {
 
 .chat-history-card__title {
   display: block;
+  max-width: 100%;
   color: var(--shell-title-ink);
   font-size: 0.9rem;
   font-weight: 700;

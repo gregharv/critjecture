@@ -2423,7 +2423,11 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       />
       <div className="chat-main">
         <div className="chat-toolbar">
-          <details className="chat-toolbar__menu" ref={toolbarMenuRef}>
+          <details
+            className="chat-toolbar__menu"
+            data-dismiss-on-outside="true"
+            ref={toolbarMenuRef}
+          >
             <summary className="chat-toolbar__summary">
               <span className="chat-toolbar__title">
                 {activeConversationTitle || "New conversation"}
