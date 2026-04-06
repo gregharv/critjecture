@@ -639,145 +639,6 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
           <section className="settings-panel">
             <div className="settings-panel__header">
               <div>
-                <div className="settings-panel__eyebrow">Access Control</div>
-                <h2>{role === "owner" ? "Owner policy view" : "Admin policy view"}</h2>
-              </div>
-            </div>
-            <div className="settings-table">
-              {[
-                "member: public-scope chat, search, analysis, chart, and document access",
-                "admin: member access plus member management, policy visibility, audit logs, operations, and review docs",
-                "owner: admin access plus organization settings, export downloads, and destructive governance",
-                "restricted: sign-in allowed, but search, chat, imports, and sandbox tools are blocked",
-              ].map((line) => (
-                <article className="settings-table__row" key={line}>
-                  <div>{line}</div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="settings-panel">
-            <div className="settings-panel__header">
-              <div>
-                <div className="settings-panel__eyebrow">Members</div>
-                <h2>Access and identity</h2>
-              </div>
-              <span className="settings-panel__meta">{state.members.length} members</span>
-            </div>
-            <form className="settings-form settings-form--inline" onSubmit={handleCreateMember}>
-              <input
-                disabled={!access.canManageMembers}
-                onChange={(event) =>
-                  setNewMember((current) => ({ ...current, name: event.target.value }))
-                }
-                placeholder="Name"
-                type="text"
-                value={newMember.name}
-              />
-              <input
-                disabled={!access.canManageMembers}
-                onChange={(event) =>
-                  setNewMember((current) => ({ ...current, email: event.target.value }))
-                }
-                placeholder="Email"
-                type="email"
-                value={newMember.email}
-              />
-              <input
-                disabled={!access.canManageMembers}
-                onChange={(event) =>
-                  setNewMember((current) => ({ ...current, password: event.target.value }))
-                }
-                placeholder="Initial password"
-                type="text"
-                value={newMember.password}
-              />
-              <select
-                disabled={!access.canManageMembers}
-                onChange={(event) =>
-                  setNewMember((current) => ({ ...current, role: event.target.value }))
-                }
-                value={newMember.role}
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
-                <option value="owner">Owner</option>
-              </select>
-              <button
-                className="settings-button"
-                disabled={state.saving || !access.canManageMembers}
-                type="submit"
-              >
-                Add member
-              </button>
-            </form>
-            <div className="settings-table">
-              {state.members.map((member) => (
-                <article className="settings-table__row" key={member.id}>
-                  <div>
-                    <strong>{member.name || member.email}</strong>
-                    <div className="settings-table__meta">
-                      {member.email}
-                      {member.monthlyCreditCap === null
-                        ? " • shared workspace pool"
-                        : ` • cap ${formatCredits(member.monthlyCreditCap)} credits`}
-                    </div>
-                    <div className="settings-table__meta">
-                      {member.capabilitySummary.join(" • ")}
-                    </div>
-                  </div>
-                  <select
-                    disabled={!access.canManageMembers}
-                    defaultValue={member.role}
-                    onChange={(event) =>
-                      void updateMember(member.id, { role: event.target.value })
-                    }
-                  >
-                    <option value="member">Member</option>
-                    <option value="admin">Admin</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                  <select
-                    disabled={!access.canManageMembers}
-                    defaultValue={member.status}
-                    onChange={(event) =>
-                      void updateMember(member.id, { status: event.target.value })
-                    }
-                  >
-                    <option value="active">Active</option>
-                    <option value="restricted">Restricted</option>
-                    <option value="suspended">Suspended</option>
-                  </select>
-                  <input
-                    disabled={!access.canManageMembers}
-                    defaultValue={member.monthlyCreditCap ?? ""}
-                    min={0}
-                    onBlur={(event) => {
-                      const trimmed = event.target.value.trim();
-                      void updateMember(member.id, {
-                        monthlyCreditCap: trimmed === "" ? null : Number(trimmed),
-                      });
-                    }}
-                    placeholder="Shared pool"
-                    type="number"
-                  />
-                  <button
-                    className="settings-button settings-button--ghost"
-                    disabled={!access.canManageMembers}
-                    onClick={() => void resetPassword(member.id)}
-                    type="button"
-                  >
-                    Reset password
-                  </button>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="settings-panel">
-            <div className="settings-panel__header">
-              <div>
                 <div className="settings-panel__eyebrow">Governance</div>
                 <h2>Retention and lifecycle controls</h2>
               </div>
@@ -988,6 +849,145 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
                 </div>
               </div>
             ) : null}
+          </section>
+
+          <section className="settings-panel">
+            <div className="settings-panel__header">
+              <div>
+                <div className="settings-panel__eyebrow">Members</div>
+                <h2>Access and identity</h2>
+              </div>
+              <span className="settings-panel__meta">{state.members.length} members</span>
+            </div>
+            <form className="settings-form settings-form--inline" onSubmit={handleCreateMember}>
+              <input
+                disabled={!access.canManageMembers}
+                onChange={(event) =>
+                  setNewMember((current) => ({ ...current, name: event.target.value }))
+                }
+                placeholder="Name"
+                type="text"
+                value={newMember.name}
+              />
+              <input
+                disabled={!access.canManageMembers}
+                onChange={(event) =>
+                  setNewMember((current) => ({ ...current, email: event.target.value }))
+                }
+                placeholder="Email"
+                type="email"
+                value={newMember.email}
+              />
+              <input
+                disabled={!access.canManageMembers}
+                onChange={(event) =>
+                  setNewMember((current) => ({ ...current, password: event.target.value }))
+                }
+                placeholder="Initial password"
+                type="text"
+                value={newMember.password}
+              />
+              <select
+                disabled={!access.canManageMembers}
+                onChange={(event) =>
+                  setNewMember((current) => ({ ...current, role: event.target.value }))
+                }
+                value={newMember.role}
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+                <option value="owner">Owner</option>
+              </select>
+              <button
+                className="settings-button"
+                disabled={state.saving || !access.canManageMembers}
+                type="submit"
+              >
+                Add member
+              </button>
+            </form>
+            <div className="settings-table">
+              {state.members.map((member) => (
+                <article className="settings-table__row" key={member.id}>
+                  <div>
+                    <strong>{member.name || member.email}</strong>
+                    <div className="settings-table__meta">
+                      {member.email}
+                      {member.monthlyCreditCap === null
+                        ? " • shared workspace pool"
+                        : ` • cap ${formatCredits(member.monthlyCreditCap)} credits`}
+                    </div>
+                    <div className="settings-table__meta">
+                      {member.capabilitySummary.join(" • ")}
+                    </div>
+                  </div>
+                  <select
+                    disabled={!access.canManageMembers}
+                    defaultValue={member.role}
+                    onChange={(event) =>
+                      void updateMember(member.id, { role: event.target.value })
+                    }
+                  >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                  <select
+                    disabled={!access.canManageMembers}
+                    defaultValue={member.status}
+                    onChange={(event) =>
+                      void updateMember(member.id, { status: event.target.value })
+                    }
+                  >
+                    <option value="active">Active</option>
+                    <option value="restricted">Restricted</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                  <input
+                    disabled={!access.canManageMembers}
+                    defaultValue={member.monthlyCreditCap ?? ""}
+                    min={0}
+                    onBlur={(event) => {
+                      const trimmed = event.target.value.trim();
+                      void updateMember(member.id, {
+                        monthlyCreditCap: trimmed === "" ? null : Number(trimmed),
+                      });
+                    }}
+                    placeholder="Shared pool"
+                    type="number"
+                  />
+                  <button
+                    className="settings-button settings-button--ghost"
+                    disabled={!access.canManageMembers}
+                    onClick={() => void resetPassword(member.id)}
+                    type="button"
+                  >
+                    Reset password
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings-panel">
+            <div className="settings-panel__header">
+              <div>
+                <div className="settings-panel__eyebrow">Access Control</div>
+                <h2>{role === "owner" ? "Owner policy view" : "Admin policy view"}</h2>
+              </div>
+            </div>
+            <div className="settings-table">
+              {[
+                "member: public-scope chat, search, analysis, chart, and document access",
+                "admin: member access plus member management, policy visibility, audit logs, operations, and review docs",
+                "owner: admin access plus organization settings, export downloads, and destructive governance",
+                "restricted: sign-in allowed, but search, chat, imports, and sandbox tools are blocked",
+              ].map((line) => (
+                <article className="settings-table__row" key={line}>
+                  <div>{line}</div>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section className="settings-panel">

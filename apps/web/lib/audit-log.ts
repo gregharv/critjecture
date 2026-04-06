@@ -22,12 +22,16 @@ import type {
 } from "@/lib/audit-types";
 import { toLegacyStoredUserRole, type UserRole } from "@/lib/roles";
 
-function normalizeLimit(limit: number) {
+function normalizeLimit(limit: number | null | undefined) {
+  if (limit === null || typeof limit === "undefined") {
+    return null;
+  }
+
   if (!Number.isFinite(limit)) {
     return 50;
   }
 
-  return Math.max(1, Math.min(100, Math.trunc(limit)));
+  return Math.max(1, Math.min(5_000, Math.trunc(limit)));
 }
 
 export async function createChatTurnLog(input: {
@@ -173,16 +177,19 @@ export async function chatTurnBelongsToUser(
 
 export async function listRecentChatTurnLogs(
   organizationId: string,
-  limit = 50,
+  limit?: number | null,
 ): Promise<ChatTurnLog[]> {
   const db = await getAppDatabase();
   const normalizedLimit = normalizeLimit(limit);
-  const turnRows = await db
+  const baseTurnQuery = db
     .select()
     .from(chatTurns)
     .where(eq(chatTurns.organizationId, organizationId))
-    .orderBy(desc(chatTurns.createdAt))
-    .limit(normalizedLimit);
+    .orderBy(desc(chatTurns.createdAt));
+  const turnRows =
+    normalizedLimit === null
+      ? await baseTurnQuery
+      : await baseTurnQuery.limit(normalizedLimit);
 
   if (turnRows.length === 0) {
     return [];

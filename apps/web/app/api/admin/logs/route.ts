@@ -37,8 +37,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const limitParam = searchParams.get("limit");
-
-  const limit = limitParam ? Number(limitParam) : 50;
+  const limit = limitParam ? Number(limitParam) : null;
 
   try {
     const turns = await listRecentChatTurnLogs(user.organizationId, limit);

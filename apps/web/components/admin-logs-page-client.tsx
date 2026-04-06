@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ChatTurnLog,
@@ -140,6 +140,43 @@ function getToolParameterDisplay(toolCall: ToolCallLog) {
     code,
     remainingParametersJson: JSON.stringify(nextParameters, null, 2),
   };
+}
+
+type AuditPolicyGroupFilter = "all" | "member" | "owner";
+
+type AuditUserFilterOption = {
+  label: string;
+  value: string;
+};
+
+function getTurnUserFilterValue(turn: ChatTurnLog) {
+  if (turn.userId) {
+    return `user:${turn.userId}`;
+  }
+
+  if (turn.userEmail) {
+    return `email:${turn.userEmail.toLowerCase()}`;
+  }
+
+  return "unknown";
+}
+
+function getTurnUserLabel(turn: ChatTurnLog) {
+  if (turn.userName && turn.userEmail) {
+    return `${turn.userName} (${turn.userEmail})`;
+  }
+
+  return turn.userName || turn.userEmail || "Unknown user";
+}
+
+function parseDateTimeFilterValue(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isNaN(timestamp) ? null : timestamp;
 }
 
 function hasAssistantMessage(turn: ChatTurnLog) {
@@ -473,6 +510,11 @@ export function AdminLogsPageClient() {
   const manualRefreshRequestedRef = useRef(false);
   const repollTimeoutRef = useRef<number | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [selectedUserFilter, setSelectedUserFilter] = useState("all");
+  const [selectedPolicyGroup, setSelectedPolicyGroup] =
+    useState<AuditPolicyGroupFilter>("all");
+  const [createdAfterFilter, setCreatedAfterFilter] = useState("");
+  const [createdBeforeFilter, setCreatedBeforeFilter] = useState("");
   const [state, setState] = useState<AuditLogState>({
     error: null,
     loading: true,
@@ -501,7 +543,7 @@ export function AdminLogsPageClient() {
       }));
 
       try {
-        const response = await fetch("/api/admin/logs?limit=50", {
+        const response = await fetch("/api/admin/logs", {
           cache: "no-store",
         });
         const data = (await response.json()) as ListChatTurnLogsResponse | { error: string };
@@ -555,6 +597,73 @@ export function AdminLogsPageClient() {
     };
   }, [reloadToken]);
 
+  const userFilterOptions = useMemo<AuditUserFilterOption[]>(() => {
+    const optionsByValue = new Map<string, string>();
+
+    for (const turn of state.turns) {
+      const value = getTurnUserFilterValue(turn);
+
+      if (!optionsByValue.has(value)) {
+        optionsByValue.set(value, getTurnUserLabel(turn));
+      }
+    }
+
+    return [...optionsByValue.entries()]
+      .map(([value, label]) => ({ label, value }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [state.turns]);
+
+  const createdAfterTimestamp = useMemo(
+    () => parseDateTimeFilterValue(createdAfterFilter),
+    [createdAfterFilter],
+  );
+  const createdBeforeTimestamp = useMemo(
+    () => parseDateTimeFilterValue(createdBeforeFilter),
+    [createdBeforeFilter],
+  );
+
+  const filteredTurns = useMemo(
+    () =>
+      state.turns.filter((turn) => {
+        if (
+          selectedUserFilter !== "all" &&
+          getTurnUserFilterValue(turn) !== selectedUserFilter
+        ) {
+          return false;
+        }
+
+        if (
+          selectedPolicyGroup !== "all" &&
+          fromLegacyStoredUserRole(turn.userRole) !== selectedPolicyGroup
+        ) {
+          return false;
+        }
+
+        if (createdAfterTimestamp !== null && turn.createdAt < createdAfterTimestamp) {
+          return false;
+        }
+
+        if (createdBeforeTimestamp !== null && turn.createdAt > createdBeforeTimestamp) {
+          return false;
+        }
+
+        return true;
+      }),
+    [
+      createdAfterTimestamp,
+      createdBeforeTimestamp,
+      selectedPolicyGroup,
+      selectedUserFilter,
+      state.turns,
+    ],
+  );
+
+  const hasActiveFilters =
+    selectedUserFilter !== "all" ||
+    selectedPolicyGroup !== "all" ||
+    createdAfterFilter.trim().length > 0 ||
+    createdBeforeFilter.trim().length > 0;
+
   return (
     <section className="audit-page">
       <header className="audit-page__header">
@@ -579,6 +688,86 @@ export function AdminLogsPageClient() {
         </button>
       </header>
 
+      <section aria-label="Audit log filters" className="audit-controls">
+        <div className="audit-controls__header">
+          <h2>Filter logs</h2>
+          <p>Narrow results by user, policy group, and created date/time.</p>
+        </div>
+        <div className="audit-controls__grid">
+          <label className="audit-controls__field">
+            <span>User</span>
+            <select
+              className="audit-controls__input"
+              onChange={(event) => setSelectedUserFilter(event.target.value)}
+              value={selectedUserFilter}
+            >
+              <option value="all">All users</option>
+              {userFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="audit-controls__field">
+            <span>Policy group</span>
+            <select
+              className="audit-controls__input"
+              onChange={(event) =>
+                setSelectedPolicyGroup(event.target.value as AuditPolicyGroupFilter)
+              }
+              value={selectedPolicyGroup}
+            >
+              <option value="all">All groups</option>
+              <option value="member">Member</option>
+              <option value="owner">Owner</option>
+            </select>
+          </label>
+
+          <label className="audit-controls__field">
+            <span>Created after</span>
+            <input
+              className="audit-controls__input"
+              onChange={(event) => setCreatedAfterFilter(event.target.value)}
+              type="datetime-local"
+              value={createdAfterFilter}
+            />
+          </label>
+
+          <label className="audit-controls__field">
+            <span>Created before</span>
+            <input
+              className="audit-controls__input"
+              onChange={(event) => setCreatedBeforeFilter(event.target.value)}
+              type="datetime-local"
+              value={createdBeforeFilter}
+            />
+          </label>
+        </div>
+
+        <div className="audit-controls__actions">
+          <span className="audit-controls__summary">
+            {state.loading
+              ? "Loading entries..."
+              : `${filteredTurns.length} of ${state.turns.length} turn(s)`}
+          </span>
+          <button
+            className="audit-controls__clear"
+            disabled={!hasActiveFilters}
+            onClick={() => {
+              setSelectedUserFilter("all");
+              setSelectedPolicyGroup("all");
+              setCreatedAfterFilter("");
+              setCreatedBeforeFilter("");
+            }}
+            type="button"
+          >
+            Clear filters
+          </button>
+        </div>
+      </section>
+
       {state.loading ? (
         <div className="audit-empty">
           <p>Loading audit logs...</p>
@@ -592,9 +781,13 @@ export function AdminLogsPageClient() {
         <div className="audit-empty">
           <p>No audit entries yet. Run a chat turn to populate the dashboard.</p>
         </div>
+      ) : filteredTurns.length === 0 ? (
+        <div className="audit-empty">
+          <p>No audit entries match your current filters.</p>
+        </div>
       ) : (
         <div className="audit-list">
-          {state.turns.map((turn) => (
+          {filteredTurns.map((turn) => (
             <ChatTurnCard key={turn.id} turn={turn} />
           ))}
         </div>

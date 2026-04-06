@@ -593,6 +593,97 @@ a {
   color: var(--shell-copy);
 }
 
+.audit-controls {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--shell-panel-border);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.02), transparent 45%),
+    var(--shell-panel);
+}
+
+.audit-controls__header {
+  display: grid;
+  gap: 4px;
+}
+
+.audit-controls__header h2,
+.audit-controls__header p {
+  margin: 0;
+}
+
+.audit-controls__header h2 {
+  color: var(--shell-title-ink);
+  font-size: 0.98rem;
+}
+
+.audit-controls__header p {
+  color: var(--muted-foreground);
+  font-size: 0.86rem;
+}
+
+.audit-controls__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.audit-controls__field {
+  display: grid;
+  gap: 6px;
+}
+
+.audit-controls__field > span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.audit-controls__input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+  color: var(--foreground);
+  font: inherit;
+  padding: 0 12px;
+}
+
+.audit-controls__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.audit-controls__summary {
+  color: var(--muted-foreground);
+  font-size: 0.84rem;
+}
+
+.audit-controls__clear {
+  min-height: 36px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--card) 86%, transparent 14%);
+  color: var(--shell-title-ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0 14px;
+}
+
+.audit-controls__clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .audit-empty {
   display: grid;
   gap: 8px;
@@ -906,23 +997,19 @@ a {
 }
 
 .audit-status--started {
-  background: rgb(59 130 246 / 0.14);
-  color: rgb(147 197 253);
+  background: color-mix(in oklab, #2563eb 24%, transparent 76%);
 }
 
 .audit-status--completed {
-  background: rgb(34 197 94 / 0.14);
-  color: rgb(134 239 172);
+  background: color-mix(in oklab, #1f8f5f 24%, transparent 76%);
 }
 
 .audit-status--error {
-  background: rgb(239 68 68 / 0.14);
-  color: rgb(252 165 165);
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
 }
 
 .audit-status--failed {
-  background: rgb(239 68 68 / 0.14);
-  color: rgb(252 165 165);
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
 }
 
 .audit-tool__section {
@@ -1302,6 +1389,19 @@ a {
     padding: 0 16px 16px;
   }
 
+  .audit-controls {
+    padding: 14px;
+  }
+
+  .audit-controls__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-controls__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .audit-card,
   .audit-empty {
     padding: 0;
@@ -1664,18 +1764,15 @@ a {
 }
 
 .knowledge-status.is-ready {
-  background: rgb(34 197 94 / 0.14);
-  color: rgb(134 239 172);
+  background: color-mix(in oklab, #1f8f5f 24%, transparent 76%);
 }
 
 .knowledge-status.is-pending {
-  background: rgb(250 204 21 / 0.14);
-  color: rgb(253 224 71);
+  background: color-mix(in oklab, #a16a11 24%, transparent 76%);
 }
 
 .knowledge-status.is-failed {
-  background: rgb(248 113 113 / 0.14);
-  color: rgb(252 165 165);
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
 }
 
 .knowledge-status__error {
@@ -1805,8 +1902,9 @@ a {
 
 .operations-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
 }
 
 .operations-panel {
@@ -1881,18 +1979,15 @@ a {
 }
 
 .operations-status--ok {
-  background: rgb(34 197 94 / 0.14);
-  color: rgb(134 239 172);
+  background: color-mix(in oklab, #1f8f5f 24%, transparent 76%);
 }
 
 .operations-status--warning {
-  background: rgb(250 204 21 / 0.14);
-  color: rgb(253 224 71);
+  background: color-mix(in oklab, #a16a11 24%, transparent 76%);
 }
 
 .operations-status--critical {
-  background: rgb(248 113 113 / 0.14);
-  color: rgb(252 165 165);
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
 }
 
 .operations-health-list,
@@ -1996,10 +2091,6 @@ a {
 }
 
 @media (max-width: 1080px) {
-  .operations-grid {
-    grid-template-columns: 1fr;
-  }
-
   .operations-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

@@ -79,7 +79,14 @@ describe("GET /api/admin/logs", () => {
     expect(mocks.listRecentChatTurnLogs).toHaveBeenCalledWith("org-1", 10);
     expect(body.turns[0]?.id).toBe("turn-1");
   });
-});
+
+  it("loads all records when no explicit limit is provided", async () => {
+    const response = await GET(new Request("http://localhost/api/admin/logs"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.listRecentChatTurnLogs).toHaveBeenCalledWith("org-1", null);
+  });
+
   it("returns 200 for admin users", async () => {
     mocks.getSessionUser.mockResolvedValue(createSessionUser({ role: "admin" }));
 
@@ -87,3 +94,4 @@ describe("GET /api/admin/logs", () => {
 
     expect(response.status).toBe(200);
   });
+});
