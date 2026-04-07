@@ -156,6 +156,19 @@ function getToolSummary(result: ToolRendererResult | undefined) {
   );
 }
 
+function renderSummaryDisclosure(summary: string) {
+  return html`
+    <details class="crit-tool__disclosure">
+      <summary class="crit-tool__disclosure-summary">
+        <span class="crit-tool__label">Summary</span>
+      </summary>
+      <section class="crit-tool__section">
+        <p class="crit-tool__summary">${summary}</p>
+      </section>
+    </details>
+  `;
+}
+
 function getToolDetails(result: ToolRendererResult | undefined) {
   return isRecord(result?.details) ? (result.details as AnyToolDetails) : undefined;
 }
@@ -379,16 +392,7 @@ function renderSandboxToolCard(
               `
         }
 
-        ${
-          summary
-            ? html`
-                <section class="crit-tool__section">
-                  <div class="crit-tool__label">Summary</div>
-                  <p class="crit-tool__summary">${summary}</p>
-                </section>
-              `
-            : nothing
-        }
+        ${summary ? renderSummaryDisclosure(summary) : nothing}
 
         ${
           typeof exitCode === "number" || stagedFiles.length || sandboxRunId || runner || limits
@@ -787,12 +791,7 @@ function renderCompanyKnowledgeSearchToolCard(
             </div>`
           : nothing}
 
-        ${summary
-          ? html`<section class="crit-tool__section">
-              <div class="crit-tool__label">Summary</div>
-              <p class="crit-tool__summary">${summary}</p>
-            </section>`
-          : nothing}
+        ${summary ? renderSummaryDisclosure(summary) : nothing}
       </div>
     `,
     isCustom: false,
