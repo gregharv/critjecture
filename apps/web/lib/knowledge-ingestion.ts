@@ -89,7 +89,7 @@ export function decodeUtf8Text(buffer: Buffer) {
   return decodeTextBuffer(buffer);
 }
 
-export function normalizeCsvLineEndings(buffer: Buffer) {
+export function normalizeCsvLineEndings<T extends ArrayBufferLike>(buffer: Buffer<T>) {
   const hasCarriageReturn = buffer.includes(0x0d);
   const hasLineFeed = buffer.includes(0x0a);
 
@@ -97,7 +97,7 @@ export function normalizeCsvLineEndings(buffer: Buffer) {
     return buffer;
   }
 
-  const normalized = Buffer.from(buffer);
+  const normalized = Buffer.from(buffer) as Buffer<T>;
 
   for (let index = 0; index < normalized.length; index += 1) {
     if (normalized[index] === 0x0d) {
