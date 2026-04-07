@@ -138,6 +138,7 @@ type ConversationBootstrapState = {
 const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 const DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES = 512 * 1024;
 const DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS = 50_000;
+const CHAT_HISTORY_SIDEBAR_COLLAPSED_STORAGE_KEY = "critjecture.chatHistorySidebarCollapsed";
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
@@ -1016,6 +1017,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historySidebarCollapsed, setHistorySidebarCollapsed] = useState(false);
   const [historyConversations, setHistoryConversations] = useState<ConversationMetadata[]>(
     [],
   );
@@ -1028,6 +1030,26 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   useEffect(() => {
     historyQueryRef.current = historyQuery;
   }, [historyQuery]);
+
+  useEffect(() => {
+    try {
+      const persisted = window.localStorage.getItem(CHAT_HISTORY_SIDEBAR_COLLAPSED_STORAGE_KEY);
+      setHistorySidebarCollapsed(persisted === "true");
+    } catch {
+      setHistorySidebarCollapsed(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        CHAT_HISTORY_SIDEBAR_COLLAPSED_STORAGE_KEY,
+        historySidebarCollapsed ? "true" : "false",
+      );
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [historySidebarCollapsed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2523,7 +2545,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   }
 
   return (
-    <div className="chat-shell">
+    <div className={`chat-shell ${historySidebarCollapsed ? "chat-shell--history-collapsed" : ""}`}>
       <ChatHistorySidebar
         activeConversationId={conversationIdRef.current}
         conversations={historyConversations}
@@ -2538,6 +2560,17 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       />
       <div className="chat-main">
         <div className="chat-toolbar">
+          <button
+            aria-label={historySidebarCollapsed ? "Show conversation history sidebar" : "Hide conversation history sidebar"}
+            aria-pressed={historySidebarCollapsed}
+            className="chat-toolbar__sidebar-toggle"
+            onClick={() => {
+              setHistorySidebarCollapsed((current) => !current);
+            }}
+            type="button"
+          >
+            {historySidebarCollapsed ? "Show history" : "Hide history"}
+          </button>
           <details
             className="chat-toolbar__menu"
             data-dismiss-on-outside="true"

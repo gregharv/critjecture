@@ -250,6 +250,14 @@ a {
   min-height: 0;
 }
 
+.chat-shell--history-collapsed {
+  gap: 0;
+}
+
+.chat-shell--history-collapsed .chat-history-sidebar {
+  display: none;
+}
+
 .chat-main {
   position: relative;
   display: flex;
@@ -338,8 +346,33 @@ a {
 
 .chat-toolbar {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 10px;
   padding: 0 24px 14px;
+}
+
+.chat-toolbar__sidebar-toggle {
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent 30%);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 86%, transparent 14%);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.chat-toolbar__sidebar-toggle:hover {
+  background: color-mix(in oklab, var(--card) 78%, transparent 22%);
+}
+
+.chat-toolbar__sidebar-toggle:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 72%, white 28%);
+  outline-offset: 2px;
 }
 
 .chat-toolbar__menu {
@@ -1311,6 +1344,10 @@ a {
   }
 
   .chat-history-sidebar {
+    display: none;
+  }
+
+  .chat-toolbar__sidebar-toggle {
     display: none;
   }
 
