@@ -1511,7 +1511,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a short summary. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
+                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. inputs/ is read-only; never write or overwrite files there. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a short summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
@@ -1988,7 +1988,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a compact summary. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. inputs/ is read-only staged data; never write there. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a compact summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
           parameters: sandboxToolParameters,
           route: "/api/data-analysis/run",
           attachDataAnalysisTextOutput: true,

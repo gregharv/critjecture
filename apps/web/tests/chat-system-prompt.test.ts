@@ -30,4 +30,13 @@ describe("buildChatSystemPrompt", () => {
       "You may search only public files inside the current organization's company_data/public",
     );
   });
+
+  it("includes sandbox guardrails to prevent write-permission errors and ungrounded numeric answers", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("inputs/ directory is read-only");
+    expect(prompt).toContain("save at most one file");
+    expect(prompt).toContain("do not present computed values as final facts");
+    expect(prompt).toContain("only provide numeric conclusions from successful tool output");
+  });
 });
