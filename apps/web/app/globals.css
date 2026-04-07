@@ -1141,6 +1141,27 @@ a {
   cursor: default;
 }
 
+.shell-toggle {
+  display: grid;
+  gap: 6px;
+}
+
+.shell-toggle__control {
+  align-items: center;
+  color: var(--foreground);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.shell-toggle__checkbox {
+  accent-color: color-mix(in oklab, var(--primary) 72%, var(--foreground) 28%);
+  block-size: 14px;
+  inline-size: 14px;
+}
+
 .shell-signout {
   border: 0;
   border-radius: 8px;
@@ -2433,4 +2454,12 @@ a {
   .settings-table__row {
     grid-template-columns: 1fr;
   }
+}
+
+.crit-tool--error-collapsed {
+  display: none !important;
+}
+
+.crit-show-error-chats .crit-tool--error-collapsed {
+  display: block !important;
 }

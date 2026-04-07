@@ -7,6 +7,7 @@ import Link from "next/link";
 import { logoutAction } from "@/app/auth-actions";
 import { setThemePreferenceAction } from "@/app/theme-actions";
 import { DetailsOutsideDismiss } from "@/components/details-outside-dismiss";
+import { ErrorChatToggle } from "@/components/error-chat-toggle";
 import type { SessionUser } from "@/lib/auth-state";
 import { getRoleLabel } from "@/lib/roles";
 import { THEME_COOKIE_NAME, normalizeThemePreference } from "@/lib/theme";
@@ -140,6 +141,7 @@ export async function WorkspaceShell({
                     </form>
                   </div>
                 </div>
+                <ErrorChatToggle />
                 <form action={logoutAction}>
                   <button className="shell-signout" type="submit">
                     Sign Out

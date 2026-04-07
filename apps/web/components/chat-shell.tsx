@@ -703,6 +703,7 @@ function getSystemPrompt(role: UserRole) {
     "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
+    "For routine technical sandbox failures (CSV encoding, delimiter, line endings, schema parsing, dtype casting), do not ask the user for permission to continue. Instead, adjust the code and retry run_data_analysis automatically.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
     "After generate_visual_graph returns, inspect the tool result image before finalizing your response. If readability, labels, or chart choice are weak, run generate_visual_graph one more time with improved plotting code; limit this self-revision to one extra pass.",
@@ -722,6 +723,7 @@ function getSystemPrompt(role: UserRole) {
     "reportlab is available for PDFs. For a simple notice, use reportlab.pdfgen.canvas.Canvas with outputs/notice.pdf.",
     "Never claim that you cannot execute Python. You can execute Python through the available tool.",
     scopeRule,
+    "Only ask a follow-up confirmation before retrying if the user explicitly asked to stop, or if retries would change the business question/scope rather than just fixing technical parsing/runtime issues.",
     "If the tool returns no matches, say you could not find that information in the current access scope.",
   ].join(" ");
 }
