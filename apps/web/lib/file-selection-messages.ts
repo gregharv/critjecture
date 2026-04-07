@@ -36,10 +36,13 @@ declare module "@mariozechner/pi-agent-core" {
 function renderPreview(candidate: FileSelectionCandidate) {
   const previewLabel =
     candidate.preview.kind === "csv"
-      ? `Preview — ${candidate.preview.rows.length} row${candidate.preview.rows.length === 1 ? "" : "s"}`
+      ? `Preview — ${candidate.preview.rows.length} sample record${candidate.preview.rows.length === 1 ? "" : "s"} (by field)`
       : `Preview — ${candidate.preview.lines.length} line${candidate.preview.lines.length === 1 ? "" : "s"}`;
 
   if (candidate.preview.kind === "csv") {
+    const csvPreview = candidate.preview;
+    const rowLabels = csvPreview.rows.map((_, index) => `Record ${index + 1}`);
+
     return html`
       <details class="crit-selection__preview">
         <summary class="crit-selection__preview-summary">${previewLabel}</summary>
@@ -47,16 +50,18 @@ function renderPreview(candidate: FileSelectionCandidate) {
           <table class="crit-selection__table">
             <thead>
               <tr>
-                ${candidate.preview.columns.map(
-                  (column) => html`<th>${column}</th>`,
-                )}
+                <th>Field</th>
+                ${rowLabels.map((label) => html`<th>${label}</th>`)}
               </tr>
             </thead>
             <tbody>
-              ${candidate.preview.rows.map(
-                (row) => html`
+              ${csvPreview.columns.map(
+                (column, columnIndex) => html`
                   <tr>
-                    ${row.map((cell) => html`<td>${cell}</td>`)}
+                    <th class="crit-selection__table-row-header" scope="row">${column}</th>
+                    ${csvPreview.rows.map(
+                      (row) => html`<td>${row[columnIndex] ?? "—"}</td>`,
+                    )}
                   </tr>
                 `,
               )}

@@ -280,6 +280,10 @@
   color: var(--foreground);
 }
 
+.crit-selection__table-row-header {
+  white-space: nowrap;
+}
+
 .crit-selection__table td {
   color: var(--shell-copy);
 }
