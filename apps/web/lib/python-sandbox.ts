@@ -78,8 +78,11 @@ const RUN_ID_PATTERN =
 const LOCAL_SUPERVISOR_ID = `local-supervisor:${process.pid}`;
 
 const GENERATED_ASSET_MIME_TYPES: Record<string, string> = {
+  ".csv": "text/csv",
+  ".json": "application/json",
   ".pdf": "application/pdf",
   ".png": "image/png",
+  ".txt": "text/plain",
 };
 
 const TOOL_OUTPUT_POLICIES = {
@@ -91,7 +94,15 @@ const TOOL_OUTPUT_POLICIES = {
     expectedRelativePath: "outputs/chart.png",
     mimeType: "image/png",
   },
-  run_data_analysis: null,
+  run_data_analysis: {
+    allowedRelativePaths: [
+      "outputs/result.csv",
+      "outputs/result.json",
+      "outputs/result.txt",
+    ],
+    allowedMimeTypes: ["text/csv", "application/json", "text/plain"],
+    optional: true,
+  },
 } as const;
 
 type SandboxToolName = keyof typeof TOOL_OUTPUT_POLICIES;
@@ -1124,7 +1135,6 @@ function validateBufferedGeneratedOutputs(
   toolName: SandboxToolName,
   assets: HostedGeneratedAssetPayload[],
 ) {
-  const outputPolicy = TOOL_OUTPUT_POLICIES[toolName];
   const outputFiles = assets.map((asset) => {
     const decoded = decodeHostedGeneratedAsset(asset);
 
@@ -1137,33 +1147,64 @@ function validateBufferedGeneratedOutputs(
     };
   });
 
-  if (!outputPolicy) {
-    if (outputFiles.length > 0) {
+  if (toolName === "run_data_analysis") {
+    const analysisOutputPolicy = TOOL_OUTPUT_POLICIES.run_data_analysis;
+
+    if (outputFiles.length > 1) {
       throw new SandboxValidationError(
-        "run_data_analysis may not persist generated files. Print the final answer to stdout instead.",
+        "run_data_analysis may save at most one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
       );
     }
 
-    return [] as BufferedOutputFileRecord[];
+    if (outputFiles.length === 1) {
+      const [outputFile] = outputFiles;
+
+      if (
+        !analysisOutputPolicy.allowedRelativePaths.some(
+          (allowedPath) => allowedPath === outputFile.relativePath,
+        )
+      ) {
+        throw new SandboxValidationError(
+          "run_data_analysis output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+        );
+      }
+
+      if (
+        !analysisOutputPolicy.allowedMimeTypes.some(
+          (allowedMimeType) => allowedMimeType === outputFile.mimeType,
+        )
+      ) {
+        throw new SandboxValidationError(
+          "run_data_analysis output must be CSV, JSON, or plain text.",
+        );
+      }
+    }
+
+    return outputFiles;
   }
+
+  const strictOutputPolicy =
+    toolName === "generate_document"
+      ? TOOL_OUTPUT_POLICIES.generate_document
+      : TOOL_OUTPUT_POLICIES.generate_visual_graph;
 
   if (outputFiles.length !== 1) {
     throw new SandboxValidationError(
-      `${toolName} must save exactly one file at ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} must save exactly one file at ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 
   const [outputFile] = outputFiles;
 
-  if (outputFile.relativePath !== outputPolicy.expectedRelativePath) {
+  if (outputFile.relativePath !== strictOutputPolicy.expectedRelativePath) {
     throw new SandboxValidationError(
-      `${toolName} must save the generated file exactly at ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} must save the generated file exactly at ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 
-  if (outputFile.mimeType !== outputPolicy.mimeType) {
+  if (outputFile.mimeType !== strictOutputPolicy.mimeType) {
     throw new SandboxValidationError(
-      `${toolName} generated the wrong file type for ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} generated the wrong file type for ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 
@@ -1171,36 +1212,66 @@ function validateBufferedGeneratedOutputs(
 }
 
 async function validateGeneratedOutputs(toolName: SandboxToolName, workspaceDir: string) {
-  const outputPolicy = TOOL_OUTPUT_POLICIES[toolName];
   const outputFiles = await collectWorkspaceOutputFiles(workspaceDir);
 
-  if (!outputPolicy) {
-    if (outputFiles.length > 0) {
+  if (toolName === "run_data_analysis") {
+    const analysisOutputPolicy = TOOL_OUTPUT_POLICIES.run_data_analysis;
+
+    if (outputFiles.length > 1) {
       throw new SandboxValidationError(
-        "run_data_analysis may not persist generated files. Print the final answer to stdout instead.",
+        "run_data_analysis may save at most one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
       );
     }
 
-    return [] as OutputFileRecord[];
+    if (outputFiles.length === 1) {
+      const [outputFile] = outputFiles;
+
+      if (
+        !analysisOutputPolicy.allowedRelativePaths.some(
+          (allowedPath) => allowedPath === outputFile.relativePath,
+        )
+      ) {
+        throw new SandboxValidationError(
+          "run_data_analysis output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+        );
+      }
+
+      if (
+        !analysisOutputPolicy.allowedMimeTypes.some(
+          (allowedMimeType) => allowedMimeType === outputFile.mimeType,
+        )
+      ) {
+        throw new SandboxValidationError(
+          "run_data_analysis output must be CSV, JSON, or plain text.",
+        );
+      }
+    }
+
+    return outputFiles;
   }
+
+  const strictOutputPolicy =
+    toolName === "generate_document"
+      ? TOOL_OUTPUT_POLICIES.generate_document
+      : TOOL_OUTPUT_POLICIES.generate_visual_graph;
 
   if (outputFiles.length !== 1) {
     throw new SandboxValidationError(
-      `${toolName} must save exactly one file at ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} must save exactly one file at ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 
   const [outputFile] = outputFiles;
 
-  if (outputFile.relativePath !== outputPolicy.expectedRelativePath) {
+  if (outputFile.relativePath !== strictOutputPolicy.expectedRelativePath) {
     throw new SandboxValidationError(
-      `${toolName} must save the generated file exactly at ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} must save the generated file exactly at ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 
-  if (outputFile.mimeType !== outputPolicy.mimeType) {
+  if (outputFile.mimeType !== strictOutputPolicy.mimeType) {
     throw new SandboxValidationError(
-      `${toolName} generated the wrong file type for ${outputPolicy.expectedRelativePath}.`,
+      `${toolName} generated the wrong file type for ${strictOutputPolicy.expectedRelativePath}.`,
     );
   }
 

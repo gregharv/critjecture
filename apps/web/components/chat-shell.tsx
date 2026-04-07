@@ -136,6 +136,8 @@ type ConversationBootstrapState = {
 };
 
 const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
+const DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES = 256 * 1024;
+const DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS = 20_000;
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
@@ -595,6 +597,62 @@ function getGraphReviewAsset(
   return generatedAsset;
 }
 
+function getDataAnalysisTextAsset(result: SandboxToolResponse) {
+  const generatedAssets = Array.isArray(result.generatedAssets) ? result.generatedAssets : [];
+
+  return (
+    generatedAssets.find((asset) => {
+      if (asset.byteSize > DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES) {
+        return false;
+      }
+
+      return (
+        asset.mimeType === "text/csv" ||
+        asset.mimeType === "application/json" ||
+        asset.mimeType === "text/plain"
+      );
+    }) ?? null
+  );
+}
+
+async function buildDataAnalysisTextAssetContent(
+  result: SandboxToolResponse,
+  signal?: AbortSignal,
+) {
+  const generatedAsset = getDataAnalysisTextAsset(result);
+
+  if (!generatedAsset) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(generatedAsset.downloadUrl, { signal });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const text = await response.text();
+    const normalized = text.trim();
+
+    if (!normalized) {
+      return null;
+    }
+
+    const preview =
+      normalized.length <= DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS
+        ? normalized
+        : `${normalized.slice(0, DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS).trimEnd()}… [truncated]`;
+
+    return {
+      type: "text" as const,
+      text: `Analysis output file (${generatedAsset.relativePath}):\n${preview}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function buildGraphReviewImageContent(
   result: SandboxToolResponse,
   signal?: AbortSignal,
@@ -645,7 +703,7 @@ function getSystemPrompt(role: UserRole) {
     "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
-    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed without creating a file.",
+    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
     "After generate_visual_graph returns, inspect the tool result image before finalizing your response. If readability, labels, or chart choice are weak, run generate_visual_graph one more time with improved plotting code; limit this self-revision to one extra pass.",
     "For most CSV-backed charts, prefer a single generate_visual_graph call with inputFiles and complete matplotlib code that reads inputs/<same-relative-path> with Polars and saves outputs/chart.png.",
@@ -654,9 +712,9 @@ function getSystemPrompt(role: UserRole) {
     "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
     "When you use generate_document on company files, pass those same relative paths in inputFiles.",
     "The search tool may return auto-selected files or trigger a planner-level multi-select picker after the assistant finishes gathering candidates. If selection is pending, do not call any Python sandbox tool yet. Wait for the user to confirm the picker first.",
-    "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout.",
+    "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout. If run_data_analysis output would be too large, save one structured file at outputs/result.csv, outputs/result.json, or outputs/result.txt and print a short summary.",
     "Never rely on a trailing expression like `mean, median`; use print(...).",
-    "If you need to return multiple analytical values or prepare chart data, print a single JSON object so the UI can render it clearly.",
+    "If you need to return multiple analytical values or prepare chart data, prefer printing a single JSON object so the UI can render it clearly.",
     "For any staged CSV input, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
     "Before full CSV analysis, inspect a small sample (first line + first few KB) to confirm delimiter and line endings. If needed, set pl.scan_csv options such as separator=';' or eol_char='\\r' before computing aggregates.",
     "Polars cheat sheet: use DataFrame.group_by(...), not groupby(...). Use df.sort('column', descending=True), not reverse=True or 'desc'. Use exact CSV headers in pl.col(...), for example ledger_year instead of inventing year. Convert plot columns with series.to_list() before passing them to matplotlib.",
@@ -1491,7 +1549,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
+                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If the output is too large for stdout, save one structured file to outputs/result.csv, outputs/result.json, or outputs/result.txt and print a short summary. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
@@ -1546,6 +1604,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           TResponse extends SandboxToolResponse,
         >(
           options: {
+            attachDataAnalysisTextOutput?: boolean;
             attachGraphImageForReview?: boolean;
             buildRequestBody: (runtimeToolCallId: string, params: TParams) => Record<string, unknown>;
             description: string;
@@ -1605,6 +1664,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 text: result.summary,
               },
             ];
+
+            if (options.attachDataAnalysisTextOutput) {
+              const textAssetContent = await buildDataAnalysisTextAssetContent(result, signal);
+
+              if (textAssetContent) {
+                content.push(textAssetContent);
+              }
+            }
 
             if (options.attachGraphImageForReview) {
               const imageContent = await buildGraphReviewImageContent(result, signal);
@@ -1959,9 +2026,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. If stdout would be too large, you may save one structured file to outputs/result.csv, outputs/result.json, or outputs/result.txt. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
           parameters: sandboxToolParameters,
           route: "/api/data-analysis/run",
+          attachDataAnalysisTextOutput: true,
         });
 
         const generateVisualGraphTool = createSandboxTool<

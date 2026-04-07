@@ -185,6 +185,12 @@ export async function POST(request: Request) {
       );
     }
 
+    if (result.generatedAssets.length > 0) {
+      summaryLines.push(
+        `Saved structured analysis output file: ${result.generatedAssets.map((asset) => asset.relativePath).join(", ")}.`,
+      );
+    }
+
     const response = NextResponse.json({
       analysisResultId: analysisResult?.id,
       chartReady: Boolean(analysisResult),

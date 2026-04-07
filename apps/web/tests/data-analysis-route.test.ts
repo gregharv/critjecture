@@ -336,6 +336,47 @@ describe("POST /api/data-analysis/run", () => {
     expect(body.summary).not.toContain("column_40");
   });
 
+  it("includes structured output file paths in the summary when present", async () => {
+    mocks.executeSandboxedCommand.mockResolvedValue({
+      exitCode: 0,
+      generatedAssets: [
+        {
+          byteSize: 512,
+          downloadUrl: "/api/generated-files/run-1/outputs/result.csv",
+          expiresAt: Date.now() + 60_000,
+          fileName: "result.csv",
+          mimeType: "text/csv",
+          relativePath: "outputs/result.csv",
+          runId: "run-1",
+        },
+      ],
+      limits: {
+        artifactMaxBytes: 1024,
+        artifactTtlMs: 3_600_000,
+        cpuLimitSeconds: 10,
+        maxProcesses: 16,
+        memoryLimitBytes: 512_000_000,
+        stdoutMaxBytes: 1024,
+        timeoutMs: 10_000,
+      },
+      runner: "python",
+      sandboxRunId: "run-1",
+      stagedFiles: [{ sourcePath: "admin/contractors_2026.csv", stagedPath: "inputs/admin/contractors_2026.csv" }],
+      status: "completed",
+      stderr: "",
+      stdout: "saved outputs/result.csv",
+    });
+
+    const response = await POST(createJsonRequest("http://localhost/api/data-analysis/run", {
+      code: "print('ok')",
+      inputFiles: ["admin/contractors_2026.csv"],
+    }));
+    const body = await readJson<{ summary: string }>(response);
+
+    expect(response.status).toBe(200);
+    expect(body.summary).toContain("Saved structured analysis output file: outputs/result.csv.");
+  });
+
   it("returns 400 when chart-ready analysis exceeds persistence limits", async () => {
     mocks.buildCsvSchemas.mockResolvedValue([
       {
