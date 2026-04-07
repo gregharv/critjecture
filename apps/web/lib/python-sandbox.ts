@@ -1,6 +1,7 @@
 import "server-only";
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
@@ -698,25 +699,129 @@ async function readFirstLine(filePath: string) {
   }
 }
 
-function splitCsvHeaderColumns(headerLine: string) {
+const CSV_PROFILE_SAMPLE_BYTES = 64 * 1024;
+const CSV_DELIMITER_CANDIDATES = [",", ";", "\t", "|"] as const;
+
+type CsvDelimiter = (typeof CSV_DELIMITER_CANDIDATES)[number];
+type CsvLineEndingStyle = "cr" | "crlf" | "lf" | "none";
+type CsvFileProfile = {
+  delimiter: CsvDelimiter;
+  headerLine: string;
+  lineEnding: CsvLineEndingStyle;
+  sourcePath: string;
+};
+
+async function readFileSample(filePath: string, maxBytes: number) {
+  const fileHandle = await open(filePath, "r");
+  const buffer = Buffer.alloc(maxBytes);
+
+  try {
+    const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+function detectCsvLineEndingStyle(sample: Buffer): CsvLineEndingStyle {
+  let crlfCount = 0;
+  let lfCount = 0;
+  let crCount = 0;
+
+  for (let index = 0; index < sample.length; index += 1) {
+    const current = sample[index];
+
+    if (current === 0x0d) {
+      if (sample[index + 1] === 0x0a) {
+        crlfCount += 1;
+        index += 1;
+      } else {
+        crCount += 1;
+      }
+      continue;
+    }
+
+    if (current === 0x0a) {
+      lfCount += 1;
+    }
+  }
+
+  if (crlfCount === 0 && lfCount === 0 && crCount === 0) {
+    return "none";
+  }
+
+  if (crlfCount >= lfCount && crlfCount >= crCount) {
+    return "crlf";
+  }
+
+  if (lfCount >= crCount) {
+    return "lf";
+  }
+
+  return "cr";
+}
+
+function detectCsvDelimiter(headerLine: string): CsvDelimiter {
+  const counts = CSV_DELIMITER_CANDIDATES.map((candidate) => ({
+    candidate,
+    count: headerLine.split(candidate).length - 1,
+  }));
+  const best = counts.sort((left, right) => right.count - left.count)[0];
+
+  return best && best.count > 0 ? best.candidate : ",";
+}
+
+function splitCsvHeaderColumns(headerLine: string, delimiter: CsvDelimiter = ",") {
   return headerLine
-    .split(",")
+    .split(delimiter)
     .map((column) => column.trim())
     .filter(Boolean);
 }
 
-async function getAvailableCsvColumns(stagedFiles: StagedSandboxFile[], workspaceDir: string) {
+function escapeRegexLiteral(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function codeSpecifiesCsvSeparator(code: string, delimiter: CsvDelimiter) {
+  if (delimiter === ",") {
+    return true;
+  }
+
+  if (delimiter === "\t") {
+    return /\b(?:separator|sep)\s*=\s*(['"])(?:\\t|\t)\1/.test(code);
+  }
+
+  return new RegExp(
+    `\\b(?:separator|sep)\\s*=\\s*(['"])${escapeRegexLiteral(delimiter)}\\1`,
+  ).test(code);
+}
+
+function codeSpecifiesCarriageReturnEol(code: string) {
+  return /\beol_char\s*=\s*(['"])(?:\\r|\r)\1/.test(code);
+}
+
+function formatDelimiterForHint(delimiter: CsvDelimiter) {
+  return delimiter === "\t" ? "\\t" : delimiter;
+}
+
+async function buildCsvFileProfiles(stagedFiles: StagedSandboxFile[], workspaceDir: string) {
   const csvFiles = stagedFiles.filter((file) => file.sourcePath.toLowerCase().endsWith(".csv"));
-  const availableColumnsByFile = new Map<string, string[]>();
+  const profiles: CsvFileProfile[] = [];
 
   for (const stagedFile of csvFiles) {
     const stagedAbsolutePath = path.join(workspaceDir, ...stagedFile.stagedPath.split("/"));
     const headerLine = await readFirstLine(stagedAbsolutePath);
+    const sample = await readFileSample(stagedAbsolutePath, CSV_PROFILE_SAMPLE_BYTES);
 
-    availableColumnsByFile.set(stagedFile.sourcePath, splitCsvHeaderColumns(headerLine));
+    profiles.push({
+      delimiter: detectCsvDelimiter(headerLine),
+      headerLine,
+      lineEnding: detectCsvLineEndingStyle(sample),
+      sourcePath: stagedFile.sourcePath,
+    });
   }
 
-  return availableColumnsByFile;
+  return profiles;
 }
 
 export async function validateCsvAnalysisCode(
@@ -764,13 +869,43 @@ export async function validateCsvAnalysisCode(
     );
   }
 
+  const csvProfiles = await buildCsvFileProfiles(stagedFiles, workspaceDir);
+  const parseHintMessages = csvProfiles.flatMap((profile) => {
+    const hints: string[] = [];
+
+    if (profile.lineEnding === "cr" && !codeSpecifiesCarriageReturnEol(code)) {
+      hints.push(
+        `${profile.sourcePath}: detected carriage-return line endings; set eol_char='\\r' in pl.scan_csv(...)`,
+      );
+    }
+
+    if (!codeSpecifiesCsvSeparator(code, profile.delimiter)) {
+      hints.push(
+        `${profile.sourcePath}: detected delimiter '${formatDelimiterForHint(profile.delimiter)}'; set separator='${formatDelimiterForHint(profile.delimiter)}' in pl.scan_csv(...)`,
+      );
+    }
+
+    return hints;
+  });
+
+  if (parseHintMessages.length > 0) {
+    throw new SandboxValidationError(
+      `CSV preflight detected non-default formatting. Read a small file sample before full analysis and configure pl.scan_csv accordingly. ${parseHintMessages.join(" | ")}`,
+    );
+  }
+
   const referencedColumns = extractPolarsColumnReferences(code);
 
   if (referencedColumns.length === 0) {
     return;
   }
 
-  const availableColumnsByFile = await getAvailableCsvColumns(stagedFiles, workspaceDir);
+  const availableColumnsByFile = new Map(
+    csvProfiles.map((profile) => [
+      profile.sourcePath,
+      splitCsvHeaderColumns(profile.headerLine, profile.delimiter),
+    ]),
+  );
   const availableColumns = new Set([...availableColumnsByFile.values()].flatMap((columns) => columns));
   const definedAliases = new Set(extractPolarsAliasDefinitions(code));
   const missingColumns = referencedColumns.filter(
@@ -1789,6 +1924,42 @@ async function finalizeSandboxRunResult(
   });
 }
 
+async function preflightCsvAnalysisForAnyBackend(options: {
+  code: string;
+  inputFiles: string[];
+  organizationId: string;
+  organizationSlug: string;
+  role: UserRole;
+  toolName: SandboxToolName;
+}) {
+  if (options.toolName !== "run_data_analysis") {
+    return;
+  }
+
+  if (!options.inputFiles.some((filePath) => filePath.toLowerCase().endsWith(".csv"))) {
+    return;
+  }
+
+  const preflightWorkspaceDir = path.join(
+    SANDBOX_WORKSPACE_DIR,
+    `preflight-${randomUUID()}`,
+  );
+
+  try {
+    const stagedFiles = await stageInputFiles(
+      options.inputFiles,
+      options.organizationId,
+      options.organizationSlug,
+      options.role,
+      preflightWorkspaceDir,
+    );
+
+    await validateCsvAnalysisCode(options.code, stagedFiles, preflightWorkspaceDir);
+  } finally {
+    await rm(preflightWorkspaceDir, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
 export async function executeSandboxedCommand(options: {
   code: string;
   inputFiles?: string[];
@@ -1821,6 +1992,15 @@ export async function executeSandboxedCommand(options: {
       relativePath,
     }),
   );
+
+  await preflightCsvAnalysisForAnyBackend({
+    code: normalizedCode,
+    inputFiles: options.inputFiles ?? [],
+    organizationId: options.organizationId,
+    organizationSlug: options.organizationSlug,
+    role: options.role,
+    toolName: options.toolName,
+  });
 
   await reconcileStaleSandboxRuns();
   await cleanupExpiredSandboxArtifacts({

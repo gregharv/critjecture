@@ -100,6 +100,74 @@ describe("python sandbox CSV validation", () => {
     ).rejects.toThrow("CSV analysis referenced unknown column(s): missing.");
   });
 
+  it("requires explicit eol_char for carriage-return-only CSV files", async () => {
+    const env = await createTestAppEnvironment();
+    cleanup = env.cleanup;
+    const workspaceDir = path.join(env.rootDir, "workspace");
+    const stagedFiles = await createCsvFixture(
+      workspaceDir,
+      "ledger_year,contractor,payout\r2026,Acme,1200\r",
+    );
+
+    await expect(
+      validateCsvAnalysisCode(
+        [
+          "import polars as pl",
+          "frame = pl.scan_csv('inputs/admin/contractors_2026.csv').collect()",
+          "print(frame)",
+        ].join("\n"),
+        stagedFiles,
+        workspaceDir,
+      ),
+    ).rejects.toThrow("detected carriage-return line endings");
+
+    await expect(
+      validateCsvAnalysisCode(
+        [
+          "import polars as pl",
+          "frame = pl.scan_csv('inputs/admin/contractors_2026.csv', eol_char='\\r').collect()",
+          "print(frame)",
+        ].join("\n"),
+        stagedFiles,
+        workspaceDir,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("requires explicit separator for non-comma CSV files", async () => {
+    const env = await createTestAppEnvironment();
+    cleanup = env.cleanup;
+    const workspaceDir = path.join(env.rootDir, "workspace");
+    const stagedFiles = await createCsvFixture(
+      workspaceDir,
+      "ledger_year;contractor;payout\n2026;Acme;1200\n",
+    );
+
+    await expect(
+      validateCsvAnalysisCode(
+        [
+          "import polars as pl",
+          "frame = pl.scan_csv('inputs/admin/contractors_2026.csv').collect()",
+          "print(frame)",
+        ].join("\n"),
+        stagedFiles,
+        workspaceDir,
+      ),
+    ).rejects.toThrow("set separator=';' in pl.scan_csv(...)");
+
+    await expect(
+      validateCsvAnalysisCode(
+        [
+          "import polars as pl",
+          "frame = pl.scan_csv('inputs/admin/contractors_2026.csv', separator=';').collect()",
+          "print(frame)",
+        ].join("\n"),
+        stagedFiles,
+        workspaceDir,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("accepts valid lazy Polars CSV analysis", async () => {
     const env = await createTestAppEnvironment();
     cleanup = env.cleanup;
@@ -123,10 +191,13 @@ describe("python sandbox CSV validation", () => {
   });
 });
 
-async function createCsvFixture(workspaceDir: string): Promise<StagedSandboxFile[]> {
+async function createCsvFixture(
+  workspaceDir: string,
+  content = "ledger_year,contractor,payout\n2026,Acme,1200\n",
+): Promise<StagedSandboxFile[]> {
   const csvPath = path.join(workspaceDir, "inputs", "admin", "contractors_2026.csv");
   await mkdir(path.dirname(csvPath), { recursive: true });
-  await writeFile(csvPath, "ledger_year,contractor,payout\n2026,Acme,1200\n", "utf8");
+  await writeFile(csvPath, content, "utf8");
 
   return [
     {
