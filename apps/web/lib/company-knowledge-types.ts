@@ -29,9 +29,21 @@ export type CompanyKnowledgeSelectionReason =
   | "multiple-candidates"
   | "no-match";
 
+export type CompanyKnowledgeQueryDiagnostics = {
+  aiRewriteApplied: boolean;
+  aiSuggestedTerms: string[];
+  correctedTerms: Array<{
+    from: string;
+    to: string;
+  }>;
+  expandedTerms: string[];
+  manifestFileCount: number;
+};
+
 export type CompanyKnowledgeSearchResult = {
   candidateFiles: CompanyKnowledgeCandidateFile[];
   matches: CompanyKnowledgeMatch[];
+  queryDiagnostics: CompanyKnowledgeQueryDiagnostics;
   recommendedFiles: string[];
   searchedDirectory: string;
   scopeDescription: string;

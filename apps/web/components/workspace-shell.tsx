@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { logoutAction } from "@/app/auth-actions";
 import { setThemePreferenceAction } from "@/app/theme-actions";
+import { ChatHistoryToggle } from "@/components/chat-history-toggle";
 import { DetailsOutsideDismiss } from "@/components/details-outside-dismiss";
 import { ErrorChatToggle } from "@/components/error-chat-toggle";
 import type { SessionUser } from "@/lib/auth-state";
@@ -150,6 +151,7 @@ export async function WorkspaceShell({
               </div>
             </div>
           </details>
+          {activePage === "chat" ? <ChatHistoryToggle /> : null}
         </header>
         <div className="shell-body">{children}</div>
       </section>

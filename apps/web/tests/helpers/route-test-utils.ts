@@ -107,6 +107,13 @@ export function createSearchResult(role: UserRole = "owner") {
         text: elevated ? "ledger_year,contractor,payout" : "Office closed July 4",
       },
     ],
+    queryDiagnostics: {
+      aiRewriteApplied: false,
+      aiSuggestedTerms: [],
+      correctedTerms: [],
+      expandedTerms: ["2026", "contractor", "contractors"],
+      manifestFileCount: 1,
+    },
     recommendedFiles: [elevated ? "admin/contractors_2026.csv" : "public/holidays.txt"],
     scopeDescription,
     searchedDirectory: elevated ? "company_data" : "company_data/public",

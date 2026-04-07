@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { searchCompanyKnowledge } from "@/lib/company-knowledge";
-import type { CompanyKnowledgeSearchResult } from "@/lib/company-knowledge-types";
+import type {
+  CompanyKnowledgeQueryDiagnostics,
+  CompanyKnowledgeSearchResult,
+} from "@/lib/company-knowledge-types";
 import { getSessionUser } from "@/lib/auth-state";
 import {
   beginObservedRequest,
@@ -37,7 +40,12 @@ function describeCsvPreview(result: CompanyKnowledgeSearchResult, files: string[
   return `CSV columns: ${schemaLines.join(" | ")}.`;
 }
 
-function buildSelectedCsvSummary(query: string, roleLabel: string, result: CompanyKnowledgeSearchResult) {
+function buildSelectedCsvSummary(
+  query: string,
+  roleLabel: string,
+  result: CompanyKnowledgeSearchResult,
+  diagnosticsLine: string,
+) {
   const selectedFile = result.selectedFiles[0];
   const selectedCandidate = selectedFile
     ? result.candidateFiles.find((candidate) => candidate.file === selectedFile)
@@ -49,6 +57,7 @@ function buildSelectedCsvSummary(query: string, roleLabel: string, result: Compa
   return [
     `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
     `Role: ${roleLabel}.`,
+    diagnosticsLine,
     `Automatically selected ${result.selectedFiles.join(", ")} because it was the only candidate file found${result.selectionReason === "unique-year-match" ? " for the requested year" : ""}.`,
     csvColumns ? `Selected CSV columns: ${csvColumns}.` : null,
     "Use the selected file path in inputFiles for run_data_analysis instead of trying to reason through rows in chat context.",
@@ -57,9 +66,42 @@ function buildSelectedCsvSummary(query: string, roleLabel: string, result: Compa
     .join("\n");
 }
 
+function describeQueryDiagnostics(diagnostics: CompanyKnowledgeQueryDiagnostics) {
+  const correctedTermsLine =
+    diagnostics.correctedTerms.length > 0
+      ? `Typo-tolerant terms applied: ${diagnostics.correctedTerms
+          .map((entry) => `${entry.from} → ${entry.to}`)
+          .join(", ")}.`
+      : null;
+
+  const expandedTermsLine =
+    diagnostics.expandedTerms.length > 0
+      ? `Expanded search terms: ${diagnostics.expandedTerms.join(", ")}.`
+      : null;
+  const aiRewriteLine =
+    diagnostics.aiRewriteApplied && diagnostics.aiSuggestedTerms.length > 0
+      ? `AI fallback rewrite terms: ${diagnostics.aiSuggestedTerms.join(", ")}.`
+      : null;
+
+  return [
+    `Searched ${diagnostics.manifestFileCount} files in the lightweight file manifest (filename + CSV headers + short preview).`,
+    correctedTermsLine,
+    expandedTermsLine,
+    aiRewriteLine,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildSummary(query: string, roleLabel: string, result: CompanyKnowledgeSearchResult) {
+  const diagnosticsLine = describeQueryDiagnostics(result.queryDiagnostics);
   if (result.candidateFiles.length === 0) {
-    return `No matches found for "${query}" in ${result.scopeDescription}.`;
+    return [
+      `No matches found for "${query}" in ${result.scopeDescription}.`,
+      diagnosticsLine,
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   const candidateLines = result.candidateFiles
@@ -79,7 +121,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     );
 
     if (selectedCandidate?.preview.kind === "csv") {
-      return buildSelectedCsvSummary(query, roleLabel, result);
+      return buildSelectedCsvSummary(query, roleLabel, result, diagnosticsLine);
     }
 
     const citations = selectedCandidate?.matches.length
@@ -97,6 +139,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     return [
       `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
       `Role: ${roleLabel}.`,
+      diagnosticsLine,
       selectionLine,
       describeCsvPreview(result, result.selectedFiles),
       "Use the selected file path in inputFiles when a Python sandbox tool is needed.",
@@ -114,6 +157,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
   return [
     `Found ${result.candidateFiles.length} candidate files for "${query}" in ${result.scopeDescription}.`,
     `Role: ${roleLabel}.`,
+    diagnosticsLine,
     "Selection pending. A multi-select file picker will appear after the assistant finishes gathering candidates. Do not call a Python sandbox tool yet.",
     recommendedLine,
     describeCsvPreview(result, result.recommendedFiles),
