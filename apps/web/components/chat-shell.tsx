@@ -578,6 +578,7 @@ function getSystemPrompt(role: UserRole) {
     `Current user role: ${roleLabel}.`,
     "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
     "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
+    "If the question is about a CSV-backed business calculation, use search_company_knowledge only to identify the right file, then use run_data_analysis with the staged inputFiles. Do not try to compute the answer from CSV rows shown in chat context.",
     "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",

@@ -37,6 +37,26 @@ function describeCsvPreview(result: CompanyKnowledgeSearchResult, files: string[
   return `CSV columns: ${schemaLines.join(" | ")}.`;
 }
 
+function buildSelectedCsvSummary(query: string, roleLabel: string, result: CompanyKnowledgeSearchResult) {
+  const selectedFile = result.selectedFiles[0];
+  const selectedCandidate = selectedFile
+    ? result.candidateFiles.find((candidate) => candidate.file === selectedFile)
+    : null;
+  const csvColumns = selectedCandidate?.preview.kind === "csv"
+    ? selectedCandidate.preview.columns.join(", ")
+    : null;
+
+  return [
+    `Found ${result.candidateFiles.length} candidate file${result.candidateFiles.length === 1 ? "" : "s"} for "${query}" in ${result.scopeDescription}.`,
+    `Role: ${roleLabel}.`,
+    `Automatically selected ${result.selectedFiles.join(", ")} because it was the only candidate file found${result.selectionReason === "unique-year-match" ? " for the requested year" : ""}.`,
+    csvColumns ? `Selected CSV columns: ${csvColumns}.` : null,
+    "Use the selected file path in inputFiles for run_data_analysis instead of trying to reason through rows in chat context.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildSummary(query: string, roleLabel: string, result: CompanyKnowledgeSearchResult) {
   if (result.candidateFiles.length === 0) {
     return `No matches found for "${query}" in ${result.scopeDescription}.`;
@@ -57,6 +77,11 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     const selectedCandidate = result.candidateFiles.find((candidate) =>
       result.selectedFiles.includes(candidate.file),
     );
+
+    if (selectedCandidate?.preview.kind === "csv") {
+      return buildSelectedCsvSummary(query, roleLabel, result);
+    }
+
     const citations = selectedCandidate?.matches.length
       ? selectedCandidate.matches
           .slice(0, 4)

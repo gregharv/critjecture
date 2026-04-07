@@ -27,7 +27,7 @@ import {
   users,
 } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
-import { buildTextChunks, decodeUtf8Text, extractPdfText } from "@/lib/knowledge-ingestion";
+import { buildTextChunks, decodeTextBuffer, extractPdfText } from "@/lib/knowledge-ingestion";
 import {
   KNOWLEDGE_ARCHIVE_MAX_BYTES,
   KNOWLEDGE_IMPORT_MAX_FILE_COUNT,
@@ -1156,7 +1156,7 @@ async function extractTextForImportedFile(input: {
     return extractPdfText(input.absoluteFilePathForPdf, KNOWLEDGE_UPLOAD_MAX_BYTES);
   }
 
-  return decodeUtf8Text(input.buffer);
+  return decodeTextBuffer(input.buffer);
 }
 
 async function upsertDocumentRecord(input: {
