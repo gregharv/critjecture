@@ -901,7 +901,7 @@ export async function validateCsvAnalysisCode(
 
   if (parseHintMessages.length > 0) {
     throw new SandboxValidationError(
-      `CSV preflight detected non-default formatting. Read a small file sample before full analysis and configure pl.scan_csv accordingly. ${parseHintMessages.join(" | ")}`,
+      `CSV preflight detected non-default formatting. Configure pl.scan_csv using these detected settings. ${parseHintMessages.join(" | ")}`,
     );
   }
 

@@ -39,4 +39,12 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("do not present computed values as final facts");
     expect(prompt).toContain("only provide numeric conclusions from successful tool output");
   });
+
+  it("prefers sandbox preflight hints over manual CSV sniffing in Python", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("rely on sandbox preflight diagnostics");
+    expect(prompt).toContain("Do not add manual delimiter/line-ending sniffing code in Python");
+    expect(prompt).not.toContain("inspect a small sample");
+  });
 });
