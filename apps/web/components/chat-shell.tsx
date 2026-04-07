@@ -50,8 +50,8 @@ import {
   DEFAULT_CHAT_THINKING_LEVEL,
   getSessionModelId,
 } from "@/lib/chat-models";
-import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
-import { getRoleLabel, type UserRole } from "@/lib/roles";
+import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
+import type { UserRole } from "@/lib/roles";
 
 type ChatShellState = {
   error: string | null;
@@ -136,8 +136,8 @@ type ConversationBootstrapState = {
 };
 
 const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
-const DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES = 256 * 1024;
-const DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS = 20_000;
+const DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES = 512 * 1024;
+const DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS = 50_000;
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
   return typeof value === "object" && value !== null && "role" in value && value.role === "user";
@@ -687,46 +687,6 @@ async function buildGraphReviewImageContent(
   }
 }
 
-function getSystemPrompt(role: UserRole) {
-  const roleLabel = getRoleLabel(role);
-  const scopeRule =
-    canRoleAccessKnowledgeScope(role, "admin")
-      ? "You may search all files inside the current organization's company_data when needed."
-      : "You may search only public files inside the current organization's company_data/public. Never imply access to admin-only data.";
-
-  return [
-    "You are a concise, reliable assistant for a property management workflow prototype.",
-    `Current user role: ${roleLabel}.`,
-    "Use the search_company_knowledge tool first whenever the user asks about company files, schedules, profits, ledgers, notices, or any internal records.",
-    "Search with short keywords, filenames, or years such as payout, contractor, 2026, or contractors_new.csv.",
-    "If the question is about a CSV-backed business calculation, use search_company_knowledge only to identify the right file, then use run_data_analysis with the staged inputFiles. Do not try to compute the answer from CSV rows shown in chat context.",
-    "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
-    "If the user explicitly asks for grounded web citations, use brave_grounding.",
-    "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
-    "For routine technical sandbox failures (CSV encoding, delimiter, line endings, schema parsing, dtype casting), do not ask the user for permission to continue. Instead, adjust the code and retry run_data_analysis automatically.",
-    "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
-    "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",
-    "After generate_visual_graph returns, inspect the tool result image before finalizing your response. If readability, labels, or chart choice are weak, run generate_visual_graph one more time with improved plotting code; limit this self-revision to one extra pass.",
-    "For most CSV-backed charts, prefer a single generate_visual_graph call with inputFiles and complete matplotlib code that reads inputs/<same-relative-path> with Polars and saves outputs/chart.png.",
-    "Use run_data_analysis before generate_visual_graph only when you first need a non-visual computed answer, schema inspection, or reusable chart-ready JSON. If you do that, print exactly one JSON object via json.dumps(...). Use either {\"chart\":{\"type\":\"bar\",\"x\":[...],\"y\":[...],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for one series or {\"chart\":{\"type\":\"line\",\"series\":[{\"name\":\"Queue A\",\"x\":[...],\"y\":[...]}],\"title\":\"...\",\"xLabel\":\"...\",\"yLabel\":\"...\"}} for multiple colored series.",
-    "Use the generate_document tool whenever the user asks for a PDF, notice, letter, or downloadable document. Use reportlab, save exactly one PDF file inside outputs/notice.pdf, and print a short summary.",
-    "When you use run_data_analysis on company files, pass those relative paths in inputFiles. Each file will be staged into the sandbox at inputs/<same-relative-path>.",
-    "When you use generate_document on company files, pass those same relative paths in inputFiles.",
-    "The search tool may return auto-selected files or trigger a planner-level multi-select picker after the assistant finishes gathering candidates. If selection is pending, do not call any Python sandbox tool yet. Wait for the user to confirm the picker first.",
-    "When you use any Python sandbox tool, write complete Python 3.13 code and print the final answer to stdout. If run_data_analysis output would be too large, save one structured file at outputs/result.csv, outputs/result.json, or outputs/result.txt and print a short summary.",
-    "Never rely on a trailing expression like `mean, median`; use print(...).",
-    "If you need to return multiple analytical values or prepare chart data, prefer printing a single JSON object so the UI can render it clearly.",
-    "For any staged CSV input, use Polars only. You must use pl.scan_csv(...) and a final .collect(). Never use pandas, pd.read_csv(...), or pl.read_csv(...).",
-    "Before full CSV analysis, inspect a small sample (first line + first few KB) to confirm delimiter and line endings. If needed, set pl.scan_csv options such as separator=';' or eol_char='\\r' before computing aggregates.",
-    "Polars cheat sheet: use DataFrame.group_by(...), not groupby(...). Use df.sort('column', descending=True), not reverse=True or 'desc'. Use exact CSV headers in pl.col(...), for example ledger_year instead of inventing year. Convert plot columns with series.to_list() before passing them to matplotlib.",
-    "matplotlib is available for PNG charts. Convert chart columns to plain Python lists before plotting.",
-    "reportlab is available for PDFs. For a simple notice, use reportlab.pdfgen.canvas.Canvas with outputs/notice.pdf.",
-    "Never claim that you cannot execute Python. You can execute Python through the available tool.",
-    scopeRule,
-    "Only ask a follow-up confirmation before retrying if the user explicitly asked to stop, or if retries would change the business question/scope rather than just fixing technical parsing/runtime issues.",
-    "If the tool returns no matches, say you could not find that information in the current access scope.",
-  ].join(" ");
-}
 
 function generateClientId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -1551,14 +1511,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const sandboxToolParameters = Type.Object({
           code: Type.String({
             description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. If the output is too large for stdout, save one structured file to outputs/result.csv, outputs/result.json, or outputs/result.txt and print a short summary. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
+                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a short summary. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
             Type.Array(
               Type.String({
                 description:
-                  "A company_data-relative file path for the current organization discovered via search_company_knowledge, such as admin/contractors_new.csv.",
+                  "A company_data-relative file path for the current organization discovered via search_company_knowledge, such as admin/quarterly_report_2026.csv.",
                 minLength: 1,
               }),
             ),
@@ -1591,7 +1551,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             Type.Array(
               Type.String({
                 description:
-                  "Optional company_data-relative paths to stage for plotting code, such as admin/contractors_new.csv. These are ignored when analysisResultId is used.",
+                  "Optional company_data-relative paths to stage for plotting code, such as admin/quarterly_report_2026.csv. These are ignored when analysisResultId is used.",
                 minLength: 1,
               }),
             ),
@@ -1698,7 +1658,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           parameters: Type.Object({
             query: Type.String({
               description:
-                "A short keyword, filename, or year such as profit, payout, contractor, contractors.csv, or 2026.",
+                "A short keyword, filename, or year such as revenue, operations, quarterly_report.csv, or 2026.",
               minLength: 1,
             }),
           }),
@@ -2028,7 +1988,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "run_data_analysis",
           label: "Run Data Analysis",
           description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. If stdout would be too large, you may save one structured file to outputs/result.csv, outputs/result.json, or outputs/result.txt. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
+            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a compact summary. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
           parameters: sandboxToolParameters,
           route: "/api/data-analysis/run",
           attachDataAnalysisTextOutput: true,
@@ -2084,7 +2044,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
         agent = new Agent({
           initialState: {
-            systemPrompt: getSystemPrompt(role),
+            systemPrompt: buildChatSystemPrompt(role),
             model:
               initialConversation.initialSessionData?.model ??
               getModel("openai", DEFAULT_CHAT_MODEL_ID),

@@ -255,8 +255,10 @@ print(json.dumps({
     };
 
     expect(parsed.question).toBe(QUESTION);
-    expect(parsed.top_products_by_region.length).toBeGreaterThan(0);
     expect(parsed.top_products_by_region.every((row) => row.top_products.length > 0)).toBe(true);
+
+    const regions = parsed.top_products_by_region.map((row) => row.Region).sort();
+    expect(regions).toEqual(["Central", "East", "West"]);
 
     const west = parsed.top_products_by_region.find((row) => row.Region === "West");
     expect(west?.top_products[0]).toBe("Product Beta");

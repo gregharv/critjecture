@@ -27,7 +27,7 @@ export function jsonError(
   );
 }
 
-const SANDBOX_SUMMARY_MAX_CHARS = 4000;
+const SANDBOX_SUMMARY_MAX_CHARS = 12000;
 
 export function truncateSandboxText(value: string) {
   const trimmed = value.trim();
