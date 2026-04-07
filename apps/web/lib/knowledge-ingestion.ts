@@ -9,7 +9,11 @@ const execFileAsync = promisify(execFile);
 
 const CHUNK_SIZE = 1_500;
 const CHUNK_OVERLAP = 200;
-const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+const UTF8_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+const FALLBACK_TEXT_DECODERS = [
+  new TextDecoder("windows-1252"),
+  new TextDecoder("iso-8859-1"),
+] as const;
 
 export type TextChunkRecord = {
   chunkIndex: number;
@@ -65,12 +69,24 @@ export function buildTextChunks(text: string) {
   return chunks;
 }
 
-export function decodeUtf8Text(buffer: Buffer) {
+export function decodeTextBuffer(buffer: Buffer) {
   try {
-    return normalizeTextContent(TEXT_DECODER.decode(buffer));
+    return normalizeTextContent(UTF8_TEXT_DECODER.decode(buffer));
   } catch {
-    throw new Error("Text uploads must be valid UTF-8.");
+    for (const decoder of FALLBACK_TEXT_DECODERS) {
+      try {
+        return normalizeTextContent(decoder.decode(buffer));
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error("Text uploads must be valid UTF-8 or Windows-1252.");
   }
+}
+
+export function decodeUtf8Text(buffer: Buffer) {
+  return decodeTextBuffer(buffer);
 }
 
 export async function extractPdfText(absolutePath: string, maxBytes: number) {

@@ -4,7 +4,6 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID, createHash } from "node:crypto";
 import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { TextDecoder } from "node:util";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
@@ -14,6 +13,7 @@ import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAppDatabase } from "@/lib/app-db";
 import { documents, documentChunks, users } from "@/lib/app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
+import { decodeTextBuffer } from "@/lib/knowledge-ingestion";
 import {
   isKnowledgeAccessScope,
   KNOWLEDGE_UPLOAD_ACCEPT,
@@ -28,8 +28,6 @@ const execFileAsync = promisify(execFile);
 const MAX_UPLOAD_BYTES = KNOWLEDGE_UPLOAD_MAX_BYTES;
 const CHUNK_SIZE = 1_500;
 const CHUNK_OVERLAP = 200;
-
-const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const ALLOWED_UPLOAD_TYPES = {
   ".csv": {
@@ -178,14 +176,6 @@ function buildTextChunks(text: string) {
   return chunks;
 }
 
-async function decodeUtf8Text(buffer: Buffer) {
-  try {
-    return normalizeTextContent(TEXT_DECODER.decode(buffer));
-  } catch {
-    throw new Error("Text uploads must be valid UTF-8.");
-  }
-}
-
 async function extractPdfText(absolutePath: string) {
   try {
     const { stdout } = await execFileAsync(
@@ -220,7 +210,7 @@ async function extractTextForUpload(
     return extractPdfText(absolutePath);
   }
 
-  return decodeUtf8Text(buffer);
+  return decodeTextBuffer(buffer);
 }
 
 async function writeUploadAtomically(absolutePath: string, buffer: Buffer) {
