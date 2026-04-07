@@ -24,6 +24,9 @@ import type { UserRole } from "@/lib/roles";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MAX_MATCHES = 6;
+const SEARCH_RESULT_MAX_TEXT_CHARS = 240;
+const SEARCH_RESULT_MAX_COLUMNS = 48;
+const SEARCH_RESULT_MAX_COLUMN_CHARS = 80;
 const STOPWORDS = new Set([
   "a",
   "an",
@@ -144,6 +147,27 @@ function isCommandNotFoundError(caughtError: unknown) {
   );
 }
 
+function isStdoutMaxBufferError(caughtError: unknown) {
+  if (typeof caughtError !== "object" || caughtError === null) {
+    return false;
+  }
+
+  const code = "code" in caughtError ? caughtError.code : undefined;
+  const message = "message" in caughtError ? String(caughtError.message ?? "") : "";
+
+  return code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || message.includes("maxBuffer");
+}
+
+function truncateMatchText(text: string) {
+  const trimmed = text.trim().replaceAll("\r", " ");
+
+  if (trimmed.length <= SEARCH_RESULT_MAX_TEXT_CHARS) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, SEARCH_RESULT_MAX_TEXT_CHARS).trimEnd()}…`;
+}
+
 async function runFallbackSearch(
   pattern: string,
   companyDataRoot: string,
@@ -169,24 +193,28 @@ async function runFallbackSearch(
 
     try {
       for await (const line of lineReader) {
-        lineNumber += 1;
+        const logicalLines = line.split(/\r/);
 
-        if (!line.trim()) {
-          continue;
-        }
+        for (const logicalLine of logicalLines) {
+          lineNumber += 1;
 
-        if (!line.toLowerCase().includes(loweredPattern)) {
-          continue;
-        }
+          if (!logicalLine.trim()) {
+            continue;
+          }
 
-        matches.push({
-          file: relativeFile,
-          line: lineNumber,
-          text: line.trim(),
-        });
+          if (!logicalLine.toLowerCase().includes(loweredPattern)) {
+            continue;
+          }
 
-        if (matches.length >= maxMatches) {
-          return matches;
+          matches.push({
+            file: relativeFile,
+            line: lineNumber,
+            text: truncateMatchText(logicalLine),
+          });
+
+          if (matches.length >= maxMatches) {
+            return matches;
+          }
         }
       }
     } catch {
@@ -213,6 +241,9 @@ async function runRipgrepSearch(
     "never",
     "--fixed-strings",
     "--ignore-case",
+    "--max-columns",
+    String(SEARCH_RESULT_MAX_TEXT_CHARS),
+    "--max-columns-preview",
     "--max-count",
     String(maxMatches),
     pattern,
@@ -249,7 +280,7 @@ async function runRipgrepSearch(
         return {
           file: path.relative(companyDataRoot, absoluteFile),
           line: Number(lineNumber),
-          text: text.trim(),
+          text: truncateMatchText(text),
         } satisfies CompanyKnowledgeMatch;
       })
       .filter((match): match is CompanyKnowledgeMatch => match !== null);
@@ -265,7 +296,7 @@ async function runRipgrepSearch(
       return [];
     }
 
-    if (isCommandNotFoundError(caughtError)) {
+    if (isCommandNotFoundError(caughtError) || isStdoutMaxBufferError(caughtError)) {
       return runFallbackSearch(pattern, companyDataRoot, searchedDirectory, maxMatches);
     }
 
@@ -306,11 +337,19 @@ async function readPreviewLines(absolutePath: string, maxLines: number) {
 
   try {
     for await (const line of lineReader) {
-      if (!line.trim()) {
-        continue;
-      }
+      const logicalLines = line.split(/\r/);
 
-      lines.push(line.trim());
+      for (const logicalLine of logicalLines) {
+        if (!logicalLine.trim()) {
+          continue;
+        }
+
+        lines.push(logicalLine.trim());
+
+        if (lines.length >= maxLines) {
+          break;
+        }
+      }
 
       if (lines.length >= maxLines) {
         break;
@@ -325,7 +364,20 @@ async function readPreviewLines(absolutePath: string, maxLines: number) {
 }
 
 function splitCsvRow(row: string) {
-  return row.split(",").map((cell) => cell.trim());
+  const firstLogicalLine = row.split(/\r\n|\n|\r/, 1)[0] ?? "";
+  const cells = firstLogicalLine
+    .split(",")
+    .map((cell) => {
+      const trimmed = cell.trim();
+
+      if (trimmed.length <= SEARCH_RESULT_MAX_COLUMN_CHARS) {
+        return trimmed;
+      }
+
+      return `${trimmed.slice(0, SEARCH_RESULT_MAX_COLUMN_CHARS).trimEnd()}…`;
+    });
+
+  return cells.slice(0, SEARCH_RESULT_MAX_COLUMNS);
 }
 
 async function buildPreview(

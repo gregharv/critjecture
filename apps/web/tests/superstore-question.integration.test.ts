@@ -39,7 +39,8 @@ function isSandboxPermissionFailure(error: SandboxExecutionError) {
   return (
     text.includes("operation not permitted") ||
     text.includes("creating new namespace failed") ||
-    text.includes("permission denied")
+    text.includes("permission denied") ||
+    text.includes("command failed: /usr/bin/bwrap")
   );
 }
 
