@@ -19,6 +19,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
+import { countCsvDelimiters, splitCsvRecord } from "@/lib/csv-utils";
 import { getHostedOrganizationSlug } from "@/lib/hosted-deployment";
 import type { UserRole } from "@/lib/roles";
 import {
@@ -775,7 +776,7 @@ function detectCsvLineEndingStyle(sample: Buffer): CsvLineEndingStyle {
 function detectCsvDelimiter(headerLine: string): CsvDelimiter {
   const counts = CSV_DELIMITER_CANDIDATES.map((candidate) => ({
     candidate,
-    count: headerLine.split(candidate).length - 1,
+    count: countCsvDelimiters(headerLine, candidate),
   }));
   const best = counts.sort((left, right) => right.count - left.count)[0];
 
@@ -783,8 +784,7 @@ function detectCsvDelimiter(headerLine: string): CsvDelimiter {
 }
 
 function splitCsvHeaderColumns(headerLine: string, delimiter: CsvDelimiter = ",") {
-  return headerLine
-    .split(delimiter)
+  return splitCsvRecord(headerLine, delimiter)
     .map((column) => column.trim())
     .filter(Boolean);
 }

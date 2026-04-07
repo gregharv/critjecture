@@ -8,6 +8,7 @@ import { and, eq, gt, lte } from "drizzle-orm";
 import { getAppDatabase } from "@/lib/app-db";
 import { analysisResults } from "@/lib/app-schema";
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
+import { splitCsvRecord } from "@/lib/csv-utils";
 import type { UserRole } from "@/lib/roles";
 
 const ANALYSIS_RESULT_TTL_MS = 60 * 60 * 1000;
@@ -238,8 +239,7 @@ function parseCsvSchemasJson(value: string): CsvSchemaSummary[] {
 }
 
 function splitCsvHeaderColumns(headerLine: string) {
-  return headerLine
-    .split(",")
+  return splitCsvRecord(headerLine, ",")
     .map((column) => column.trim())
     .filter(Boolean);
 }

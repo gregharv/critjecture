@@ -14,6 +14,7 @@ import { getAppDatabase } from "@/lib/app-db";
 import { documentChunks, documents } from "@/lib/app-schema";
 import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { splitCsvRecord } from "@/lib/csv-utils";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 import { isRipgrepAvailable } from "@/lib/runtime-toolchain";
 import type {
@@ -829,18 +830,15 @@ function addManifestMatches(
 }
 
 function splitCsvRow(row: string) {
-  const firstLogicalLine = row.split(/\r\n|\n|\r/, 1)[0] ?? "";
-  const cells = firstLogicalLine
-    .split(",")
-    .map((cell) => {
-      const trimmed = cell.trim();
+  const cells = splitCsvRecord(row, ",").map((cell) => {
+    const trimmed = cell.trim();
 
-      if (trimmed.length <= SEARCH_RESULT_MAX_COLUMN_CHARS) {
-        return trimmed;
-      }
+    if (trimmed.length <= SEARCH_RESULT_MAX_COLUMN_CHARS) {
+      return trimmed;
+    }
 
-      return `${trimmed.slice(0, SEARCH_RESULT_MAX_COLUMN_CHARS).trimEnd()}…`;
-    });
+    return `${trimmed.slice(0, SEARCH_RESULT_MAX_COLUMN_CHARS).trimEnd()}…`;
+  });
 
   return cells.slice(0, SEARCH_RESULT_MAX_COLUMNS);
 }

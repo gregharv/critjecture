@@ -105,4 +105,49 @@ describe("company knowledge search query expansion", () => {
     );
     expect(result.queryDiagnostics.manifestFileCount).toBeGreaterThan(0);
   });
+
+  it("parses CSV preview columns and rows with quoted commas and quotes", async () => {
+    const user = await getAuthenticatedUserByEmail("owner@example.com");
+
+    expect(user).not.toBeNull();
+
+    const companyDataAdminRoot = path.join(
+      storageRoot,
+      "organizations",
+      user!.organizationSlug,
+      "company_data",
+      "admin",
+    );
+    await mkdir(companyDataAdminRoot, { recursive: true });
+    await writeFile(
+      path.join(companyDataAdminRoot, "quoted-preview.csv"),
+      [
+        'Region,"Product, Name","Memo ""quoted"""',
+        'West,"Desk, Platinum","He said ""hello"""',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await searchCompanyKnowledge(
+      "desk",
+      user!.organizationId,
+      user!.organizationSlug,
+      user!.role,
+    );
+
+    const preview = result.candidateFiles.find((candidate) => candidate.file === "admin/quoted-preview.csv")
+      ?.preview;
+
+    expect(preview?.kind).toBe("csv");
+    expect(preview?.kind === "csv" ? preview.columns : []).toEqual([
+      "Region",
+      "Product, Name",
+      'Memo "quoted"',
+    ]);
+    expect(preview?.kind === "csv" ? preview.rows[0] : []).toEqual([
+      "West",
+      "Desk, Platinum",
+      'He said "hello"',
+    ]);
+  });
 });

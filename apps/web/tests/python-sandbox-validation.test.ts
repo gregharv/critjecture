@@ -168,6 +168,28 @@ describe("python sandbox CSV validation", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("detects semicolon separators even when quoted headers contain commas", async () => {
+    const env = await createTestAppEnvironment();
+    cleanup = env.cleanup;
+    const workspaceDir = path.join(env.rootDir, "workspace");
+    const stagedFiles = await createCsvFixture(
+      workspaceDir,
+      '"contractor, legal";payout\n"Acme, Inc.";1200\n',
+    );
+
+    await expect(
+      validateCsvAnalysisCode(
+        [
+          "import polars as pl",
+          "frame = pl.scan_csv('inputs/admin/contractors_2026.csv').collect()",
+          "print(frame)",
+        ].join("\n"),
+        stagedFiles,
+        workspaceDir,
+      ),
+    ).rejects.toThrow("set separator=';' in pl.scan_csv(...)");
+  });
+
   it("accepts valid lazy Polars CSV analysis", async () => {
     const env = await createTestAppEnvironment();
     cleanup = env.cleanup;

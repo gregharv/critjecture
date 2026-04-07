@@ -110,6 +110,36 @@ describe("analysis-results integration", () => {
     ]);
   });
 
+  it("builds CSV schemas correctly when headers contain quoted commas and quotes", async () => {
+    const owner = await getAuthenticatedUserByEmail("owner@example.com");
+
+    expect(owner).not.toBeNull();
+
+    const uploaded = await uploadKnowledgeFile({
+      file: new File([
+        'Region,"Product, Name","Memo ""quoted"""\nWest,"Desk, Platinum","He said ""hello"""\n',
+      ], "quoted-columns.csv", { type: "text/csv" }),
+      requestedScope: "public",
+      user: owner!,
+    });
+
+    expect(uploaded.ingestionStatus).toBe("ready");
+
+    const csvSchemas = await buildCsvSchemas({
+      inputFiles: [uploaded.sourcePath],
+      organizationId: owner!.organizationId,
+      organizationSlug: owner!.organizationSlug,
+      role: owner!.role,
+    });
+
+    expect(csvSchemas).toEqual([
+      {
+        columns: ["Region", "Product, Name", 'Memo "quoted"'],
+        file: uploaded.sourcePath,
+      },
+    ]);
+  });
+
   it("rejects lookups when org, user, or turn do not match", async () => {
     const owner = await getAuthenticatedUserByEmail("owner@example.com");
     const intern = await getAuthenticatedUserByEmail("intern@example.com");
