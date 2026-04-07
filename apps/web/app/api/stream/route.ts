@@ -3,6 +3,7 @@ import { getModel, stream } from "@mariozechner/pi-ai";
 import { getSessionUser } from "@/lib/auth-state";
 import {
   DEFAULT_CHAT_MODEL_ID,
+  getSessionModelId,
   OPENAI_MODEL_IDS,
   type OpenAiModelId,
 } from "@/lib/chat-models";
@@ -27,6 +28,7 @@ type ProxyRequestBody = {
     systemPrompt?: string;
     tools?: unknown[];
   };
+  model?: unknown;
   options?: {
     temperature?: number;
     maxTokens?: number;
@@ -190,7 +192,8 @@ export async function POST(request: Request) {
   }
 
   const context = body.context;
-  const requestedModelId = process.env.OPENAI_MODEL ?? DEFAULT_CHAT_MODEL_ID;
+  const requestedModelId =
+    getSessionModelId(body.model) ?? process.env.OPENAI_MODEL ?? DEFAULT_CHAT_MODEL_ID;
 
   if (!isOpenAiModelId(requestedModelId)) {
     return finalizeObservedRequest(observed, {

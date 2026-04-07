@@ -45,6 +45,7 @@ import type {
 } from "@/lib/sandbox-tool-types";
 import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
 import {
+  DATA_ANALYSIS_CHAT_MODEL_ID,
   DEFAULT_CHAT_MODEL_ID,
   DEFAULT_CHAT_THINKING_LEVEL,
   getSessionModelId,
@@ -264,6 +265,68 @@ function getUniqueStrings(values: string[]) {
 
 function getActiveModelId(model: unknown) {
   return getSessionModelId(model) ?? DEFAULT_CHAT_MODEL_ID;
+}
+
+const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+
+function getMostRecentToolResultName(context: unknown) {
+  if (typeof context !== "object" || context === null || !("messages" in context)) {
+    return null;
+  }
+
+  const messages = Array.isArray(context.messages) ? context.messages : [];
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (typeof message !== "object" || message === null || !("role" in message)) {
+      continue;
+    }
+
+    if (message.role !== "toolResult") {
+      continue;
+    }
+
+    const toolName =
+      "toolName" in message && typeof message.toolName === "string"
+        ? message.toolName.trim()
+        : "";
+
+    return toolName || null;
+  }
+
+  return null;
+}
+
+function shouldUseDataAnalysisModel(context: unknown) {
+  const toolName = getMostRecentToolResultName(context);
+
+  return toolName === "search_company_knowledge" || toolName === "run_data_analysis";
+}
+
+function getDataAnalysisReasoning(
+  reasoning: "high" | "low" | "medium" | "minimal" | "xhigh" | undefined,
+  failureStreak: number,
+) {
+  const normalizedReasoning = reasoning ?? "low";
+  const baseIndex = THINKING_LEVELS.indexOf(normalizedReasoning);
+  const lowIndex = THINKING_LEVELS.indexOf("low");
+  const mediumIndex = THINKING_LEVELS.indexOf("medium");
+  const highIndex = THINKING_LEVELS.indexOf("high");
+  const cappedBaseIndex =
+    baseIndex < 0
+      ? lowIndex
+      : Math.min(Math.max(baseIndex, lowIndex), highIndex);
+
+  let targetIndex = cappedBaseIndex;
+
+  if (failureStreak >= 4) {
+    targetIndex = Math.max(targetIndex, highIndex);
+  } else if (failureStreak >= 2) {
+    targetIndex = Math.max(targetIndex, mediumIndex);
+  }
+
+  return THINKING_LEVELS[targetIndex] as "high" | "low" | "medium";
 }
 
 type AskUserOptionInput = AskUserOption | string;
@@ -920,6 +983,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const historyRequestIdRef = useRef(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const messageIndexRef = useRef(0);
+  const runDataAnalysisFailureStreakRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
@@ -1033,6 +1097,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
     setState({ error: null, ready: false });
     setIsStreaming(false);
+    runDataAnalysisFailureStreakRef.current = 0;
 
     if (!browserSessionIdRef.current) {
       browserSessionIdRef.current = generateClientId();
@@ -1999,8 +2064,20 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               }
             }
 
-            return streamProxy(model, context, {
-              ...options,
+            const useDataAnalysisModel = shouldUseDataAnalysisModel(context);
+            const routedModel = useDataAnalysisModel
+              ? getModel("openai", DATA_ANALYSIS_CHAT_MODEL_ID)
+              : model;
+            const effectiveReasoning = useDataAnalysisModel
+              ? getDataAnalysisReasoning(
+                  options?.reasoning,
+                  runDataAnalysisFailureStreakRef.current,
+                )
+              : options?.reasoning;
+
+            return streamProxy(routedModel, context, {
+              ...(options ?? {}),
+              reasoning: effectiveReasoning,
               authToken: "local-dev",
               proxyUrl: "",
             });
@@ -2038,6 +2115,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           return undefined;
         });
         agent.setAfterToolCall(async ({ args, isError, result, toolCall }) => {
+          if (toolCall.name === "run_data_analysis") {
+            runDataAnalysisFailureStreakRef.current = isError
+              ? runDataAnalysisFailureStreakRef.current + 1
+              : 0;
+          }
+
           const turnId = activeTurnIdRef.current;
 
           if (!turnId) {
