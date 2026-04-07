@@ -216,6 +216,39 @@
   line-height: 1.45;
 }
 
+.crit-selection__preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crit-selection__preview-summary {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.crit-selection__preview-summary::-webkit-details-marker {
+  display: none;
+}
+
+.crit-selection__preview-summary::before {
+  content: "▶";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 120ms ease;
+}
+
+.crit-selection__preview[open] > .crit-selection__preview-summary::before {
+  transform: rotate(90deg);
+}
+
 .crit-selection__snippet {
   display: grid;
   gap: 4px;

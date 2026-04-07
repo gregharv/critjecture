@@ -34,35 +34,46 @@ declare module "@mariozechner/pi-agent-core" {
 }
 
 function renderPreview(candidate: FileSelectionCandidate) {
+  const previewLabel =
+    candidate.preview.kind === "csv"
+      ? `Preview — ${candidate.preview.rows.length} row${candidate.preview.rows.length === 1 ? "" : "s"}`
+      : `Preview — ${candidate.preview.lines.length} line${candidate.preview.lines.length === 1 ? "" : "s"}`;
+
   if (candidate.preview.kind === "csv") {
     return html`
-      <div class="crit-selection__table-wrap">
-        <table class="crit-selection__table">
-          <thead>
-            <tr>
-              ${candidate.preview.columns.map(
-                (column) => html`<th>${column}</th>`,
+      <details class="crit-selection__preview">
+        <summary class="crit-selection__preview-summary">${previewLabel}</summary>
+        <div class="crit-selection__table-wrap">
+          <table class="crit-selection__table">
+            <thead>
+              <tr>
+                ${candidate.preview.columns.map(
+                  (column) => html`<th>${column}</th>`,
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              ${candidate.preview.rows.map(
+                (row) => html`
+                  <tr>
+                    ${row.map((cell) => html`<td>${cell}</td>`)}
+                  </tr>
+                `,
               )}
-            </tr>
-          </thead>
-          <tbody>
-            ${candidate.preview.rows.map(
-              (row) => html`
-                <tr>
-                  ${row.map((cell) => html`<td>${cell}</td>`)}
-                </tr>
-              `,
-            )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      </details>
     `;
   }
 
   return html`
-    <div class="crit-selection__snippet">
-      ${candidate.preview.lines.map((line) => html`<div>${line}</div>`)}
-    </div>
+    <details class="crit-selection__preview">
+      <summary class="crit-selection__preview-summary">${previewLabel}</summary>
+      <div class="crit-selection__snippet">
+        ${candidate.preview.lines.map((line) => html`<div>${line}</div>`)}
+      </div>
+    </details>
   `;
 }
 

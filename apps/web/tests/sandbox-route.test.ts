@@ -39,6 +39,12 @@ describe("sandbox-route helpers", () => {
     );
   });
 
+  it("truncates very long sandbox summaries", () => {
+    const longText = "x".repeat(2000);
+
+    expect(buildSandboxSummary(longText, "")).toContain("… [truncated]");
+  });
+
   it("builds generated asset summaries", () => {
     expect(buildGeneratedAssetSummary("Created file.", "document", "outputs/notice.pdf")).toContain(
       "Saved document asset to outputs/notice.pdf.",

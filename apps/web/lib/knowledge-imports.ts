@@ -1244,10 +1244,10 @@ async function replaceDocumentChunks(documentId: string, extractedText: string) 
 
   const indexedAt = Date.now();
 
-  await db.transaction(async (transaction) => {
-    await transaction.delete(documentChunks).where(eq(documentChunks.documentId, documentId));
+  await db.transaction((transaction) => {
+    transaction.delete(documentChunks).where(eq(documentChunks.documentId, documentId)).run();
 
-    await transaction.insert(documentChunks).values(
+    transaction.insert(documentChunks).values(
       chunks.map((chunk) => ({
         chunkIndex: chunk.chunkIndex,
         chunkText: chunk.chunkText,
@@ -1259,9 +1259,9 @@ async function replaceDocumentChunks(documentId: string, extractedText: string) 
         startOffset: chunk.startOffset,
         tokenCount: chunk.tokenCount,
       })),
-    );
+    ).run();
 
-    await transaction
+    transaction
       .update(documents)
       .set({
         ingestionError: null,
@@ -1269,7 +1269,8 @@ async function replaceDocumentChunks(documentId: string, extractedText: string) 
         lastIndexedAt: indexedAt,
         updatedAt: indexedAt,
       })
-      .where(eq(documents.id, documentId));
+      .where(eq(documents.id, documentId))
+      .run();
   });
 }
 

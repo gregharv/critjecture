@@ -27,9 +27,21 @@ export function jsonError(
   );
 }
 
+const SANDBOX_SUMMARY_MAX_CHARS = 1600;
+
+export function truncateSandboxText(value: string) {
+  const trimmed = value.trim();
+
+  if (trimmed.length <= SANDBOX_SUMMARY_MAX_CHARS) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, SANDBOX_SUMMARY_MAX_CHARS).trimEnd()}… [truncated]`;
+}
+
 export function buildSandboxSummary(stdout: string, stderr: string) {
-  const trimmedStdout = stdout.trim();
-  const trimmedStderr = stderr.trim();
+  const trimmedStdout = truncateSandboxText(stdout);
+  const trimmedStderr = truncateSandboxText(stderr);
 
   if (trimmedStdout) {
     return `Sandbox execution completed successfully.\n${trimmedStdout}`;
@@ -47,7 +59,7 @@ export function buildGeneratedAssetSummary(
   assetKind: "chart" | "document",
   relativePath: string,
 ) {
-  const trimmedStdout = stdout.trim();
+  const trimmedStdout = truncateSandboxText(stdout);
 
   if (trimmedStdout) {
     return `Sandbox execution completed successfully.\n${trimmedStdout}\nSaved ${assetKind} asset to ${relativePath}.`;

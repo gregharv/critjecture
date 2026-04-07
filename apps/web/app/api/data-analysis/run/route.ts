@@ -27,6 +27,7 @@ import {
 import {
   buildSandboxSummary,
   parseSandboxRequest,
+  truncateSandboxText,
   type SandboxRequestBody,
 } from "@/lib/sandbox-route";
 
@@ -177,6 +178,8 @@ export async function POST(request: Request) {
       chartReady: Boolean(analysisResult),
       csvSchemas,
       ...result,
+      stderr: truncateSandboxText(result.stderr),
+      stdout: truncateSandboxText(result.stdout),
       summary: summaryLines.join("\n"),
     });
     return finalizeObservedRequest(observed, {

@@ -423,10 +423,10 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
 
     const indexedAt = Date.now();
 
-    await db.transaction(async (transaction) => {
-      await transaction.delete(documentChunks).where(eq(documentChunks.documentId, documentId));
+    await db.transaction((transaction) => {
+      transaction.delete(documentChunks).where(eq(documentChunks.documentId, documentId)).run();
 
-      await transaction.insert(documentChunks).values(
+      transaction.insert(documentChunks).values(
         chunks.map((chunk) => ({
           chunkIndex: chunk.chunkIndex,
           chunkText: chunk.chunkText,
@@ -438,9 +438,9 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
           startOffset: chunk.startOffset,
           tokenCount: chunk.tokenCount,
         })),
-      );
+      ).run();
 
-      await transaction
+      transaction
         .update(documents)
         .set({
           ingestionError: null,
@@ -448,7 +448,8 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
           lastIndexedAt: indexedAt,
           updatedAt: indexedAt,
         })
-        .where(eq(documents.id, documentId));
+        .where(eq(documents.id, documentId))
+        .run();
     });
   } catch (caughtError) {
     const message =
