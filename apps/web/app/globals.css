@@ -2456,6 +2456,10 @@ a {
   }
 }
 
+html:not(.crit-show-error-chats) assistant-message:has(.crit-tool--error-collapsed) {
+  display: none !important;
+}
+
 .crit-tool--error-collapsed {
   display: none !important;
 }

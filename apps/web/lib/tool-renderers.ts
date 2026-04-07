@@ -96,35 +96,50 @@ function renderCollapsedToolError(eyebrow: string, result?: ToolRendererResult) 
   const summary = getToolSummary(result);
   const details = getToolDetails(result);
   const detailsJson = details ? JSON.stringify(details, null, 2) : "";
+  const stdout = formatBlockContent(getStringValue(details, "stdout"));
+  const stderr = formatBlockContent(getStringValue(details, "stderr"));
 
   return {
     content: html`
-      <div class="crit-tool crit-tool--error-collapsed">
-        <details class="crit-tool__disclosure">
-          <summary class="crit-tool__disclosure-summary">
+      <div class="crit-tool crit-tool--error-collapsed crit-tool--error-trace">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
             <span class="crit-tool__error-summary">Error (${eyebrow})</span>
-          </summary>
-
-          <div class="crit-tool__split">
-            ${summary
-              ? html`<section class="crit-tool__section">
-                  <div class="crit-tool__label">Message</div>
-                  <p class="crit-tool__summary">${summary}</p>
-                </section>`
-              : nothing}
-
-            ${detailsJson
-              ? html`<section class="crit-tool__section">
-                  <div class="crit-tool__label">Details</div>
-                  <code-block .code=${detailsJson} language="json"></code-block>
-                </section>`
-              : nothing}
-
-            ${!summary && !detailsJson
-              ? html`<div class="crit-tool__empty">No additional error details were provided.</div>`
-              : nothing}
           </div>
-        </details>
+          <span class="crit-tool__status crit-tool__status--error">Error</span>
+        </div>
+
+        ${summary
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Message</div>
+              <p class="crit-tool__summary">${summary}</p>
+            </section>`
+          : nothing}
+
+        ${!stdout.empty
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">stdout</div>
+              <code-block .code=${stdout.code} language=${stdout.language}></code-block>
+            </section>`
+          : nothing}
+
+        ${!stderr.empty
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">stderr</div>
+              <code-block .code=${stderr.code} language=${stderr.language}></code-block>
+            </section>`
+          : nothing}
+
+        ${detailsJson
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Trace Details</div>
+              <code-block .code=${detailsJson} language="json"></code-block>
+            </section>`
+          : nothing}
+
+        ${!summary && stdout.empty && stderr.empty && !detailsJson
+          ? html`<div class="crit-tool__empty">No additional error details were provided.</div>`
+          : nothing}
       </div>
     `,
     isCustom: false,
