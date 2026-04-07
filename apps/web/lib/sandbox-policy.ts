@@ -48,7 +48,7 @@ export const SANDBOX_CPU_LIMIT_SECONDS = parseIntegerEnv(
 );
 export const SANDBOX_MEMORY_LIMIT_BYTES = parseIntegerEnv(
   "CRITJECTURE_SANDBOX_MEMORY_LIMIT_BYTES",
-  512 * MEBIBYTE,
+  4 * 1024 * MEBIBYTE,
 );
 export const SANDBOX_MAX_PROCESSES = parseIntegerEnv("CRITJECTURE_SANDBOX_MAX_PROCESSES", 64);
 export const SANDBOX_MAX_BUFFER = parseIntegerEnv(
