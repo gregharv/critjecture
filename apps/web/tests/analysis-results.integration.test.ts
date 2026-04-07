@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  buildCsvSchemas,
   cleanupExpiredAnalysisResults,
   getStoredAnalysisResult,
   storeAnalysisResult,
@@ -8,6 +9,7 @@ import {
 import { createChatTurnLog } from "@/lib/audit-log";
 import { getAppDatabase, resetAppDatabaseForTests } from "@/lib/app-db";
 import { analysisResults } from "@/lib/app-schema";
+import { uploadKnowledgeFile } from "@/lib/knowledge-files";
 import { ensureSeedState, getAuthenticatedUserByEmail } from "@/lib/users";
 import { createTestAppEnvironment } from "@/tests/helpers/test-environment";
 import { eq } from "drizzle-orm";
@@ -76,6 +78,36 @@ describe("analysis-results integration", () => {
     expect(reloaded?.chart).toEqual(stored.chart);
     expect(reloaded?.csvSchemas).toEqual(stored.csvSchemas);
     expect(reloaded?.inputFiles).toEqual(["admin/contractors_2026.csv"]);
+  });
+
+  it("builds CSV schemas correctly for carriage-return-only CSV files", async () => {
+    const owner = await getAuthenticatedUserByEmail("owner@example.com");
+
+    expect(owner).not.toBeNull();
+
+    const uploaded = await uploadKnowledgeFile({
+      file: new File([
+        "Region,Product Name,Sales\rWest,Product Beta,250\rEast,Product Desk,300\r",
+      ], "superstore-sales.csv", { type: "text/csv" }),
+      requestedScope: "public",
+      user: owner!,
+    });
+
+    expect(uploaded.ingestionStatus).toBe("ready");
+
+    const csvSchemas = await buildCsvSchemas({
+      inputFiles: [uploaded.sourcePath],
+      organizationId: owner!.organizationId,
+      organizationSlug: owner!.organizationSlug,
+      role: owner!.role,
+    });
+
+    expect(csvSchemas).toEqual([
+      {
+        columns: ["Region", "Product Name", "Sales"],
+        file: uploaded.sourcePath,
+      },
+    ]);
   });
 
   it("rejects lookups when org, user, or turn do not match", async () => {

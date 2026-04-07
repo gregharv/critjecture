@@ -48,6 +48,7 @@ import {
   getSandboxSupervisorHmacSecret,
   getSandboxSupervisorKeyId,
 } from "@/lib/sandbox-supervisor-auth";
+import { normalizeCsvLineEndings } from "@/lib/knowledge-ingestion";
 import {
   getSandboxContainerImage,
   getSandboxExecutionBackend,
@@ -691,7 +692,7 @@ async function readFirstLine(filePath: string) {
   try {
     const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, 0);
 
-    return buffer.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0]?.trim() ?? "";
+    return buffer.toString("utf8", 0, bytesRead).split(/\r\n|\n|\r/, 1)[0]?.trim() ?? "";
   } finally {
     await fileHandle.close();
   }
@@ -810,7 +811,13 @@ async function stageInputFiles(
     const stagedAbsolutePath = path.join(workspaceDir, ...stagedPath.split("/"));
 
     await mkdir(path.dirname(stagedAbsolutePath), { recursive: true });
-    await copyFile(resolvedFile.absolutePath, stagedAbsolutePath);
+
+    if (resolvedFile.relativePath.toLowerCase().endsWith(".csv")) {
+      const sourceBuffer = await readFile(resolvedFile.absolutePath);
+      await writeFile(stagedAbsolutePath, normalizeCsvLineEndings(sourceBuffer));
+    } else {
+      await copyFile(resolvedFile.absolutePath, stagedAbsolutePath);
+    }
 
     stagedFiles.push({
       sourcePath: resolvedFile.relativePath,
@@ -838,8 +845,13 @@ async function collectRemoteInputFiles(
       organizationId,
     );
 
+    const sourceBuffer = await readFile(resolvedFile.absolutePath);
+    const normalizedBuffer = resolvedFile.relativePath.toLowerCase().endsWith(".csv")
+      ? normalizeCsvLineEndings(sourceBuffer)
+      : sourceBuffer;
+
     stagedFiles.push({
-      base64Data: (await readFile(resolvedFile.absolutePath)).toString("base64"),
+      base64Data: normalizedBuffer.toString("base64"),
       relativePath: path.posix.join("inputs", resolvedFile.relativePath),
       sourcePath: resolvedFile.relativePath,
     });

@@ -13,7 +13,7 @@ import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAppDatabase } from "@/lib/app-db";
 import { documents, documentChunks, users } from "@/lib/app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
-import { decodeTextBuffer } from "@/lib/knowledge-ingestion";
+import { decodeTextBuffer, normalizeCsvLineEndings } from "@/lib/knowledge-ingestion";
 import {
   isKnowledgeAccessScope,
   KNOWLEDGE_UPLOAD_ACCEPT,
@@ -383,7 +383,12 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
 
   assertMimeMatchesExtension(file, uploadDestination.extension);
 
-  const fileBuffer = Buffer.from(await file.arrayBuffer());
+  let fileBuffer = Buffer.from(await file.arrayBuffer());
+
+  if (uploadDestination.extension === ".csv") {
+    fileBuffer = normalizeCsvLineEndings(fileBuffer);
+  }
+
   const fileContentSha256 = createHash("sha256").update(fileBuffer).digest("hex");
   const now = Date.now();
   const db = await getAppDatabase();

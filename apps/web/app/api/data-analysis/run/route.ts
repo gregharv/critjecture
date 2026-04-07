@@ -33,12 +33,24 @@ import {
 
 export const runtime = "nodejs";
 
+const MAX_COLUMNS_IN_SCHEMA_SUMMARY = 24;
+
 function buildSchemaSummary(csvSchemas: { columns: string[]; file: string }[]) {
   if (csvSchemas.length === 0) {
     return null;
   }
 
-  return csvSchemas.map((schema) => `${schema.file}: ${schema.columns.join(", ")}`).join(" | ");
+  return csvSchemas
+    .map((schema) => {
+      const previewColumns = schema.columns
+        .slice(0, MAX_COLUMNS_IN_SCHEMA_SUMMARY)
+        .map((column) => (column.length > 80 ? `${column.slice(0, 80)}…` : column));
+      const hiddenCount = Math.max(0, schema.columns.length - previewColumns.length);
+      const suffix = hiddenCount > 0 ? `, … (+${hiddenCount} more)` : "";
+
+      return `${schema.file}: ${previewColumns.join(", ")}${suffix}`;
+    })
+    .join(" | ");
 }
 
 export async function POST(request: Request) {

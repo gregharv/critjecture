@@ -314,6 +314,28 @@ describe("POST /api/data-analysis/run", () => {
     expect(body.summary).toContain("analysisResultId analysis-1");
   });
 
+  it("truncates verbose CSV schema summaries", async () => {
+    mocks.buildCsvSchemas.mockResolvedValue([
+      {
+        columns: Array.from({ length: 40 }, (_, index) => `column_${index + 1}`),
+        file: "public/superstore-sales.csv",
+      },
+    ]);
+
+    const response = await POST(createJsonRequest("http://localhost/api/data-analysis/run", {
+      code: "print('ok')",
+      inputFiles: ["public/superstore-sales.csv"],
+    }));
+    const body = await readJson<{
+      csvSchemas: Array<{ columns: string[]; file: string }>;
+      summary: string;
+    }>(response);
+
+    expect(response.status).toBe(200);
+    expect(body.summary).toContain("… (+16 more)");
+    expect(body.summary).not.toContain("column_40");
+  });
+
   it("returns 400 when chart-ready analysis exceeds persistence limits", async () => {
     mocks.buildCsvSchemas.mockResolvedValue([
       {

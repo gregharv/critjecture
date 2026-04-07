@@ -89,6 +89,25 @@ export function decodeUtf8Text(buffer: Buffer) {
   return decodeTextBuffer(buffer);
 }
 
+export function normalizeCsvLineEndings(buffer: Buffer) {
+  const hasCarriageReturn = buffer.includes(0x0d);
+  const hasLineFeed = buffer.includes(0x0a);
+
+  if (!hasCarriageReturn || hasLineFeed) {
+    return buffer;
+  }
+
+  const normalized = Buffer.from(buffer);
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (normalized[index] === 0x0d) {
+      normalized[index] = 0x0a;
+    }
+  }
+
+  return normalized;
+}
+
 export async function extractPdfText(absolutePath: string, maxBytes: number) {
   try {
     const { stdout } = await execFileAsync(

@@ -27,7 +27,12 @@ import {
   users,
 } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
-import { buildTextChunks, decodeTextBuffer, extractPdfText } from "@/lib/knowledge-ingestion";
+import {
+  buildTextChunks,
+  decodeTextBuffer,
+  extractPdfText,
+  normalizeCsvLineEndings,
+} from "@/lib/knowledge-ingestion";
 import {
   KNOWLEDGE_ARCHIVE_MAX_BYTES,
   KNOWLEDGE_IMPORT_MAX_FILE_COUNT,
@@ -1340,7 +1345,11 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
       id: file.id,
       stage: "extracting",
     });
-    const fileBuffer = await loadImportedFileBuffer(file);
+    let fileBuffer = await loadImportedFileBuffer(file);
+
+    if (extension === ".csv") {
+      fileBuffer = normalizeCsvLineEndings(fileBuffer);
+    }
 
     if (fileBuffer.length <= 0) {
       throw createPermanentImportError("Imported file must not be empty.", "empty_file");

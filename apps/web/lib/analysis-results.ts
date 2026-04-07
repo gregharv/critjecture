@@ -295,7 +295,7 @@ async function readCsvSchemas(input: {
       input.organizationId,
     );
     const headerLine = (await readFile(resolvedFile.absolutePath, "utf8"))
-      .split(/\r?\n/, 1)[0]
+      .split(/\r\n|\n|\r/, 1)[0]
       ?.trim() ?? "";
 
     schemas.push({
