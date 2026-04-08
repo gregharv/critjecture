@@ -34,6 +34,7 @@ This file indexes the project documents that live in the repository root and in 
 - [Hosted Operations](./apps/web/docs/runbooks/hosted-operations.md)
 - [Railway Hosted Deployment](./apps/web/docs/runbooks/railway-hosted-deployment.md)
 - [Railway Demo Deployment](./apps/web/docs/runbooks/railway-demo-deployment.md)
+- [Railway Workspace Credit Top-Up](./apps/web/docs/runbooks/railway-credit-topup.md)
 - [Railway Hosted Sandbox On A Locally Owned Server](./apps/web/docs/runbooks/railway-locally-owned-supervisor.md)
 - [Hosted Restore Drill](./apps/web/docs/runbooks/hosted-restore-drill.md)
 - [Hosted Routine Upgrade](./apps/web/docs/runbooks/hosted-routine-upgrade.md)
