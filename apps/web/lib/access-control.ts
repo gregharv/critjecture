@@ -21,7 +21,10 @@ export type AccessCapability =
   | "governance_manage"
   | "governance_download"
   | "customer_review_docs"
-  | "generated_asset_override";
+  | "generated_asset_override"
+  | "workflow_view"
+  | "workflow_manage"
+  | "workflow_manage_org";
 
 export type AccessSnapshot = {
   capabilities: AccessCapability[];
@@ -31,12 +34,15 @@ export type AccessSnapshot = {
   canManageGovernance: boolean;
   canManageMembers: boolean;
   canManageOrganizationSettings: boolean;
+  canManageOrgWorkflows: boolean;
+  canManageWorkflows: boolean;
   canUseAnswerTools: boolean;
   canViewAuditLogs: boolean;
   canViewCustomerReviewDocs: boolean;
   canViewGovernance: boolean;
   canViewKnowledgeLibrary: boolean;
   canViewOperations: boolean;
+  canViewWorkflows: boolean;
   canWriteKnowledge: boolean;
   membershipStatus: MembershipStatus;
   role: UserRole;
@@ -93,6 +99,8 @@ export function buildAccessSnapshot(
           "governance_view",
           "customer_review_docs",
           "knowledge_write",
+          "workflow_view",
+          "workflow_manage",
         ] as AccessCapability[])
       : []),
     ...(active && role === "owner"
@@ -101,6 +109,7 @@ export function buildAccessSnapshot(
           "governance_manage",
           "governance_download",
           "generated_asset_override",
+          "workflow_manage_org",
         ] as AccessCapability[])
       : []),
   ];
@@ -117,6 +126,8 @@ export function buildAccessSnapshot(
     canManageGovernance: capabilities.includes("governance_manage"),
     canManageMembers: capabilities.includes("member_management"),
     canManageOrganizationSettings: capabilities.includes("organization_settings"),
+    canManageOrgWorkflows: capabilities.includes("workflow_manage_org"),
+    canManageWorkflows: capabilities.includes("workflow_manage"),
     canUseAnswerTools:
       capabilities.includes("chat") &&
       capabilities.includes("search") &&
@@ -126,6 +137,7 @@ export function buildAccessSnapshot(
     canViewGovernance: capabilities.includes("governance_view"),
     canViewKnowledgeLibrary: capabilities.includes("knowledge_view"),
     canViewOperations: capabilities.includes("operations_view"),
+    canViewWorkflows: capabilities.includes("workflow_view"),
     canWriteKnowledge: capabilities.includes("knowledge_write"),
     membershipStatus,
     role,

@@ -11,6 +11,7 @@ This document is the customer-review summary for Critjecture's hosted production
 - SQLite in `WAL` mode plus one persistent storage root is required per cell
 - hosted sandbox execution depends on the dedicated hosted supervisor with signed request auth
 - recovery posture depends on at-least-daily backups, hosted restore-drill evidence, and hosted release-proof evidence
+- scheduled workflow execution remains feature-gated and disabled by default unless operators explicitly enable hosted scheduler flags
 
 ## Onboarding Model
 
@@ -69,6 +70,7 @@ Hosted launch is `no-go` when any of the following are missing or failing:
 - admin/member creation flow after handoff fails
 - upload flow fails
 - sandbox-backed request fails
+- when scheduler is enabled, authenticated `POST /api/internal/workflows/tick` health check fails
 
 ## Remaining Exclusions
 
@@ -76,5 +78,5 @@ This hosted production claim still does not include:
 
 - public SaaS onboarding
 - shared-cell density work
-- async heavy-job infrastructure beyond the current synchronous sandbox envelope
+- async heavy-job infrastructure beyond the current feature-gated workflow scheduler envelope
 - formal attestations or certifications beyond the controls documented in this repo

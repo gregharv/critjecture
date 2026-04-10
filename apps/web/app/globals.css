@@ -470,6 +470,155 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   color: color-mix(in oklab, var(--primary) 64%, var(--foreground) 36%);
 }
 
+.chat-toolbar__status {
+  margin: 0;
+  padding: 0 24px 10px;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.chat-toolbar__status--error {
+  color: color-mix(in oklab, var(--destructive) 72%, white 28%);
+}
+
+.chat-toolbar__status--success {
+  color: color-mix(in oklab, var(--primary) 66%, var(--foreground) 34%);
+}
+
+.workflow-builder-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(3 7 18 / 0.66);
+}
+
+.workflow-builder-modal {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 16px;
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100dvh - 64px));
+  padding: 22px;
+  border: 1px solid var(--shell-panel-border);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent 45%),
+    var(--shell-panel);
+  box-shadow: 0 30px 90px -50px var(--shell-panel-shadow);
+}
+
+.workflow-builder-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-builder-modal__eyebrow {
+  margin: 0 0 6px;
+  color: var(--shell-kicker);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.workflow-builder-modal__title {
+  margin: 0;
+  color: var(--shell-title-ink);
+  font-size: 1.15rem;
+  letter-spacing: -0.03em;
+}
+
+.workflow-builder-modal__body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+}
+
+.workflow-builder-modal__field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.workflow-builder-modal__input,
+.workflow-builder-modal__textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.workflow-builder-modal__input:focus-visible,
+.workflow-builder-modal__textarea:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 64%, white 36%);
+  outline-offset: 1px;
+}
+
+.workflow-builder-modal__textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.workflow-builder-modal__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workflow-builder-modal__summary,
+.workflow-builder-modal__warning {
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent 30%);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+}
+
+.workflow-builder-modal__summary h3,
+.workflow-builder-modal__warning h3 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: var(--foreground);
+}
+
+.workflow-builder-modal__summary ul,
+.workflow-builder-modal__warning ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+.workflow-builder-modal__warning p {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+.workflow-builder-modal__error {
+  margin: 0;
+  color: color-mix(in oklab, var(--destructive) 72%, white 28%);
+  font-size: 0.82rem;
+}
+
+.workflow-builder-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .chat-history-backdrop {
   position: absolute;
   inset: 0;
@@ -1379,6 +1528,10 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
     padding: 0 16px 12px;
   }
 
+  .chat-toolbar__status {
+    padding: 0 16px 10px;
+  }
+
   .chat-toolbar__menu {
     width: 100%;
   }
@@ -1397,6 +1550,19 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
   .chat-history-backdrop {
     padding: 16px;
+  }
+
+  .workflow-builder-backdrop {
+    padding: 16px;
+  }
+
+  .workflow-builder-modal {
+    width: 100%;
+    padding: 16px;
+  }
+
+  .workflow-builder-modal__row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .chat-history-card__title {
@@ -2508,4 +2674,401 @@ html:not(.crit-show-error-chats) assistant-message:has(.crit-tool--error-collaps
 
 .crit-show-error-chats .crit-tool--error-collapsed {
   display: block !important;
+}
+
+.workflows-page {
+  display: grid;
+  gap: 16px;
+}
+
+.workflows-hero,
+.workflows-panel {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklab, var(--border) 56%, transparent 44%);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
+}
+
+.workflows-hero {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.workflows-hero__eyebrow,
+.workflows-panel__eyebrow {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workflows-hero__title {
+  margin: 4px 0 6px;
+  color: var(--shell-title-ink);
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+
+.workflows-hero__copy {
+  margin: 0;
+  color: var(--shell-copy);
+}
+
+.workflows-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+}
+
+.workflows-content {
+  display: grid;
+  gap: 16px;
+}
+
+.workflows-panel--list {
+  align-content: start;
+}
+
+.workflows-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workflows-panel__header h2 {
+  margin: 4px 0 0;
+  color: var(--shell-title-ink);
+  font-size: 1.08rem;
+  letter-spacing: -0.015em;
+}
+
+.workflows-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workflows-button {
+  border: 1px solid color-mix(in oklab, var(--border) 66%, transparent 34%);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+  padding: 8px 12px;
+}
+
+.workflows-button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--card) 78%, transparent 22%);
+}
+
+.workflows-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.workflows-button--primary {
+  border-color: color-mix(in oklab, var(--primary) 55%, transparent 45%);
+  background: color-mix(in oklab, var(--primary) 22%, transparent 78%);
+}
+
+.workflow-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid color-mix(in oklab, var(--border) 65%, transparent 35%);
+}
+
+.workflow-chip.is-ready {
+  background: color-mix(in oklab, #1f8f5f 24%, transparent 76%);
+}
+
+.workflow-chip.is-failed {
+  background: color-mix(in oklab, #b83a3a 24%, transparent 76%);
+}
+
+.workflow-chip.is-pending {
+  background: color-mix(in oklab, #2563eb 22%, transparent 78%);
+}
+
+.workflow-chip.is-warn {
+  background: color-mix(in oklab, #a16a11 24%, transparent 76%);
+}
+
+.workflows-banner {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 58%, transparent 42%);
+}
+
+.workflows-banner--error {
+  background: color-mix(in oklab, #b83a3a 18%, transparent 82%);
+  color: color-mix(in oklab, var(--foreground) 90%, white 10%);
+}
+
+.workflows-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflows-list-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid color-mix(in oklab, var(--border) 58%, transparent 42%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--background) 84%, transparent 16%);
+  color: inherit;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.workflows-list-item:hover {
+  border-color: color-mix(in oklab, var(--primary) 42%, var(--border) 58%);
+}
+
+.workflows-list-item.is-active {
+  border-color: color-mix(in oklab, var(--primary) 58%, var(--border) 42%);
+  background: color-mix(in oklab, var(--primary) 10%, var(--background) 90%);
+}
+
+.workflows-list-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflows-list-item__meta {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.workflows-list-item__description {
+  margin: 0;
+  color: var(--shell-copy);
+  font-size: 0.86rem;
+}
+
+.workflows-empty {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in oklab, var(--border) 56%, transparent 44%);
+  color: var(--muted-foreground);
+}
+
+.workflows-facts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.workflows-facts > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 55%, transparent 45%);
+  background: color-mix(in oklab, var(--background) 85%, transparent 15%);
+}
+
+.workflows-facts span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.workflows-facts strong {
+  color: var(--shell-title-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.workflows-current-version {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--shell-copy);
+  font-size: 0.85rem;
+}
+
+.workflows-table-wrap {
+  overflow-x: auto;
+}
+
+.workflows-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.workflows-table th,
+.workflows-table td {
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 58%, transparent 42%);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.84rem;
+}
+
+.workflows-table th {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workflows-table code {
+  font-size: 0.75rem;
+  color: var(--shell-copy);
+}
+
+.workflows-table--compact {
+  min-width: 620px;
+}
+
+.workflows-run-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.workflows-change-summary {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 55%, transparent 45%);
+  background: color-mix(in oklab, var(--background) 86%, transparent 14%);
+}
+
+.workflows-change-summary h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.workflows-change-summary p,
+.workflows-change-summary ul {
+  margin: 0;
+  color: var(--shell-copy);
+  font-size: 0.84rem;
+}
+
+.workflows-change-summary ul {
+  margin-top: 8px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.workflows-run-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.workflows-run-sections section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 55%, transparent 45%);
+  background: color-mix(in oklab, var(--background) 86%, transparent 14%);
+}
+
+.workflows-run-sections h3 {
+  margin: 0;
+  font-size: 0.94rem;
+  color: var(--shell-title-ink);
+}
+
+.workflows-run-sections p {
+  margin: 0;
+  color: var(--shell-copy);
+  font-size: 0.84rem;
+}
+
+.workflows-inline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.workflows-inline-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 52%, transparent 48%);
+  background: color-mix(in oklab, var(--card) 82%, transparent 18%);
+  font-size: 0.82rem;
+  color: var(--shell-copy);
+}
+
+.workflows-inline-list strong {
+  color: var(--shell-title-ink);
+}
+
+.workflows-inline-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.workflows-inline-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 52%, transparent 48%);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 84%, transparent 16%);
+}
+
+.workflows-inline-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflows-inline-card ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--shell-copy);
+  font-size: 0.82rem;
+  display: grid;
+  gap: 4px;
+}
+
+.workflows-inline-card p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--shell-copy);
+}
+
+@media (max-width: 1120px) {
+  .workflows-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .workflows-grid {
+    grid-template-columns: 1fr;
+  }
 }

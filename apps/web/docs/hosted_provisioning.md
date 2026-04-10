@@ -59,7 +59,8 @@ Provisioning guardrails:
 - hosted operators should run `pnpm restore:drill:hosted -- --environment <label> --operator "<name>"` before first cutover and at least quarterly per hosted environment
 - hosted operators should run `pnpm release:proof:hosted` before first cutover and for later production-changing hosted upgrades
 - hosted operators should treat the current recovery objectives as `24`-hour RPO and `2`-hour RTO
-- hosted operators should manage `AUTH_SECRET`, model credentials, and sandbox supervisor credentials through platform secret storage
+- hosted operators should manage `AUTH_SECRET`, model credentials, sandbox supervisor credentials, and `CRITJECTURE_WORKFLOW_TICK_SECRET` (if scheduler is enabled) through platform secret storage
 - hosted operators should record named ownership for the hosted app cell, the hosted supervisor deployment, credential rotation, alerts, and incident response
 - destructive customer data purges should be preceded by a recent full export
+- if hosted scheduler is enabled, operators should configure platform cron to call `POST /api/internal/workflows/tick` every minute with internal-token auth and keep `CRITJECTURE_ENABLE_HOSTED_SCHEDULED_WORKFLOWS=true`
 - customer review for hosted mode should include `security_review.md`, `deployment.md`, `hosted_launch.md`, and the hosted runbooks that match the operating model

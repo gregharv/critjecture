@@ -8,6 +8,7 @@
 - hosted deployment binding for `CRITJECTURE_HOSTED_ORGANIZATION_SLUG`
 - hosted persistence metadata shows `sqlite`, `WAL`, and `single_writer_dedicated_hosted_cell`
 - persistent SQLite storage and tenant storage mounts
+- when scheduler is enabled, authenticated `POST /api/internal/workflows/tick` succeeds and no sustained scheduler backpressure is reported
 - latest backup is less than `24` hours old
 
 ## Required Incident Data
@@ -43,6 +44,7 @@
 - one successful health check
 - one successful sandbox-backed request
 - no growing stale-run or import-stale alerts
+- no sustained growth in `queued`/stale `running` workflow runs when scheduler is enabled
 - hosted deployment and sandbox supervisor both report the same bound organization slug
 - latest hosted restore drill record is present for the environment and not older than one quarter
 - latest hosted release-proof record is present for the last production-changing launch or upgrade

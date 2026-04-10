@@ -6,6 +6,7 @@ export type OperationsRouteGroup =
   | "sandbox"
   | "knowledge_upload"
   | "knowledge_import"
+  | "workflow"
   | "governance"
   | "admin"
   | "health";
@@ -15,7 +16,8 @@ export type RateLimitedRouteGroup =
   | "search"
   | "sandbox"
   | "knowledge_upload"
-  | "knowledge_import";
+  | "knowledge_import"
+  | "workflow";
 
 export type RouteRateLimitPolicy = {
   maxRequests: number;
@@ -55,6 +57,9 @@ export type OperationsPoliciesSnapshot = {
     rateLimits: RouteRateLimitPolicy[];
   };
   search: {
+    rateLimits: RouteRateLimitPolicy[];
+  };
+  workflow: {
     rateLimits: RouteRateLimitPolicy[];
   };
 };
@@ -123,6 +128,13 @@ export const OPERATIONS_ROUTE_POLICIES: Record<RateLimitedRouteGroup, RouteGroup
       { maxRequests: 40, scope: "organization", windowMs: HOUR },
     ],
   },
+  workflow: {
+    group: "workflow",
+    rateLimits: [
+      { maxRequests: 20, scope: "user", windowMs: MINUTE },
+      { maxRequests: 80, scope: "organization", windowMs: MINUTE },
+    ],
+  },
 };
 
 export function getRouteGroupPolicy(group: RateLimitedRouteGroup) {
@@ -158,6 +170,9 @@ export function getOperationsPoliciesSnapshot(): OperationsPoliciesSnapshot {
     },
     search: {
       rateLimits: OPERATIONS_ROUTE_POLICIES.search.rateLimits,
+    },
+    workflow: {
+      rateLimits: OPERATIONS_ROUTE_POLICIES.workflow.rateLimits,
     },
   };
 }

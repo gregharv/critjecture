@@ -52,6 +52,7 @@ import {
   logStructuredEvent,
 } from "@/lib/observability";
 import { resolveOperationalAlert, upsertOperationalAlert } from "@/lib/operations";
+import { enqueueWorkflowWaitingRunRecheck } from "@/lib/workflow-resume";
 import { listZipEntries, extractZipEntry } from "@/lib/zip-reader";
 
 const ALLOWED_UPLOAD_TYPES = {
@@ -1432,6 +1433,9 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
     });
     await updateJobAggregates(file.jobId);
     await updateImportAlerts(file.organizationId);
+    enqueueWorkflowWaitingRunRecheck({
+      organizationId: file.organizationId,
+    });
     logStructuredEvent("knowledge-import.file_processed", {
       knowledgeImportJobId: file.jobId,
       organizationId: file.organizationId,

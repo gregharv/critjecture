@@ -936,3 +936,338 @@ export const governanceJobs = sqliteTable(
     index("governance_jobs_trigger_request_id_idx").on(table.triggerRequestId),
   ],
 );
+
+export const workflows = sqliteTable(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    description: text("description"),
+    visibility: text("visibility", {
+      enum: ["private", "organization"],
+    })
+      .notNull()
+      .default("organization"),
+    status: text("status", {
+      enum: ["draft", "active", "paused", "archived"],
+    })
+      .notNull()
+      .default("draft"),
+    currentVersionId: text("current_version_id"),
+    lastEnabledByUserId: text("last_enabled_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    nextRunAt: integer("next_run_at"),
+    lastRunAt: integer("last_run_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflows_visibility_check",
+      sql`${table.visibility} in ('private', 'organization')`,
+    ),
+    check(
+      "workflows_status_check",
+      sql`${table.status} in ('draft', 'active', 'paused', 'archived')`,
+    ),
+    index("workflows_org_status_next_run_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.nextRunAt,
+    ),
+    index("workflows_org_updated_at_idx").on(table.organizationId, table.updatedAt),
+    index("workflows_current_version_id_idx").on(table.currentVersionId),
+    index("workflows_created_by_user_id_idx").on(table.createdByUserId),
+  ],
+);
+
+export const workflowVersions = sqliteTable(
+  "workflow_versions",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    inputContractJson: text("input_contract_json").notNull(),
+    inputBindingsJson: text("input_bindings_json").notNull(),
+    recipeJson: text("recipe_json").notNull(),
+    thresholdsJson: text("thresholds_json").notNull(),
+    outputsJson: text("outputs_json").notNull(),
+    deliveryJson: text("delivery_json").notNull(),
+    scheduleJson: text("schedule_json").notNull(),
+    executionIdentityJson: text("execution_identity_json").notNull(),
+    provenanceJson: text("provenance_json").notNull().default("{}"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_versions_workflow_id_version_number_idx").on(
+      table.workflowId,
+      table.versionNumber,
+    ),
+    index("workflow_versions_workflow_id_created_at_idx").on(table.workflowId, table.createdAt),
+    index("workflow_versions_org_created_at_idx").on(table.organizationId, table.createdAt),
+    index("workflow_versions_created_by_user_id_idx").on(table.createdByUserId),
+  ],
+);
+
+export const workflowRuns = sqliteTable(
+  "workflow_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    workflowVersionId: text("workflow_version_id")
+      .notNull()
+      .references(() => workflowVersions.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    triggerKind: text("trigger_kind", {
+      enum: ["manual", "scheduled", "resume"],
+    }).notNull(),
+    triggerWindowKey: text("trigger_window_key"),
+    status: text("status", {
+      enum: [
+        "queued",
+        "running",
+        "waiting_for_input",
+        "blocked_validation",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
+    })
+      .notNull()
+      .default("queued"),
+    runAsUserId: text("run_as_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    runAsRole: text("run_as_role", { enum: ["member", "admin", "owner"] }).notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    failureReason: text("failure_reason"),
+    requestId: text("request_id"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflow_runs_trigger_kind_check",
+      sql`${table.triggerKind} in ('manual', 'scheduled', 'resume')`,
+    ),
+    check(
+      "workflow_runs_status_check",
+      sql`${table.status} in ('queued', 'running', 'waiting_for_input', 'blocked_validation', 'completed', 'failed', 'cancelled')`,
+    ),
+    check(
+      "workflow_runs_run_as_role_check",
+      sql`${table.runAsRole} in ('member', 'admin', 'owner')`,
+    ),
+    check(
+      "workflow_runs_trigger_window_key_check",
+      sql`(
+        (${table.triggerKind} = 'scheduled' and ${table.triggerWindowKey} is not null)
+        or (${table.triggerKind} in ('manual', 'resume') and ${table.triggerWindowKey} is null)
+      )`,
+    ),
+    uniqueIndex("workflow_runs_scheduled_window_unique_idx").on(
+      table.workflowId,
+      table.triggerKind,
+      table.triggerWindowKey,
+    ),
+    index("workflow_runs_workflow_id_created_at_idx").on(table.workflowId, table.createdAt),
+    index("workflow_runs_org_status_created_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.createdAt,
+    ),
+    index("workflow_runs_status_updated_at_idx").on(table.status, table.updatedAt),
+    index("workflow_runs_trigger_window_key_idx").on(table.triggerWindowKey),
+    index("workflow_runs_run_as_user_id_created_at_idx").on(table.runAsUserId, table.createdAt),
+    index("workflow_runs_request_id_idx").on(table.requestId),
+  ],
+);
+
+export const workflowRunSteps = sqliteTable(
+  "workflow_run_steps",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    stepKey: text("step_key").notNull(),
+    stepOrder: integer("step_order").notNull(),
+    toolName: text("tool_name").notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "failed", "skipped"],
+    })
+      .notNull()
+      .default("queued"),
+    inputJson: text("input_json").notNull().default("{}"),
+    outputJson: text("output_json").notNull().default("{}"),
+    sandboxRunId: text("sandbox_run_id").references(() => sandboxRuns.runId, {
+      onDelete: "set null",
+    }),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflow_run_steps_status_check",
+      sql`${table.status} in ('queued', 'running', 'completed', 'failed', 'skipped')`,
+    ),
+    uniqueIndex("workflow_run_steps_run_id_step_key_idx").on(table.runId, table.stepKey),
+    index("workflow_run_steps_run_id_step_order_idx").on(table.runId, table.stepOrder),
+    index("workflow_run_steps_run_id_status_idx").on(table.runId, table.status),
+    index("workflow_run_steps_sandbox_run_id_idx").on(table.sandboxRunId),
+  ],
+);
+
+export const workflowRunInputChecks = sqliteTable(
+  "workflow_run_input_checks",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    inputKey: text("input_key").notNull(),
+    status: text("status", { enum: ["pass", "warn", "fail"] }).notNull(),
+    reportJson: text("report_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflow_run_input_checks_status_check",
+      sql`${table.status} in ('pass', 'warn', 'fail')`,
+    ),
+    uniqueIndex("workflow_run_input_checks_run_id_input_key_idx").on(table.runId, table.inputKey),
+    index("workflow_run_input_checks_run_id_status_idx").on(table.runId, table.status),
+    index("workflow_run_input_checks_org_created_at_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const workflowInputRequests = sqliteTable(
+  "workflow_input_requests",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    status: text("status", {
+      enum: ["open", "sent", "fulfilled", "expired", "cancelled"],
+    })
+      .notNull()
+      .default("open"),
+    requestedInputKeysJson: text("requested_input_keys_json").notNull().default("[]"),
+    notificationChannelsJson: text("notification_channels_json").notNull().default("[]"),
+    message: text("message"),
+    sentAt: integer("sent_at"),
+    fulfilledAt: integer("fulfilled_at"),
+    expiresAt: integer("expires_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflow_input_requests_status_check",
+      sql`${table.status} in ('open', 'sent', 'fulfilled', 'expired', 'cancelled')`,
+    ),
+    index("workflow_input_requests_run_id_status_updated_at_idx").on(
+      table.runId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("workflow_input_requests_org_status_updated_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("workflow_input_requests_status_expires_at_idx").on(table.status, table.expiresAt),
+  ],
+);
+
+export const workflowDeliveries = sqliteTable(
+  "workflow_deliveries",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    channelKind: text("channel_kind", {
+      enum: ["webhook", "chart_pack", "ranked_table", "generated_document", "email"],
+    }).notNull(),
+    status: text("status", { enum: ["pending", "sent", "failed"] })
+      .notNull()
+      .default("pending"),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    payloadSnapshotJson: text("payload_snapshot_json").notNull(),
+    artifactManifestJson: text("artifact_manifest_json").notNull().default("[]"),
+    responseStatusCode: integer("response_status_code"),
+    responseBody: text("response_body"),
+    errorMessage: text("error_message"),
+    nextRetryAt: integer("next_retry_at"),
+    sentAt: integer("sent_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "workflow_deliveries_channel_kind_check",
+      sql`${table.channelKind} in ('webhook', 'chart_pack', 'ranked_table', 'generated_document', 'email')`,
+    ),
+    check(
+      "workflow_deliveries_status_check",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    uniqueIndex("workflow_deliveries_run_id_channel_attempt_idx").on(
+      table.runId,
+      table.channelKind,
+      table.attemptNumber,
+    ),
+    index("workflow_deliveries_run_id_created_at_idx").on(table.runId, table.createdAt),
+    index("workflow_deliveries_org_status_next_retry_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.nextRetryAt,
+    ),
+    index("workflow_deliveries_status_created_at_idx").on(table.status, table.createdAt),
+  ],
+);

@@ -15,6 +15,8 @@ pnpm backup:verify -- --deployment-mode hosted
 
 - confirm the environment still serves exactly one bound organization
 - confirm the hosted supervisor remains healthy and bound to the same organization slug
+- if scheduled workflows are enabled, confirm scheduler flags and `CRITJECTURE_WORKFLOW_TICK_SECRET` are still set correctly for the environment
+- if scheduled workflows are enabled, confirm platform cron still calls `POST /api/internal/workflows/tick` every minute
 - confirm the latest backup is less than `24` hours old
 - confirm the latest hosted restore-drill record for the environment is present and acceptable for the change window
 
@@ -56,3 +58,4 @@ pnpm release:proof:hosted -- \
 - one upload succeeds
 - one sandbox-backed request succeeds
 - no new hosted binding, supervisor-auth, stale-run, or import-stall alerts remain open
+- if scheduler is enabled, one authenticated `POST /api/internal/workflows/tick` call succeeds with `202` and expected summary payload

@@ -79,7 +79,7 @@ Current characteristics:
 - hosted remains SQLite-backed per dedicated customer cell in the current supported envelope
 - one writable web-app instance is supported per hosted cell
 - active-active multi-writer replicas sharing one SQLite file are out of scope
-- current hosted support assumes the existing synchronous request model only, not queue-backed heavy analytics expansion
+- scheduled workflow execution is available only through feature-gated worker/tick controls and remains disabled by default in hosted
 - hosted inherits the current sandbox envelope of `1` active run per user and `4` globally
 - tenant creation is operator-managed through the provisioning script, not tenant self-service
 - the web app must be configured with `CRITJECTURE_SANDBOX_SUPERVISOR_URL`
@@ -87,6 +87,32 @@ Current characteristics:
 - the sandbox path depends on a dedicated remote supervisor service and should be treated as a required production dependency
 - customer isolation is enforced by dedicated app/SQLite/storage/supervisor placement plus authenticated organization scoping inside that dedicated cell
 - customer onboarding remains operator-managed; after first owner handoff, additional users are created through the existing admin settings surface
+
+## Workflow Scheduler (Feature-Gated)
+
+Scheduled workflows are disabled by default and require explicit flags.
+
+Required flags:
+
+- `CRITJECTURE_ENABLE_WORKFLOW_SCHEDULER=true`
+- `CRITJECTURE_ENABLE_HOSTED_SCHEDULED_WORKFLOWS=true` (hosted only)
+- `CRITJECTURE_WORKFLOW_TICK_SECRET=<shared-secret>`
+
+Recommended operational trigger:
+
+- platform cron calling `POST /api/internal/workflows/tick` every minute
+- authenticate with bearer token (or `x-critjecture-internal-token`) matching `CRITJECTURE_WORKFLOW_TICK_SECRET`
+
+Optional worker tuning:
+
+- `CRITJECTURE_WORKFLOW_SCHEDULER_MAX_WORKFLOWS_PER_TICK`
+- `CRITJECTURE_WORKFLOW_SCHEDULER_MAX_WINDOWS_PER_WORKFLOW`
+- `CRITJECTURE_WORKFLOW_SCHEDULER_QUEUE_BACKPRESSURE_LIMIT`
+- `CRITJECTURE_WORKFLOW_WORKER_MAX_CONCURRENCY`
+- `CRITJECTURE_WORKFLOW_WORKER_MAX_RUNS_PER_SWEEP`
+- `CRITJECTURE_WORKFLOW_WORKER_STALE_RUN_MINUTES`
+
+Operator rollback path is documented in `apps/web/docs/runbooks/workflow-worker-reconciliation.md`.
 
 ## Shared Runtime Requirements
 
@@ -198,6 +224,7 @@ Runbooks:
 - `apps/web/docs/runbooks/single-org-restore-drill.md`
 - `apps/web/docs/runbooks/single-org-first-deployment.md`
 - `apps/web/docs/runbooks/single-org-routine-upgrade.md`
+- `apps/web/docs/runbooks/workflow-worker-reconciliation.md`
 
 ## Hosted-Only Future Work
 
@@ -205,7 +232,7 @@ These items are outside the current hosted production-ready claim rather than bl
 
 - further hosted density or cell-sharing work beyond the current dedicated-customer-cell boundary
 - public self-service onboarding or tenant self-service organization creation
-- async heavy-job infrastructure beyond the current synchronous sandbox envelope
+- async heavy-job infrastructure beyond the current feature-gated workflow scheduler envelope
 
 ## Retention
 

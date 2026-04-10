@@ -2,6 +2,8 @@
 
 Critjecture is an auditable AI data analyst for business teams. It combines a chat interface, role-aware access to company files, sandboxed analysis tooling, generated outputs, and an admin-visible audit trail of what the system did to produce each answer.
 
+The current product is chat-first, but the intended direction is broader than a one-off assistant. Critjecture is meant to evolve into a governed workflow product where successful analyses can be saved, validated, rerun on schedule, and delivered as repeatable business outputs under the same audit and policy controls.
+
 The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` and a separate `uv`-managed Python environment in `packages/python-sandbox`.
 
 ## What It Does
@@ -12,8 +14,22 @@ The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` a
 - Generates PNG charts and PDF documents when those outputs help explain or operationalize an answer.
 - Persists short-lived chart-ready analysis results in SQLite so `analysisResultId` survives normal app restarts within its TTL.
 - Lets authenticated users upload approved files into organization-owned knowledge storage.
+- Lets admin/owner users save typed workflows, run them manually, and review full run/delivery history.
 - Records chat turns, tool calls, accessed files, and assistant responses in an audit dashboard.
 - Provides scripted backup creation, clean restore tooling, and repeatable recovery drills for persisted runtime state.
+
+## Product Direction
+
+Critjecture should not stop at "ask a question, get an answer." The intended product direction is:
+
+- interactive business-data exploration through governed chat
+- conversion of successful analyses into typed workflow definitions
+- validation of required inputs before each run
+- repeat execution of approved workflows, including scheduled runs
+- standardized output delivery such as summaries, documents, charts, and webhooks
+- durable operational history showing what ran, what data was used, what changed, and what was sent
+
+That direction keeps the current chat experience, but moves the product toward repeatable business processes rather than a thin wrapper around a general model.
 
 ## Commercial Packaging Direction
 
@@ -25,8 +41,9 @@ Critjecture is intended to be packaged as a flat-rate team product rather than a
 - admin visibility into per-user usage
 - admin controls to restrict heavy users when needed
 - predictable monthly spend through a hard cap once included credits are exhausted
+- over time, workflow-centric limits such as active saved workflows and scheduled-run capacity
 
-This is aimed at teams that want governed business-data answers for the whole company without deciding which employees get a paid seat.
+This is aimed at teams that want governed business-data answers and repeatable analytics workflows for the whole company without deciding which employees get a paid seat.
 
 ## Core Experience
 
@@ -45,6 +62,8 @@ The chat UI uses `@mariozechner/pi-web-ui` with Critjecture-owned styling. The a
 - `generate_document`
 
 When a question depends on company data, the assistant searches the current organization's approved files for the authenticated role, stages selected files into the sandbox, and then uses analysis or generation tools as needed.
+
+This chat surface remains the primary entry point. Privileged users can now turn successful chat-driven analyses into governed workflows, run them manually from `/workflows`, and optionally enable scheduled execution behind explicit feature flags.
 
 ### Roles
 
@@ -146,7 +165,7 @@ Current hosted support keeps that same engine inside a narrower dedicated-cell e
 - one writable web-app instance per hosted cell
 - SQLite in `WAL` mode plus one persistent storage root per cell
 - no active-active multi-writer replicas sharing one SQLite file
-- current synchronous request model only
+- workflow scheduling is feature-gated and disabled by default in hosted unless explicitly enabled
 - target hosted recovery objectives of `24`-hour RPO and `2`-hour RTO
 
 Hosted production changes also retain two operator-side evidence artifacts:
@@ -227,6 +246,7 @@ Open:
 
 - `http://localhost:3000/login`
 - `http://localhost:3000/chat`
+- `http://localhost:3000/workflows`
 - `http://localhost:3000/knowledge`
 - `http://localhost:3000/admin/operations`
 - `http://localhost:3000/admin/logs`
@@ -266,6 +286,16 @@ CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN=replace-me
 CRITJECTURE_SANDBOX_SUPERVISOR_TIMEOUT_MS=15000
 CRITJECTURE_CHAT_MAX_TOKENS_HARD_CAP=4000
 CRITJECTURE_ALERT_WEBHOOK_URL=
+CRITJECTURE_ENABLE_WORKFLOW_ASYNC_MANUAL_RUNS=false
+CRITJECTURE_ENABLE_WORKFLOW_SCHEDULER=false
+CRITJECTURE_ENABLE_HOSTED_SCHEDULED_WORKFLOWS=false
+CRITJECTURE_WORKFLOW_TICK_SECRET=
+CRITJECTURE_WORKFLOW_SCHEDULER_MAX_WORKFLOWS_PER_TICK=25
+CRITJECTURE_WORKFLOW_SCHEDULER_MAX_WINDOWS_PER_WORKFLOW=24
+CRITJECTURE_WORKFLOW_SCHEDULER_QUEUE_BACKPRESSURE_LIMIT=100
+CRITJECTURE_WORKFLOW_WORKER_MAX_CONCURRENCY=2
+CRITJECTURE_WORKFLOW_WORKER_MAX_RUNS_PER_SWEEP=20
+CRITJECTURE_WORKFLOW_WORKER_STALE_RUN_MINUTES=45
 ```
 
 For local development without the dedicated supervisor service, set `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=local_supervisor` and keep the existing `bubblewrap` / `prlimit` host dependencies installed.
@@ -290,7 +320,7 @@ Current default credit consumption:
 
 When the workspace or member cap is exhausted, credit-consuming routes return `429` with `status: "credit_exhausted"` plus remaining-balance and reset metadata. Operational rate limits still apply separately and continue to return `status: "rate_limited"`.
 
-Operator incident runbooks live under `apps/web/docs/runbooks/` and cover sandbox, storage, migration, backup/restore, hosted, and on-prem response paths.
+Operator incident runbooks live under `apps/web/docs/runbooks/` and cover sandbox, storage, migration, backup/restore, hosted, on-prem response paths, and workflow worker/scheduler reconciliation.
 
 If `OPENAI_API_KEY` is missing, the chat API returns a clear configuration error.
 If `CRITJECTURE_DEPLOYMENT_MODE=single_org`, missing bootstrap user env vars mean first login will not succeed because no bootstrap accounts will be available.
@@ -305,6 +335,7 @@ The supported current deployment envelope is SQLite-backed in both current modes
 - `single_org` production should point at the repo-owned supervisor in `packages/sandbox-supervisor`
 - `hosted` for Railway-style centrally operated deployments with a dedicated sandbox supervisor service
   - one organization/customer per hosted deployment cell
+  - scheduled workflow execution remains feature-gated and disabled by default unless hosted scheduler flags are explicitly enabled
 
 `single_org` is now production-ready for controlled customer-managed deployments inside one clear support envelope:
 

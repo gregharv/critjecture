@@ -21,6 +21,7 @@ Use this checklist for every production-changing `single_org` upgrade after init
 - the most recent successful restore-drill JSON for the same environment
 - documented secret, TLS, encryption, alerting, and incident ownership
 - any sandbox supervisor or sandbox image change that must ship with the release
+- if scheduled workflows are enabled, the scheduler/tick secret and cron settings that must ship with the release
 
 ## Upgrade Gate
 
@@ -54,4 +55,5 @@ pnpm release:proof:single-org -- \
 - `/api/health` is healthy or understood
 - owner can load `/admin/operations`
 - one upload or sandbox task succeeds
+- if scheduler is enabled, one authenticated `POST /api/internal/workflows/tick` call succeeds with `202` and expected summary payload
 - the generated release-proof records are retained with the environment history

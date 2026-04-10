@@ -7,6 +7,7 @@ This file indexes the project documents that live in the repository root and in 
 - [Critjecture](README.md)
 - [Critjecture Product Overview](overview.md)
 - [Future Steps](steps.md)
+- [Workflow Step 0 Technical Spec](workflow_step0_technical_spec.md)
 - [Steps Completed](steps_completed.md)
 - [Search Tool TODO](todo.md)
 - [Compliance Controls](compliance_controls.md)
@@ -45,3 +46,4 @@ This file indexes the project documents that live in the repository root and in 
 - [Single-Org Restore Drill](./apps/web/docs/runbooks/single-org-restore-drill.md)
 - [Single-Org Routine Upgrade](./apps/web/docs/runbooks/single-org-routine-upgrade.md)
 - [Storage Failures](./apps/web/docs/runbooks/storage-failures.md)
+- [Workflow Worker Reconciliation And Rollback](./apps/web/docs/runbooks/workflow-worker-reconciliation.md)

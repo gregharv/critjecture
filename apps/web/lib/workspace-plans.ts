@@ -22,6 +22,11 @@ export type CommercialUsageClass = (typeof COMMERCIAL_USAGE_CLASSES)[number];
 
 export type WorkspacePlanRateCard = Record<CommercialUsageClass, number>;
 
+export type WorkspaceWorkflowEntitlements = {
+  maxActiveWorkflows: number;
+  maxScheduledRunsPerWindow: number;
+};
+
 export type WorkspacePlanWindow = {
   endAt: number;
   startAt: number;
@@ -35,6 +40,7 @@ export type WorkspacePlanSummary = {
   planCode: string;
   planName: string;
   rateCard: WorkspacePlanRateCard;
+  workflowEntitlements: WorkspaceWorkflowEntitlements;
 };
 
 export type WorkspacePlanUsageSnapshot = {
@@ -60,6 +66,10 @@ export const DEFAULT_WORKSPACE_PLAN: WorkspacePlanSummary = {
     chat: 1,
     document: 12,
     import: 2,
+  },
+  workflowEntitlements: {
+    maxActiveWorkflows: 12,
+    maxScheduledRunsPerWindow: 40,
   },
 };
 
@@ -89,38 +99,85 @@ export function getWorkspaceBillingWindow(anchorAt: number, timestamp: number): 
   };
 }
 
-function parseRateCardJson(value: string): WorkspacePlanRateCard {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeNonNegativeInteger(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : fallback;
+}
+
+function parseRateCardValue(value: unknown): WorkspacePlanRateCard {
+  const source = isRecord(value) ? value : {};
+
+  return {
+    analysis: normalizeNonNegativeInteger(source.analysis, DEFAULT_WORKSPACE_PLAN.rateCard.analysis),
+    chart: normalizeNonNegativeInteger(source.chart, DEFAULT_WORKSPACE_PLAN.rateCard.chart),
+    chat: normalizeNonNegativeInteger(source.chat, DEFAULT_WORKSPACE_PLAN.rateCard.chat),
+    document: normalizeNonNegativeInteger(source.document, DEFAULT_WORKSPACE_PLAN.rateCard.document),
+    import: normalizeNonNegativeInteger(source.import, DEFAULT_WORKSPACE_PLAN.rateCard.import),
+  };
+}
+
+function parseWorkflowEntitlementsValue(value: unknown): WorkspaceWorkflowEntitlements {
+  const source = isRecord(value) ? value : {};
+
+  return {
+    maxActiveWorkflows: Math.max(
+      1,
+      normalizeNonNegativeInteger(
+        source.max_active_workflows,
+        normalizeNonNegativeInteger(
+          source.maxActiveWorkflows,
+          DEFAULT_WORKSPACE_PLAN.workflowEntitlements.maxActiveWorkflows,
+        ),
+      ),
+    ),
+    maxScheduledRunsPerWindow: Math.max(
+      1,
+      normalizeNonNegativeInteger(
+        source.max_scheduled_runs_per_window,
+        normalizeNonNegativeInteger(
+          source.maxScheduledRunsPerWindow,
+          DEFAULT_WORKSPACE_PLAN.workflowEntitlements.maxScheduledRunsPerWindow,
+        ),
+      ),
+    ),
+  };
+}
+
+function parsePlanConfigJson(value: string) {
   try {
-    const parsed = JSON.parse(value) as Partial<Record<CommercialUsageClass, unknown>>;
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!isRecord(parsed)) {
+      return {
+        rateCard: { ...DEFAULT_WORKSPACE_PLAN.rateCard },
+        workflowEntitlements: { ...DEFAULT_WORKSPACE_PLAN.workflowEntitlements },
+      };
+    }
+
+    const rateCardSource =
+      isRecord(parsed.rate_card) || isRecord(parsed.rateCard) ? parsed.rate_card ?? parsed.rateCard : parsed;
+    const workflowSource = parsed.workflow ?? parsed.workflow_entitlements;
 
     return {
-      analysis:
-        typeof parsed.analysis === "number" && Number.isFinite(parsed.analysis)
-          ? Math.max(0, Math.trunc(parsed.analysis))
-          : DEFAULT_WORKSPACE_PLAN.rateCard.analysis,
-      chart:
-        typeof parsed.chart === "number" && Number.isFinite(parsed.chart)
-          ? Math.max(0, Math.trunc(parsed.chart))
-          : DEFAULT_WORKSPACE_PLAN.rateCard.chart,
-      chat:
-        typeof parsed.chat === "number" && Number.isFinite(parsed.chat)
-          ? Math.max(0, Math.trunc(parsed.chat))
-          : DEFAULT_WORKSPACE_PLAN.rateCard.chat,
-      document:
-        typeof parsed.document === "number" && Number.isFinite(parsed.document)
-          ? Math.max(0, Math.trunc(parsed.document))
-          : DEFAULT_WORKSPACE_PLAN.rateCard.document,
-      import:
-        typeof parsed.import === "number" && Number.isFinite(parsed.import)
-          ? Math.max(0, Math.trunc(parsed.import))
-          : DEFAULT_WORKSPACE_PLAN.rateCard.import,
+      rateCard: parseRateCardValue(rateCardSource),
+      workflowEntitlements: parseWorkflowEntitlementsValue(workflowSource),
     };
   } catch {
-    return { ...DEFAULT_WORKSPACE_PLAN.rateCard };
+    return {
+      rateCard: { ...DEFAULT_WORKSPACE_PLAN.rateCard },
+      workflowEntitlements: { ...DEFAULT_WORKSPACE_PLAN.workflowEntitlements },
+    };
   }
 }
 
 function mapWorkspacePlanRow(row: typeof workspacePlans.$inferSelect): WorkspacePlanSummary {
+  const parsedConfig = parsePlanConfigJson(row.rateCardJson);
+
   return {
     currentWindowEndAt: row.currentWindowEndAt,
     currentWindowStartAt: row.currentWindowStartAt,
@@ -128,7 +185,8 @@ function mapWorkspacePlanRow(row: typeof workspacePlans.$inferSelect): Workspace
     monthlyIncludedCredits: row.monthlyIncludedCredits,
     planCode: row.planCode,
     planName: row.planName,
-    rateCard: parseRateCardJson(row.rateCardJson),
+    rateCard: parsedConfig.rateCard,
+    workflowEntitlements: parsedConfig.workflowEntitlements,
   };
 }
 
@@ -189,7 +247,10 @@ export async function ensureWorkspacePlanForOrganization(input: {
     organizationId: input.organizationId,
     planCode: DEFAULT_WORKSPACE_PLAN.planCode,
     planName: DEFAULT_WORKSPACE_PLAN.planName,
-    rateCardJson: JSON.stringify(DEFAULT_WORKSPACE_PLAN.rateCard),
+    rateCardJson: JSON.stringify({
+      rate_card: DEFAULT_WORKSPACE_PLAN.rateCard,
+      workflow: DEFAULT_WORKSPACE_PLAN.workflowEntitlements,
+    }),
     billingAnchorAt,
     updatedAt: now,
   } satisfies typeof workspacePlans.$inferInsert;
@@ -225,6 +286,12 @@ export async function getWorkspacePlanSummary(organizationId: string) {
   }
 
   return mapWorkspacePlanRow(existing);
+}
+
+export async function getWorkspaceWorkflowEntitlements(organizationId: string) {
+  const summary = await getWorkspacePlanSummary(organizationId);
+
+  return summary.workflowEntitlements;
 }
 
 export async function getWorkspaceCommercialUsageSnapshot(input: {

@@ -607,14 +607,21 @@ export function AdminSettingsPageClient({ access, role }: AdminSettingsPageClien
               <span className="settings-panel__meta">{state.organization?.slug}</span>
             </div>
             {state.workspacePlan ? (
-              <div className="settings-job__header">
-                <strong>
-                  {state.workspacePlan.planName}: {formatCredits(state.workspacePlan.remainingCredits)} credits left
-                </strong>
-                <span className={`settings-status settings-status--${state.workspacePlan.exhausted ? "failed" : "completed"}`}>
-                  resets {formatTimestamp(state.workspacePlan.resetAt)}
-                </span>
-              </div>
+              <>
+                <div className="settings-job__header">
+                  <strong>
+                    {state.workspacePlan.planName}: {formatCredits(state.workspacePlan.remainingCredits)} credits left
+                  </strong>
+                  <span className={`settings-status settings-status--${state.workspacePlan.exhausted ? "failed" : "completed"}`}>
+                    resets {formatTimestamp(state.workspacePlan.resetAt)}
+                  </span>
+                </div>
+                <p className="settings-panel__meta">
+                  Workflow limits: {state.workspacePlan.workflowEntitlements.maxActiveWorkflows} active workflows,
+                  {" "}
+                  {state.workspacePlan.workflowEntitlements.maxScheduledRunsPerWindow} estimated scheduled runs/window.
+                </p>
+              </>
             ) : null}
             <form className="settings-form" onSubmit={handleOrganizationSubmit}>
               <label className="settings-field">

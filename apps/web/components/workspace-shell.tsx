@@ -14,7 +14,7 @@ import { getRoleLabel } from "@/lib/roles";
 import { THEME_COOKIE_NAME, normalizeThemePreference } from "@/lib/theme";
 
 type WorkspaceShellProps = {
-  activePage: "chat" | "knowledge" | "logs" | "operations" | "settings";
+  activePage: "chat" | "knowledge" | "workflows" | "logs" | "operations" | "settings";
   children: ReactNode;
   user: SessionUser;
 };
@@ -32,11 +32,13 @@ export async function WorkspaceShell({
       ? "/chat"
       : activePage === "knowledge"
         ? "/knowledge"
-        : activePage === "logs"
-          ? "/admin/logs"
-          : activePage === "operations"
-            ? "/admin/operations"
-            : "/admin/settings";
+        : activePage === "workflows"
+          ? "/workflows"
+          : activePage === "logs"
+            ? "/admin/logs"
+            : activePage === "operations"
+              ? "/admin/operations"
+              : "/admin/settings";
 
   return (
     <main className="shell-page">
@@ -78,6 +80,14 @@ export async function WorkspaceShell({
                 >
                   Knowledge
                 </Link>
+                {user.access.canViewWorkflows ? (
+                  <Link
+                    className={`shell-nav__link ${activePage === "workflows" ? "is-active" : ""}`}
+                    href="/workflows"
+                  >
+                    Workflows
+                  </Link>
+                ) : null}
                 {user.access.canViewOperations ? (
                   <>
                     <Link

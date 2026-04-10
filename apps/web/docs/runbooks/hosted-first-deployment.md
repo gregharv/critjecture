@@ -19,6 +19,8 @@ pnpm backup:verify -- --deployment-mode hosted
 - confirm `CRITJECTURE_ALERT_WEBHOOK_URL` is configured for the hosted environment
 - confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_KEY_ID`, and `CRITJECTURE_SANDBOX_SUPERVISOR_HMAC_SECRET`
 - confirm the hosted supervisor reports the same bound organization slug as the web app
+- if scheduled workflows are enabled, confirm `CRITJECTURE_ENABLE_WORKFLOW_SCHEDULER=true`, `CRITJECTURE_ENABLE_HOSTED_SCHEDULED_WORKFLOWS=true`, and `CRITJECTURE_WORKFLOW_TICK_SECRET` are set
+- if scheduled workflows are enabled, confirm platform cron calls `POST /api/internal/workflows/tick` every minute with the internal token
 - confirm the latest backup is less than `24` hours old
 - confirm `pdftotext` is installed on the web-app host
 
@@ -84,3 +86,4 @@ pnpm release:proof:hosted -- \
 - one upload succeeds
 - one sandbox-backed request succeeds
 - alert delivery is confirmed for the target environment
+- if scheduler is enabled, one authenticated `POST /api/internal/workflows/tick` call succeeds with `202` and expected summary payload

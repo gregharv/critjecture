@@ -102,6 +102,27 @@ function getFailureActionLabel(failure: RecentFailure) {
     case "governance.jobs.detail":
     case "governance.jobs.download":
       return "run a governance export task";
+    case "workflow.list":
+      return "list workflows";
+    case "workflow.create":
+      return "create a workflow";
+    case "workflow.detail":
+      return "view workflow details";
+    case "workflow.update":
+      return "update a workflow";
+    case "workflow.runs.list":
+      return "list workflow runs";
+    case "workflow.runs.create":
+      return "start a workflow run";
+    case "workflow.runs.detail":
+      return "view workflow run details";
+    case "workflow.from_chat_turn":
+      return "build a workflow draft from chat";
+    case "workflow.internal.process_queue":
+    case "workflow.internal.tick":
+    case "workflow.internal.recheck_waiting":
+    case "workflow.internal.retry_deliveries":
+      return "run an internal workflow worker task";
     default:
       break;
   }
@@ -117,6 +138,8 @@ function getFailureActionLabel(failure: RecentFailure) {
       return "upload knowledge content";
     case "knowledge_import":
       return "process imported knowledge";
+    case "workflow":
+      return "run a workflow request";
     case "governance":
       return "run a governance request";
     case "admin":
@@ -391,6 +414,45 @@ export function OperationsPageClient() {
               </article>
             </div>
             <p>Hard cap: {summary.workspace.hardCapBehavior}. Resets {formatTimestamp(summary.workspace.resetAt)}.</p>
+          </section>
+
+          <section className="operations-panel">
+            <div className="operations-panel__header">
+              <div>
+                <div className="operations-panel__eyebrow">Workflow Runtime</div>
+                <h2>Workflow Activity</h2>
+              </div>
+            </div>
+            <div className="operations-metrics">
+              <article className="operations-metric">
+                <span className="operations-metric__label">Active workflows</span>
+                <strong>
+                  {formatInteger(summary.workflow.activeWorkflowCount)} / {formatInteger(summary.workflow.maxActiveWorkflows)}
+                </strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Scheduled estimate</span>
+                <strong>
+                  {formatInteger(summary.workflow.scheduledRunsPerWindowEstimate)} / {formatInteger(summary.workflow.maxScheduledRunsPerWindow)}
+                </strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Workflow runs</span>
+                <strong>{formatInteger(summary.workflow.runsTotal)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Run failures</span>
+                <strong>{formatInteger(summary.workflow.runsFailed)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Waiting for input</span>
+                <strong>{formatInteger(summary.workflow.runsWaitingForInput)}</strong>
+              </article>
+              <article className="operations-metric">
+                <span className="operations-metric__label">Delivery failures</span>
+                <strong>{formatInteger(summary.workflow.deliveryFailedCount)}</strong>
+              </article>
+            </div>
           </section>
 
           <section className="operations-panel">

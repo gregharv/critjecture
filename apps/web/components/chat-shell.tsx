@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Agent, AgentMessage, SessionData } from "@mariozechner/pi-web-ui";
 
+import {
+  WorkflowBuilderModal,
+  type SaveWorkflowDraftInput,
+} from "@/components/workflow-builder-modal";
 import type {
   CompanyKnowledgeCandidateFile,
   CompanyKnowledgeMatch,
@@ -38,6 +42,10 @@ import type {
   FinishChatTurnResponse,
   ToolCallStatus,
 } from "@/lib/audit-types";
+import type {
+  BuildWorkflowFromChatTurnResponse,
+  WorkflowDraftFromChatTurn,
+} from "@/lib/workflow-builder-types";
 import type {
   DataAnalysisToolResponse,
   GeneratedAssetToolResponse,
@@ -133,6 +141,15 @@ type ConversationBootstrapState = {
   createdAt: string;
   id: string;
   initialSessionData: SessionData | null;
+};
+
+type CreateWorkflowResponse = {
+  workflow?: {
+    workflow?: {
+      id?: string;
+      name?: string;
+    };
+  };
 };
 
 const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
@@ -1003,6 +1020,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const historyRequestIdRef = useRef(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const messageIndexRef = useRef(0);
+  const lastCompletedTurnIdRef = useRef<string | null>(null);
   const runDataAnalysisFailureStreakRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
@@ -1020,6 +1038,15 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     [],
   );
   const [isStreaming, setIsStreaming] = useState(false);
+  const [workflowBuilderOpen, setWorkflowBuilderOpen] = useState(false);
+  const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraftFromChatTurn | null>(
+    null,
+  );
+  const [workflowDraftError, setWorkflowDraftError] = useState<string | null>(null);
+  const [workflowDraftLoading, setWorkflowDraftLoading] = useState(false);
+  const [workflowSaveError, setWorkflowSaveError] = useState<string | null>(null);
+  const [workflowSaveSuccess, setWorkflowSaveSuccess] = useState<string | null>(null);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
   const [{ error, ready }, setState] = useState<ChatShellState>({
     error: null,
     ready: false,
@@ -1043,6 +1070,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
           conversationPersistedRef.current = false;
+          lastCompletedTurnIdRef.current = null;
+          setWorkflowBuilderOpen(false);
+          setWorkflowDraft(null);
+          setWorkflowDraftError(null);
+          setWorkflowSaveError(null);
+          setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
           setConversationBootstrap(draft);
         }
@@ -1079,6 +1112,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         conversationCreatedAtRef.current = bootstrap.createdAt;
         conversationIdRef.current = bootstrap.id;
         conversationPersistedRef.current = true;
+        lastCompletedTurnIdRef.current = null;
+        setWorkflowBuilderOpen(false);
+        setWorkflowDraft(null);
+        setWorkflowDraftError(null);
+        setWorkflowSaveError(null);
+        setWorkflowSaveSuccess(null);
         setActiveConversationTitle(data.conversation.title);
         setConversationBootstrap(bootstrap);
       } catch (caughtError) {
@@ -1092,6 +1131,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
           conversationPersistedRef.current = false;
+          lastCompletedTurnIdRef.current = null;
+          setWorkflowBuilderOpen(false);
+          setWorkflowDraft(null);
+          setWorkflowDraftError(null);
+          setWorkflowSaveError(null);
+          setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
           setConversationBootstrap(draft);
         }
@@ -2261,6 +2306,11 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             }
 
             const turnId = activeTurnIdRef.current;
+
+            if (turnId) {
+              lastCompletedTurnIdRef.current = turnId;
+            }
+
             activeTurnIdRef.current = null;
             messageIndexRef.current = 0;
             plannerSearchesRef.current = [];
@@ -2384,6 +2434,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         saveTimerRef.current = null;
       }
       messageIndexRef.current = 0;
+      lastCompletedTurnIdRef.current = null;
       pendingChatTurnRef.current = null;
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
@@ -2447,6 +2498,127 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     };
   }, [historyQuery, loadConversationHistory]);
 
+  const canSaveAsWorkflow = role === "admin" || role === "owner";
+
+  function handleCloseWorkflowBuilder() {
+    if (workflowSaving) {
+      return;
+    }
+
+    setWorkflowBuilderOpen(false);
+    setWorkflowSaveError(null);
+  }
+
+  async function handleOpenWorkflowBuilder() {
+    if (!canSaveAsWorkflow || isStreaming) {
+      return;
+    }
+
+    setWorkflowDraftLoading(true);
+    setWorkflowDraftError(null);
+    setWorkflowSaveError(null);
+    setWorkflowSaveSuccess(null);
+
+    const turnId = lastCompletedTurnIdRef.current;
+    const conversationId = conversationIdRef.current;
+    const requestBody: Record<string, string> = {};
+
+    if (turnId) {
+      requestBody.turnId = turnId;
+    }
+
+    if (conversationId) {
+      requestBody.conversationId = conversationId;
+    }
+
+    if (Object.keys(requestBody).length === 0) {
+      setWorkflowDraftLoading(false);
+      setWorkflowDraftError("Start and complete a chat turn before saving as workflow.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/workflows/from-chat-turn", {
+        body: JSON.stringify(requestBody),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const data = (await response.json()) as
+        | BuildWorkflowFromChatTurnResponse
+        | {
+            error: string;
+          };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to build workflow draft."));
+      }
+
+      if (!("draft" in data)) {
+        throw new Error("Workflow draft payload was missing from the response.");
+      }
+
+      setWorkflowDraft(data.draft);
+      setWorkflowBuilderOpen(true);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to build workflow draft.";
+      setWorkflowDraftError(message);
+      setWorkflowBuilderOpen(false);
+    } finally {
+      setWorkflowDraftLoading(false);
+    }
+  }
+
+  async function handleSaveWorkflowDraft(input: SaveWorkflowDraftInput) {
+    setWorkflowSaving(true);
+    setWorkflowSaveError(null);
+
+    try {
+      const response = await fetch("/api/workflows", {
+        body: JSON.stringify({
+          description: input.description,
+          name: input.name,
+          status: input.status,
+          version: input.version,
+          visibility: input.visibility,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const data = (await response.json()) as CreateWorkflowResponse | { error: string };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to save workflow draft."));
+      }
+
+      const savedName =
+        "workflow" in data &&
+        typeof data.workflow?.workflow?.name === "string" &&
+        data.workflow.workflow.name.trim()
+          ? data.workflow.workflow.name.trim()
+          : input.name;
+
+      setWorkflowSaveSuccess(`Saved workflow “${savedName}”.`);
+      setWorkflowBuilderOpen(false);
+      setWorkflowDraft(null);
+      setWorkflowDraftError(null);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to save workflow draft.";
+      setWorkflowSaveError(message);
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }
+
   function handleOpenHistory() {
     if (isStreaming) {
       return;
@@ -2483,6 +2655,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       conversationIdRef.current = data.conversation.id;
       conversationCreatedAtRef.current = data.conversation.createdAt;
       conversationPersistedRef.current = true;
+      lastCompletedTurnIdRef.current = null;
+      setWorkflowBuilderOpen(false);
+      setWorkflowDraft(null);
+      setWorkflowDraftError(null);
+      setWorkflowSaveError(null);
+      setWorkflowSaveSuccess(null);
       setActiveConversationTitle(data.conversation.title);
       setConversationBootstrap({
         createdAt: data.conversation.createdAt,
@@ -2509,6 +2687,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     conversationIdRef.current = draft.id;
     conversationCreatedAtRef.current = draft.createdAt;
     conversationPersistedRef.current = false;
+    lastCompletedTurnIdRef.current = null;
+    setWorkflowBuilderOpen(false);
+    setWorkflowDraft(null);
+    setWorkflowDraftError(null);
+    setWorkflowSaveError(null);
+    setWorkflowSaveSuccess(null);
     setActiveConversationTitle("");
     setHistoryOpen(false);
     setConversationBootstrap(draft);
@@ -2564,6 +2748,24 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               >
                 History
               </button>
+              {canSaveAsWorkflow ? (
+                <button
+                  className="chat-toolbar__button"
+                  disabled={
+                    isStreaming ||
+                    !conversationBootstrap ||
+                    workflowDraftLoading ||
+                    workflowSaving
+                  }
+                  onClick={() => {
+                    toolbarMenuRef.current?.removeAttribute("open");
+                    void handleOpenWorkflowBuilder();
+                  }}
+                  type="button"
+                >
+                  {workflowDraftLoading ? "Compiling workflow draft…" : "Save as workflow"}
+                </button>
+              ) : null}
               <button
                 className="chat-toolbar__button chat-toolbar__button--primary"
                 disabled={isStreaming || !conversationBootstrap}
@@ -2578,6 +2780,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             </div>
           </details>
         </div>
+        {workflowDraftError ? (
+          <p className="chat-toolbar__status chat-toolbar__status--error">{workflowDraftError}</p>
+        ) : null}
+        {workflowSaveSuccess ? (
+          <p className="chat-toolbar__status chat-toolbar__status--success">{workflowSaveSuccess}</p>
+        ) : null}
         <div className="chat-host" ref={hostRef} />
         {!ready ? (
           <div className="chat-fallback chat-fallback-overlay">
@@ -2585,6 +2793,18 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           </div>
         ) : null}
       </div>
+      {workflowBuilderOpen && workflowDraft ? (
+        <WorkflowBuilderModal
+          key={workflowDraft.turnId}
+          draft={workflowDraft}
+          error={workflowSaveError}
+          onClose={handleCloseWorkflowBuilder}
+          onSave={(input) => {
+            void handleSaveWorkflowDraft(input);
+          }}
+          saving={workflowSaving}
+        />
+      ) : null}
       {historyOpen ? (
         <ChatHistoryDialog
           activeConversationId={conversationIdRef.current}

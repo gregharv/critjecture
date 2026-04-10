@@ -2,6 +2,8 @@
 
 Critjecture is an auditable AI data analyst for business teams. It helps people ask plain-language questions about business data, get useful answers quickly, and inspect the full trace of how those answers were produced.
 
+The current shipped experience is chat-first, but the product direction is to go beyond one-off conversations. Critjecture is intended to become a governed workflow system where successful analyses can be saved as typed recipes, validated against required inputs, rerun reliably, and delivered as standardized outputs.
+
 The product is intentionally opinionated. It is not a general autonomous agent. It is a governed answer system built around role-aware access control, constrained tool execution, visible tool traces, and customer-controlled deployment options.
 
 ## 1. Product Position
@@ -13,6 +15,7 @@ Critjecture is designed to give organizations:
 * **Visible execution traces** that show which tools ran, which files were accessed, and what the system did to produce the result.
 * **Role-aware controls** over what data can be searched, what analysis can run, and what outputs can be retrieved.
 * **Deployment flexibility** for hosted dedicated customer cells, customer-managed installs, and stricter private environments.
+* **A path from exploration to repeatability** so valuable analyses can become governed operating workflows rather than staying trapped in chat history.
 
 This is the core distinction in the product: Critjecture is not just a chat workspace with company knowledge. It is a governed system for producing business-data answers under explicit policy, execution, and audit constraints.
 
@@ -46,6 +49,8 @@ This supports multi-step answer flows such as:
 * generate a chart or document when that makes the answer easier to act on
 * persist the trace so the answer can be reviewed later
 
+This same tooled path is also the intended foundation for saved workflows. The workflow product should reuse the same governed tools and traces, but add orchestration, versioning, validation, scheduling, and delivery on top instead of introducing a second execution model.
+
 ## 4. What The System Supports Right Now
 
 The current product is for:
@@ -59,6 +64,9 @@ The current product is for:
 * **Small-to-medium analysis tasks** where the source data may be large, but the answer returned to the model stays compact.
 * **Organization-scoped knowledge management** with uploaded files, saved chat history, and privileged audit logs.
 * **SQLite-first operations** with scripted backup creation, clean restore tooling, and repeatable recovery drills for persisted runtime state.
+* **Workflow orchestration** for admin/owner users, including saved workflow definitions, input validation, run history, and feature-gated scheduled execution.
+
+Today, these capabilities are exposed through interactive chat plus admin, audit, operations, and workflow-management surfaces.
 
 ## 5. What The System Is Not For Yet
 
@@ -66,10 +74,12 @@ The current MVP is not for:
 
 * **Open-ended BI or dashboard exploration** where the model should iterate freely across large warehouse-scale data.
 * **Massive plotted payloads** passed directly through the synchronous chart pipeline.
-* **Long-running async jobs** such as heavy background transformations, bulk document rendering, or scheduled warehouse analytics.
+* **Long-running heavy async jobs** such as warehouse-scale background transformations or bulk rendering beyond the current workflow scheduler envelope.
 * **General-purpose autonomous coding or arbitrary enterprise automation.**
 
 The product is intentionally narrow. It is built to answer business questions quickly and transparently, not to replace every analytics or automation system in the stack.
+
+Near-term product expansion should stay inside that narrow frame. A workflow layer is a good fit when it turns repeated governed analyses into auditable scheduled outputs. A broad connector marketplace, arbitrary automation engine, or generic agent platform is not.
 
 ## 6. Current Limits And Near-Term Scaling Ideas
 
@@ -89,12 +99,13 @@ Current limitations:
 * **Bounded intermediate storage:** `analysisResultId` data is persisted durably in SQLite, but the system intentionally caps payload bytes and plotted point counts so synchronous rendering stays predictable.
 * **Tight sandbox limits:** chart generation still runs under strict timeout, memory, process, and artifact-size limits.
 * **Readability limits:** even when large point sets render successfully, the chart is often not useful without aggregation or sampling.
-* **No async chart or document jobs yet:** large workloads still fail synchronously once they exceed the current request-time budget or payload caps.
+* **No async chart or document heavy-job path yet:** large chart/document workloads still fail once they exceed current request-time and sandbox limits.
 
 Near-term scaling ideas:
 
 * **Require aggregation, binning, or top-N reduction** before a chart can be rendered.
-* **Introduce async job handling** once analysis or rendering needs to exceed the current request-time budget.
+* **Expand async job handling** for heavyweight chart/document workloads beyond the current scheduler envelope.
+* **Harden scheduled workflow operations further** with additional worker and tick integration tests plus broader rollout controls.
 
 ## 7. Packaging Direction
 
@@ -105,8 +116,9 @@ The planned commercial model is:
 * **Pooled monthly credits** for analysis and answer generation
 * **Admin usage visibility and controls** so organizations can see who is consuming capacity and restrict heavy users when needed
 * **Predictable spend** through a hard cap when the included monthly credit pool is exhausted
+* **A workflow-centric packaging path** where saved workflows and scheduled runs become part of the product value, not just ad hoc chat usage
 
-This is intended to make Critjecture easier to adopt for SMB teams than a seat-assignment model. The product value is team-wide governed access to business answers, not named-seat access to a generic assistant.
+This is intended to make Critjecture easier to adopt for SMB teams than a seat-assignment model. The product value is team-wide governed access to business answers and repeatable analytics workflows, not named-seat access to a generic assistant.
 
 ## 8. Supported Flat-Rate Behavior
 
@@ -144,3 +156,6 @@ The current system is a constrained, auditable answer engine with:
 * persisted short-lived generated assets
 * an analysis-first chart flow that separates schema discovery from rendering
 * scripted backup creation, restore validation, and repeatable recovery drills for SQLite plus tenant storage
+* a workflow layer with typed definitions, manual execution, delivery traces, and feature-gated scheduled ticks/workers
+
+The next logical layer is still not "more generic chat." It is continued hardening and scale-proofing of this governed workflow system under the same controls.

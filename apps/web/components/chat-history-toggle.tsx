@@ -13,19 +13,20 @@ function applyChatHistoryCollapsedClass(collapsed: boolean) {
   document.documentElement.classList.toggle(CHAT_HISTORY_SIDEBAR_COLLAPSED_ROOT_CLASS, collapsed);
 }
 
-export function ChatHistoryToggle() {
-  const [collapsed, setCollapsed] = useState(false);
+function getInitialCollapsedState() {
+  if (typeof window === "undefined") {
+    return false;
+  }
 
-  useEffect(() => {
-    try {
-      const persistedValue = window.localStorage.getItem(CHAT_HISTORY_SIDEBAR_COLLAPSED_STORAGE_KEY);
-      const persistedCollapsed = persistedValue === "true";
-      setCollapsed(persistedCollapsed);
-      applyChatHistoryCollapsedClass(persistedCollapsed);
-    } catch {
-      applyChatHistoryCollapsedClass(false);
-    }
-  }, []);
+  try {
+    return window.localStorage.getItem(CHAT_HISTORY_SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function ChatHistoryToggle() {
+  const [collapsed, setCollapsed] = useState(getInitialCollapsedState);
 
   useEffect(() => {
     applyChatHistoryCollapsedClass(collapsed);

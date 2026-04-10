@@ -13,19 +13,20 @@ function applyShowErrorChatsClass(showErrorChats: boolean) {
   document.documentElement.classList.toggle(SHOW_ERROR_CHATS_ROOT_CLASS, showErrorChats);
 }
 
-export function ErrorChatToggle() {
-  const [showErrorChats, setShowErrorChats] = useState(false);
+function getInitialShowErrorChatsState() {
+  if (typeof window === "undefined") {
+    return false;
+  }
 
-  useEffect(() => {
-    try {
-      const persistedValue = window.localStorage.getItem(SHOW_ERROR_CHATS_STORAGE_KEY);
-      const enabled = persistedValue === "true";
-      setShowErrorChats(enabled);
-      applyShowErrorChatsClass(enabled);
-    } catch {
-      applyShowErrorChatsClass(false);
-    }
-  }, []);
+  try {
+    return window.localStorage.getItem(SHOW_ERROR_CHATS_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function ErrorChatToggle() {
+  const [showErrorChats, setShowErrorChats] = useState(getInitialShowErrorChatsState);
 
   useEffect(() => {
     applyShowErrorChatsClass(showErrorChats);

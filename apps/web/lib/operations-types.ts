@@ -122,11 +122,24 @@ export type OperationsAlertSummary = {
   title: string;
 };
 
+export type WorkflowOperationsSummary = {
+  activeWorkflowCount: number;
+  deliveryFailedCount: number;
+  maxActiveWorkflows: number;
+  maxScheduledRunsPerWindow: number;
+  runsCompleted: number;
+  runsFailed: number;
+  runsTotal: number;
+  runsWaitingForInput: number;
+  scheduledRunsPerWindowEstimate: number;
+};
+
 export type OperationsSummaryResponse = {
   alerts: OperationsAlertSummary[];
   health: HealthSummary;
   policies: OperationsPoliciesSnapshot;
   workspace: WorkspaceCommercialSummary;
+  workflow: WorkflowOperationsSummary;
   rateLimitActivity: Array<{
     count: number;
     routeGroup: OperationsRouteGroup;

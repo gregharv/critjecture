@@ -64,6 +64,231 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
     });
   });
 
+  await page.route("**/api/workflows/from-chat-turn", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        draft: {
+          conversationId: "conversation-1",
+          inputFilePaths: [],
+          sourceSummary: {
+            analysisToolCallCount: 1,
+            chartToolCallCount: 0,
+            documentToolCallCount: 0,
+            sandboxRunIds: [],
+            selectedToolCallIds: ["tool-call-1"],
+          },
+          status: "draft",
+          suggestedDescription: "Generated from conversation.",
+          suggestedName: "Budget review workflow",
+          turnId: "turn-1",
+          unresolvedInputPaths: [],
+          version: {
+            delivery: {
+              channels: [],
+              retry_policy: {
+                backoff_multiplier: 2,
+                initial_backoff_seconds: 30,
+                max_attempts: 3,
+              },
+              schema_version: 1,
+            },
+            executionIdentity: {
+              mode: "fixed_membership_user",
+              on_identity_invalid: "block_run",
+              recheck_at_enqueue: true,
+              recheck_at_execution: true,
+              required_membership_roles: ["admin", "owner"],
+              require_membership_status: "active",
+              run_as_user_id: "user-1",
+              schema_version: 1,
+            },
+            inputBindings: {
+              bindings: [],
+              schema_version: 1,
+            },
+            inputContract: {
+              inputs: [],
+              schema_version: 1,
+            },
+            outputs: {
+              schema_version: 1,
+              summary_template: "standard_v1",
+            },
+            provenance: {
+              schema_version: 1,
+              source_kind: "manual_builder",
+            },
+            recipe: {
+              schema_version: 1,
+              steps: [],
+            },
+            schedule: {
+              kind: "manual_only",
+              schema_version: 1,
+            },
+            thresholds: {
+              rules: [],
+              schema_version: 1,
+            },
+          },
+          visibility: "organization",
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/workflows", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        body: JSON.stringify({
+          workflow: {
+            workflow: {
+              id: "wf-1",
+              name: "Budget review workflow",
+            },
+          },
+        }),
+        contentType: "application/json",
+        status: 201,
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        workflows: [
+          {
+            createdAt: Date.now() - 10_000,
+            currentVersionId: "wf-v1",
+            currentVersionNumber: 1,
+            description: "Weekly budget checks",
+            id: "wf-1",
+            lastRunAt: Date.now() - 5_000,
+            name: "Budget review workflow",
+            nextRunAt: null,
+            status: "active",
+            updatedAt: Date.now() - 1_000,
+            visibility: "organization",
+          },
+        ],
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/workflows/wf-1", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        workflow: {
+          currentVersion: {
+            contracts: {
+              delivery: {
+                channels: [],
+              },
+              inputContract: {
+                inputs: [],
+              },
+              recipe: {
+                steps: [],
+              },
+            },
+            createdAt: Date.now() - 10_000,
+            id: "wf-v1",
+            versionNumber: 1,
+          },
+          versions: [
+            {
+              createdAt: Date.now() - 10_000,
+              id: "wf-v1",
+              versionNumber: 1,
+            },
+          ],
+          workflow: {
+            createdAt: Date.now() - 10_000,
+            currentVersionId: "wf-v1",
+            currentVersionNumber: 1,
+            description: "Weekly budget checks",
+            id: "wf-1",
+            lastRunAt: Date.now() - 5_000,
+            name: "Budget review workflow",
+            nextRunAt: null,
+            status: "active",
+            updatedAt: Date.now() - 1_000,
+            visibility: "organization",
+          },
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/workflows/wf-1/runs?limit=100", async (route) => {
+    const now = Date.now();
+
+    await route.fulfill({
+      body: JSON.stringify({
+        runs: [
+          {
+            completedAt: now - 500,
+            createdAt: now - 2_000,
+            failureReason: null,
+            id: "run-1",
+            metadata: {},
+            runAsRole: "owner",
+            runAsUserId: "user-1",
+            startedAt: now - 1_500,
+            status: "completed",
+            triggerKind: "manual",
+            workflowVersionId: "wf-v1",
+            workflowVersionNumber: 1,
+          },
+        ],
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/workflow-runs/run-1", async (route) => {
+    const now = Date.now();
+
+    await route.fulfill({
+      body: JSON.stringify({
+        alerts: [],
+        changeSummary: {
+          artifactCountDelta: 0,
+          comparedToRunId: null,
+          inputKeysAdded: [],
+          inputKeysChanged: [],
+          inputKeysRemoved: [],
+          inputKeysUnchanged: [],
+          statusChanged: false,
+          workflowVersionChanged: false,
+        },
+        deliveries: [],
+        inputChecks: [],
+        inputRequests: [],
+        previousRun: null,
+        run: {
+          completedAt: now - 500,
+          createdAt: now - 2_000,
+          failureReason: null,
+          id: "run-1",
+          metadata: {},
+          runAsRole: "owner",
+          runAsUserId: "user-1",
+          startedAt: now - 1_500,
+          status: "completed",
+          triggerKind: "manual",
+          workflowVersionId: "wf-v1",
+          workflowVersionNumber: 1,
+        },
+        steps: [],
+      }),
+      contentType: "application/json",
+    });
+  });
+
   await page.route("**/api/admin/logs?limit=50", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ turns: [] }),
@@ -138,6 +363,9 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
           search: {
             rateLimits: [],
           },
+          workflow: {
+            rateLimits: [],
+          },
         },
         rateLimitActivity: [],
         recentFailures: [],
@@ -161,6 +389,17 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
           remainingCredits: 500,
           resetAt: Date.now() + 24 * 60 * 60 * 1000,
           usedCredits: 0,
+        },
+        workflow: {
+          activeWorkflowCount: 1,
+          deliveryFailedCount: 0,
+          maxActiveWorkflows: 10,
+          maxScheduledRunsPerWindow: 20,
+          runsCompleted: 1,
+          runsFailed: 0,
+          runsTotal: 1,
+          runsWaitingForInput: 0,
+          scheduledRunsPerWindowEstimate: 0,
         },
         usageSummary: {
           byEventType: [],
@@ -236,6 +475,17 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
 
   await page.getByRole("button", { name: /Budget review/ }).first().click();
   await expect(page.getByText("Budget review").first()).toBeVisible();
+
+  await page.locator(".chat-toolbar__summary").click();
+  await page.getByRole("button", { name: "Save as workflow" }).click();
+  await expect(page.getByRole("heading", { name: "Finalize workflow draft" })).toBeVisible();
+  await page.getByRole("button", { name: "Save workflow" }).click();
+  await expect(page.getByText("Saved workflow")).toBeVisible();
+
+  await page.locator(".shell-menu__summary").click();
+  await page.getByRole("link", { name: "Workflows" }).click();
+  await expect(page.getByRole("heading", { name: "Saved workflows and execution history" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Budget review workflow" })).toBeVisible();
 
   await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Audit Logs" }).click();

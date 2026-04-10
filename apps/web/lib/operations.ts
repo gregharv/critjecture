@@ -31,6 +31,10 @@ import {
   requestLogs,
   usageEvents,
   users,
+  workflowDeliveries,
+  workflowRuns,
+  workflowVersions,
+  workflows,
   workspaceCommercialLedger,
 } from "@/lib/app-schema";
 import {
@@ -67,6 +71,7 @@ import {
 } from "@/lib/observability";
 import { getSandboxBackendHealth } from "@/lib/python-sandbox";
 import { getSandboxHealthSnapshot } from "@/lib/sandbox-runs";
+import { parseWorkflowScheduleJson } from "@/lib/workflow-types";
 import {
   getCommercialUsageClassForRoute,
   getOrganizationMembershipCommercialPolicy,
@@ -162,6 +167,16 @@ function getWindowMs(window: "24h" | "7d") {
 
 function getBucketStartAt(timestamp: number, bucketWidthMs = ONE_MINUTE_MS) {
   return Math.floor(timestamp / bucketWidthMs) * bucketWidthMs;
+}
+
+function parsePositiveIntegerEnv(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
 }
 
 async function sendAlertWebhook(payload: Record<string, unknown>) {
@@ -785,6 +800,201 @@ async function evaluateSandboxOperationalAlerts() {
   }
 }
 
+function estimateScheduledRunsPerWindowFromScheduleJson(scheduleJson: string | null | undefined) {
+  if (!scheduleJson) {
+    return 0;
+  }
+
+  try {
+    const schedule = parseWorkflowScheduleJson(scheduleJson);
+
+    if (schedule.kind !== "recurring") {
+      return 0;
+    }
+
+    return schedule.cadence.kind === "weekly" ? 5 : 1;
+  } catch {
+    return 0;
+  }
+}
+
+async function evaluateWorkflowOperationalAlerts() {
+  const db = await getAppDatabase();
+  const now = Date.now();
+  const burstWindowMs = parsePositiveIntegerEnv(
+    process.env.CRITJECTURE_WORKFLOW_ALERT_BURST_WINDOW_MINUTES,
+    10,
+  ) * ONE_MINUTE_MS;
+  const workflowFailureThreshold = parsePositiveIntegerEnv(
+    process.env.CRITJECTURE_WORKFLOW_FAILURE_BURST_THRESHOLD,
+    3,
+  );
+  const deliveryFailureThreshold = parsePositiveIntegerEnv(
+    process.env.CRITJECTURE_WORKFLOW_DELIVERY_FAILURE_BURST_THRESHOLD,
+    5,
+  );
+  const waitingStaleThreshold = parsePositiveIntegerEnv(
+    process.env.CRITJECTURE_WORKFLOW_WAITING_STALE_THRESHOLD,
+    1,
+  );
+  const waitingStaleHours = parsePositiveIntegerEnv(
+    process.env.CRITJECTURE_WORKFLOW_WAITING_STALE_HOURS,
+    6,
+  );
+  const burstSince = now - burstWindowMs;
+  const staleWaitingCutoff = now - waitingStaleHours * 60 * ONE_MINUTE_MS;
+
+  const [failureRows, waitingRows, deliveryFailureRows, existingOpenAlerts] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        organizationId: workflowRuns.organizationId,
+      })
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.status, "failed"),
+          gte(workflowRuns.completedAt, burstSince),
+        ),
+      )
+      .groupBy(workflowRuns.organizationId),
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        organizationId: workflowRuns.organizationId,
+      })
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.status, "waiting_for_input"),
+          lt(workflowRuns.updatedAt, staleWaitingCutoff),
+        ),
+      )
+      .groupBy(workflowRuns.organizationId),
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        organizationId: workflowDeliveries.organizationId,
+      })
+      .from(workflowDeliveries)
+      .where(
+        and(
+          eq(workflowDeliveries.status, "failed"),
+          gte(workflowDeliveries.updatedAt, burstSince),
+        ),
+      )
+      .groupBy(workflowDeliveries.organizationId),
+    db.query.operationalAlerts.findMany({
+      where: and(
+        eq(operationalAlerts.status, "open"),
+        inArray(operationalAlerts.alertType, [
+          "workflow-failure-burst",
+          "workflow-waiting-stale",
+          "workflow-delivery-failure-burst",
+        ]),
+      ),
+    }),
+  ]);
+
+  const activeDedupeKeys = new Set<string>();
+
+  for (const row of failureRows) {
+    const organizationId = row.organizationId;
+
+    if (!organizationId) {
+      continue;
+    }
+
+    const count = Number(row.count ?? 0);
+    const dedupeKey = `workflow:failures:${organizationId}:burst`;
+
+    if (count >= workflowFailureThreshold) {
+      activeDedupeKeys.add(dedupeKey);
+
+      await upsertOperationalAlert({
+        alertType: "workflow-failure-burst",
+        dedupeKey,
+        message: `${count} workflow runs failed in the last ${Math.round(burstWindowMs / ONE_MINUTE_MS)} minutes.`,
+        metadata: {
+          count,
+          routeGroup: "workflow",
+          threshold: workflowFailureThreshold,
+          windowMinutes: Math.round(burstWindowMs / ONE_MINUTE_MS),
+        },
+        organizationId,
+        severity: count >= workflowFailureThreshold * 2 ? "critical" : "warning",
+        title: "Workflow Failure Burst",
+      });
+    }
+  }
+
+  for (const row of waitingRows) {
+    const organizationId = row.organizationId;
+
+    if (!organizationId) {
+      continue;
+    }
+
+    const count = Number(row.count ?? 0);
+    const dedupeKey = `workflow:waiting:${organizationId}:stale`;
+
+    if (count >= waitingStaleThreshold) {
+      activeDedupeKeys.add(dedupeKey);
+
+      await upsertOperationalAlert({
+        alertType: "workflow-waiting-stale",
+        dedupeKey,
+        message: `${count} workflow run${count === 1 ? "" : "s"} have been waiting for input longer than ${waitingStaleHours} hours.`,
+        metadata: {
+          count,
+          routeGroup: "workflow",
+          staleHours: waitingStaleHours,
+          threshold: waitingStaleThreshold,
+        },
+        organizationId,
+        severity: count >= Math.max(3, waitingStaleThreshold + 1) ? "critical" : "warning",
+        title: "Stale Waiting Workflow Runs",
+      });
+    }
+  }
+
+  for (const row of deliveryFailureRows) {
+    const organizationId = row.organizationId;
+
+    if (!organizationId) {
+      continue;
+    }
+
+    const count = Number(row.count ?? 0);
+    const dedupeKey = `workflow:delivery_failures:${organizationId}:burst`;
+
+    if (count >= deliveryFailureThreshold) {
+      activeDedupeKeys.add(dedupeKey);
+
+      await upsertOperationalAlert({
+        alertType: "workflow-delivery-failure-burst",
+        dedupeKey,
+        message: `${count} workflow delivery attempts failed in the last ${Math.round(burstWindowMs / ONE_MINUTE_MS)} minutes.`,
+        metadata: {
+          count,
+          routeGroup: "workflow",
+          threshold: deliveryFailureThreshold,
+          windowMinutes: Math.round(burstWindowMs / ONE_MINUTE_MS),
+        },
+        organizationId,
+        severity: count >= deliveryFailureThreshold * 2 ? "critical" : "warning",
+        title: "Workflow Delivery Failure Burst",
+      });
+    }
+  }
+
+  for (const alert of existingOpenAlerts) {
+    if (!activeDedupeKeys.has(alert.dedupeKey)) {
+      await resolveOperationalAlert(alert.dedupeKey);
+    }
+  }
+}
+
 export async function runOperationsMaintenance() {
   const now = Date.now();
 
@@ -873,6 +1083,9 @@ export async function runOperationsMaintenance() {
 
   await evaluateSandboxOperationalAlerts().catch((caughtError) => {
     logStructuredError("operations.sandbox_alert_evaluation_failed", caughtError);
+  });
+  await evaluateWorkflowOperationalAlerts().catch((caughtError) => {
+    logStructuredError("operations.workflow_alert_evaluation_failed", caughtError);
   });
   await runGovernanceMaintenance();
 }
@@ -1515,8 +1728,18 @@ export async function getOperationsSummary(input: {
     }),
   ]);
 
-  const [alerts, routeMetrics, usageByRouteGroup, usageByEventType, byUser, recentFailures, rateLimitActivity] =
-    await Promise.all([
+  const [
+    alerts,
+    routeMetrics,
+    usageByRouteGroup,
+    usageByEventType,
+    byUser,
+    recentFailures,
+    rateLimitActivity,
+    workflowRunStatusRows,
+    activeWorkflowRows,
+    workflowDeliveryFailureRows,
+  ] = await Promise.all([
       db.query.operationalAlerts.findMany({
         limit: 20,
         orderBy: [desc(operationalAlerts.severity), desc(operationalAlerts.lastSeenAt)],
@@ -1661,6 +1884,44 @@ export async function getOperationsSummary(input: {
           ),
         )
         .groupBy(requestLogs.routeGroup),
+      db
+        .select({
+          count: sql<number>`count(*)`,
+          status: workflowRuns.status,
+        })
+        .from(workflowRuns)
+        .where(
+          and(
+            eq(workflowRuns.organizationId, input.organizationId),
+            gte(workflowRuns.createdAt, since),
+          ),
+        )
+        .groupBy(workflowRuns.status),
+      db
+        .select({
+          scheduleJson: workflowVersions.scheduleJson,
+          workflowId: workflows.id,
+        })
+        .from(workflows)
+        .leftJoin(workflowVersions, eq(workflowVersions.id, workflows.currentVersionId))
+        .where(
+          and(
+            eq(workflows.organizationId, input.organizationId),
+            eq(workflows.status, "active"),
+          ),
+        ),
+      db
+        .select({
+          count: sql<number>`count(*)`,
+        })
+        .from(workflowDeliveries)
+        .where(
+          and(
+            eq(workflowDeliveries.organizationId, input.organizationId),
+            eq(workflowDeliveries.status, "failed"),
+            gte(workflowDeliveries.updatedAt, since),
+          ),
+        ),
     ]);
 
   const byUserSummary: UsageActorSummary[] = byUser
@@ -1697,6 +1958,17 @@ export async function getOperationsSummary(input: {
         right.totalTokens - left.totalTokens,
     );
 
+  const workflowRunCounts = new Map<string, number>();
+
+  for (const row of workflowRunStatusRows) {
+    workflowRunCounts.set(String(row.status), Number(row.count ?? 0));
+  }
+
+  const workflowScheduledRunsPerWindowEstimate = activeWorkflowRows.reduce((sum, row) => {
+    return sum + estimateScheduledRunsPerWindowFromScheduleJson(row.scheduleJson);
+  }, 0);
+  const workflowDeliveryFailedCount = Number(workflowDeliveryFailureRows[0]?.count ?? 0);
+
   return {
     alerts: alerts.map((alert) => ({
       alertType: alert.alertType,
@@ -1717,6 +1989,18 @@ export async function getOperationsSummary(input: {
       remainingCredits: workspaceUsage.remainingCredits,
       resetAt: workspaceUsage.resetAt,
       usedCredits: workspaceUsage.usedCredits,
+    },
+    workflow: {
+      activeWorkflowCount: activeWorkflowRows.length,
+      deliveryFailedCount: workflowDeliveryFailedCount,
+      maxActiveWorkflows: workspacePlan.workflowEntitlements.maxActiveWorkflows,
+      maxScheduledRunsPerWindow:
+        workspacePlan.workflowEntitlements.maxScheduledRunsPerWindow,
+      runsCompleted: workflowRunCounts.get("completed") ?? 0,
+      runsFailed: workflowRunCounts.get("failed") ?? 0,
+      runsTotal: [...workflowRunCounts.values()].reduce((sum, count) => sum + count, 0),
+      runsWaitingForInput: workflowRunCounts.get("waiting_for_input") ?? 0,
+      scheduledRunsPerWindowEstimate: workflowScheduledRunsPerWindowEstimate,
     },
     rateLimitActivity: rateLimitActivity.map((row) => ({
       count: Number(row.count ?? 0),

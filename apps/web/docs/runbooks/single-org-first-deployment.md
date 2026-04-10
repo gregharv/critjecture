@@ -19,6 +19,8 @@ pnpm backup:verify -- --deployment-mode single_org
 - confirm `CRITJECTURE_SANDBOX_EXECUTION_BACKEND=container_supervisor`
 - confirm `CRITJECTURE_SANDBOX_SUPERVISOR_URL`, `CRITJECTURE_SANDBOX_SUPERVISOR_TOKEN`, and `CRITJECTURE_SANDBOX_CONTAINER_IMAGE`
 - confirm the sandbox supervisor service is running and Docker can start the configured image
+- if scheduled workflows are enabled, confirm `CRITJECTURE_ENABLE_WORKFLOW_SCHEDULER=true` and `CRITJECTURE_WORKFLOW_TICK_SECRET` are set
+- if scheduled workflows are enabled, confirm local/platform cron calls `POST /api/internal/workflows/tick` every minute with the internal token
 - confirm `pdftotext` is installed on the web-app host
 - confirm the bootstrap owner/member credentials are set only for first access and are stored outside source control
 
@@ -73,4 +75,5 @@ pnpm release:proof:single-org -- \
 - an app restart does not revert the rotated credentials
 - one upload succeeds
 - one sandbox task succeeds
+- if scheduler is enabled, one authenticated `POST /api/internal/workflows/tick` call succeeds with `202` and expected summary payload
 - the release-proof JSON and Markdown records are stored with the deployment evidence
