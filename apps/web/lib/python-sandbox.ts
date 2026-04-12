@@ -80,6 +80,7 @@ const LOCAL_SUPERVISOR_ID = `local-supervisor:${process.pid}`;
 
 const GENERATED_ASSET_MIME_TYPES: Record<string, string> = {
   ".csv": "text/csv",
+  ".html": "text/html",
   ".json": "application/json",
   ".pdf": "application/pdf",
   ".png": "image/png",
@@ -103,6 +104,16 @@ const TOOL_OUTPUT_POLICIES = {
     ],
     allowedMimeTypes: ["text/csv", "application/json", "text/plain"],
     optional: true,
+  },
+  run_marimo_analysis: {
+    htmlRelativePath: "outputs/notebook.html",
+    htmlMimeType: "text/html",
+    optionalStructuredRelativePaths: [
+      "outputs/result.csv",
+      "outputs/result.json",
+      "outputs/result.txt",
+    ],
+    optionalStructuredMimeTypes: ["text/csv", "application/json", "text/plain"],
   },
 } as const;
 
@@ -1131,6 +1142,108 @@ async function collectWorkspaceOutputFiles(workspaceDir: string) {
   return collected.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
+function validateRunDataAnalysisOutputs<T extends { mimeType: string; relativePath: string }>(
+  outputFiles: T[],
+) {
+  const analysisOutputPolicy = TOOL_OUTPUT_POLICIES.run_data_analysis;
+
+  if (outputFiles.length > 1) {
+    throw new SandboxValidationError(
+      "run_data_analysis may save at most one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+    );
+  }
+
+  if (outputFiles.length === 1) {
+    const [outputFile] = outputFiles;
+
+    if (
+      !analysisOutputPolicy.allowedRelativePaths.some(
+        (allowedPath) => allowedPath === outputFile.relativePath,
+      )
+    ) {
+      throw new SandboxValidationError(
+        "run_data_analysis output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+      );
+    }
+
+    if (
+      !analysisOutputPolicy.allowedMimeTypes.some(
+        (allowedMimeType) => allowedMimeType === outputFile.mimeType,
+      )
+    ) {
+      throw new SandboxValidationError(
+        "run_data_analysis output must be CSV, JSON, or plain text.",
+      );
+    }
+  }
+
+  return outputFiles;
+}
+
+function validateRunMarimoAnalysisOutputs<T extends { mimeType: string; relativePath: string }>(
+  outputFiles: T[],
+) {
+  const marimoOutputPolicy = TOOL_OUTPUT_POLICIES.run_marimo_analysis;
+
+  if (outputFiles.length === 0 || outputFiles.length > 2) {
+    throw new SandboxValidationError(
+      "run_marimo_analysis must save outputs/notebook.html and may optionally save one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+    );
+  }
+
+  const htmlFile = outputFiles.find(
+    (outputFile) => outputFile.relativePath === marimoOutputPolicy.htmlRelativePath,
+  );
+
+  if (!htmlFile) {
+    throw new SandboxValidationError(
+      "run_marimo_analysis must save outputs/notebook.html.",
+    );
+  }
+
+  if (htmlFile.mimeType !== marimoOutputPolicy.htmlMimeType) {
+    throw new SandboxValidationError(
+      "run_marimo_analysis generated the wrong file type for outputs/notebook.html.",
+    );
+  }
+
+  const additionalFiles = outputFiles.filter(
+    (outputFile) => outputFile.relativePath !== marimoOutputPolicy.htmlRelativePath,
+  );
+
+  if (additionalFiles.length > 1) {
+    throw new SandboxValidationError(
+      "run_marimo_analysis may save at most one structured output file in addition to outputs/notebook.html.",
+    );
+  }
+
+  if (additionalFiles.length === 1) {
+    const [structuredFile] = additionalFiles;
+
+    if (
+      !marimoOutputPolicy.optionalStructuredRelativePaths.some(
+        (allowedPath) => allowedPath === structuredFile.relativePath,
+      )
+    ) {
+      throw new SandboxValidationError(
+        "run_marimo_analysis structured output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
+      );
+    }
+
+    if (
+      !marimoOutputPolicy.optionalStructuredMimeTypes.some(
+        (allowedMimeType) => allowedMimeType === structuredFile.mimeType,
+      )
+    ) {
+      throw new SandboxValidationError(
+        "run_marimo_analysis structured output must be CSV, JSON, or plain text.",
+      );
+    }
+  }
+
+  return outputFiles;
+}
+
 function validateBufferedGeneratedOutputs(
   toolName: SandboxToolName,
   assets: HostedGeneratedAssetPayload[],
@@ -1148,39 +1261,11 @@ function validateBufferedGeneratedOutputs(
   });
 
   if (toolName === "run_data_analysis") {
-    const analysisOutputPolicy = TOOL_OUTPUT_POLICIES.run_data_analysis;
+    return validateRunDataAnalysisOutputs(outputFiles);
+  }
 
-    if (outputFiles.length > 1) {
-      throw new SandboxValidationError(
-        "run_data_analysis may save at most one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
-      );
-    }
-
-    if (outputFiles.length === 1) {
-      const [outputFile] = outputFiles;
-
-      if (
-        !analysisOutputPolicy.allowedRelativePaths.some(
-          (allowedPath) => allowedPath === outputFile.relativePath,
-        )
-      ) {
-        throw new SandboxValidationError(
-          "run_data_analysis output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
-        );
-      }
-
-      if (
-        !analysisOutputPolicy.allowedMimeTypes.some(
-          (allowedMimeType) => allowedMimeType === outputFile.mimeType,
-        )
-      ) {
-        throw new SandboxValidationError(
-          "run_data_analysis output must be CSV, JSON, or plain text.",
-        );
-      }
-    }
-
-    return outputFiles;
+  if (toolName === "run_marimo_analysis") {
+    return validateRunMarimoAnalysisOutputs(outputFiles);
   }
 
   const strictOutputPolicy =
@@ -1215,39 +1300,11 @@ async function validateGeneratedOutputs(toolName: SandboxToolName, workspaceDir:
   const outputFiles = await collectWorkspaceOutputFiles(workspaceDir);
 
   if (toolName === "run_data_analysis") {
-    const analysisOutputPolicy = TOOL_OUTPUT_POLICIES.run_data_analysis;
+    return validateRunDataAnalysisOutputs(outputFiles);
+  }
 
-    if (outputFiles.length > 1) {
-      throw new SandboxValidationError(
-        "run_data_analysis may save at most one structured output file under outputs/result.csv, outputs/result.json, or outputs/result.txt.",
-      );
-    }
-
-    if (outputFiles.length === 1) {
-      const [outputFile] = outputFiles;
-
-      if (
-        !analysisOutputPolicy.allowedRelativePaths.some(
-          (allowedPath) => allowedPath === outputFile.relativePath,
-        )
-      ) {
-        throw new SandboxValidationError(
-          "run_data_analysis output must be saved as outputs/result.csv, outputs/result.json, or outputs/result.txt.",
-        );
-      }
-
-      if (
-        !analysisOutputPolicy.allowedMimeTypes.some(
-          (allowedMimeType) => allowedMimeType === outputFile.mimeType,
-        )
-      ) {
-        throw new SandboxValidationError(
-          "run_data_analysis output must be CSV, JSON, or plain text.",
-        );
-      }
-    }
-
-    return outputFiles;
+  if (toolName === "run_marimo_analysis") {
+    return validateRunMarimoAnalysisOutputs(outputFiles);
   }
 
   const strictOutputPolicy =

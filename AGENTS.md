@@ -8,6 +8,7 @@ This file indexes the project documents that live in the repository root and in 
 - [Critjecture Product Overview](overview.md)
 - [Future Steps](steps.md)
 - [Workflow Step 0 Technical Spec](workflow_step0_technical_spec.md)
+- [Marimo Analysis Workspace Technical Spec](marimo_analysis_workspace_technical_spec.md)
 - [Steps Completed](steps_completed.md)
 - [Search Tool TODO](todo.md)
 - [Compliance Controls](compliance_controls.md)

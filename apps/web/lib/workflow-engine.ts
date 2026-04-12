@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
-import { parseChartAnalysisStdout, type ChartAnalysisPayload } from "@/lib/analysis-results";
 import { getAppDatabase } from "@/lib/app-db";
 import {
   documents,
@@ -16,7 +15,6 @@ import {
   workflows,
 } from "@/lib/app-schema";
 import {
-  executeSandboxedCommand,
   SandboxAdmissionError,
   SandboxExecutionError,
   SandboxUnavailableError,
@@ -31,6 +29,7 @@ import {
   cancelWorkflowInputRequestsForRun,
   ensureWorkflowInputRequestNotification,
   fulfillWorkflowInputRequestsForRun,
+  sendWorkflowRunEmailAlert,
 } from "@/lib/workflow-notifications";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
 import type { UserRole } from "@/lib/roles";
@@ -76,7 +75,6 @@ type WorkflowRunExecutionContext = {
 type ResolvedWorkflowDocument = WorkflowValidatorResolvedDocument;
 
 type StepExecutionState = {
-  chartPayload: ChartAnalysisPayload | null;
   generatedAssets: GeneratedSandboxAsset[];
   inputFiles: string[];
   sandboxRunId: string;
@@ -129,129 +127,6 @@ function getErrorMessage(caughtError: unknown, fallbackMessage: string) {
   return caughtError instanceof Error ? caughtError.message : fallbackMessage;
 }
 
-function buildVisualGraphCode(code: string) {
-  return ["import matplotlib", 'matplotlib.use("Agg")', code].join("\n\n");
-}
-
-function buildStoredChartPayload(
-  chart: ChartAnalysisPayload,
-  overrides: {
-    chartType: "area" | "bar" | "line" | "scatter";
-    title: string;
-  },
-): ChartAnalysisPayload {
-  const normalizedChartType =
-    overrides.chartType === "area" ? "line" : overrides.chartType;
-
-  return {
-    chartType: normalizedChartType,
-    title: overrides.title || chart.title,
-    xLabel: chart.xLabel,
-    yLabel: chart.yLabel,
-    ...("series" in chart
-      ? {
-          series: chart.series,
-        }
-      : {
-          x: chart.x,
-          y: chart.y,
-        }),
-  };
-}
-
-function buildStoredChartRenderCode() {
-  return buildVisualGraphCode(`
-import json
-from pathlib import Path
-import matplotlib.pyplot as plt
-
-payload = json.loads(Path("chart_payload.json").read_text(encoding="utf-8"))
-plt.figure(figsize=(10, 6))
-plotted_value_count = 0
-
-if "series" in payload:
-    axis_labels = []
-    axis_positions = {}
-
-    for series in payload["series"]:
-        for value in series["x"]:
-            label = str(value)
-            if label not in axis_positions:
-                axis_positions[label] = len(axis_labels)
-                axis_labels.append(label)
-
-    positions = list(range(len(axis_labels)))
-    series_count = max(len(payload["series"]), 1)
-
-    if payload["chartType"] == "bar":
-        width = min(0.8 / series_count, 0.35)
-        offset_origin = ((series_count - 1) / 2) * width
-
-        for index, series in enumerate(payload["series"]):
-            series_positions = [axis_positions[str(value)] - offset_origin + index * width for value in series["x"]]
-            label = series.get("name") or f"Series {index + 1}"
-            plt.bar(series_positions, series["y"], width=width, label=label)
-            plotted_value_count += len(series["x"])
-    else:
-        for index, series in enumerate(payload["series"]):
-            series_positions = [axis_positions[str(value)] for value in series["x"]]
-            label = series.get("name") or f"Series {index + 1}"
-            plotted_value_count += len(series["x"])
-
-            if payload["chartType"] == "scatter":
-                plt.scatter(series_positions, series["y"], label=label)
-            else:
-                plt.plot(series_positions, series["y"], marker="o", label=label)
-
-    plt.xticks(positions, axis_labels, rotation=45, ha="right")
-    if len(payload["series"]) > 1:
-        plt.legend()
-else:
-    x_values = payload["x"]
-    y_values = payload["y"]
-    positions = list(range(len(x_values)))
-    plotted_value_count = len(x_values)
-
-    if payload["chartType"] == "line":
-        plt.plot(positions, y_values, marker="o", color="#4C78A8")
-    elif payload["chartType"] == "scatter":
-        plt.scatter(positions, y_values, color="#4C78A8")
-    else:
-        plt.bar(positions, y_values, color="#4C78A8")
-
-    plt.xticks(positions, [str(value) for value in x_values], rotation=45, ha="right")
-
-if payload.get("title"):
-    plt.title(payload["title"])
-
-if payload.get("xLabel"):
-    plt.xlabel(payload["xLabel"])
-
-if payload.get("yLabel"):
-    plt.ylabel(payload["yLabel"])
-
-plt.tight_layout()
-plt.savefig("outputs/chart.png", dpi=200)
-print(f"Created chart.png with {plotted_value_count} plotted values.")
-`);
-}
-
-function expectSingleAsset(
-  generatedAssets: GeneratedSandboxAsset[],
-  options: {
-    label: string;
-    mimeType: string;
-  },
-) {
-  if (generatedAssets.length !== 1 || generatedAssets[0]?.mimeType !== options.mimeType) {
-    throw new WorkflowEngineError(
-      `${options.label} step must save exactly one ${options.mimeType} asset.`,
-      "invalid_generated_assets",
-    );
-  }
-
-  return generatedAssets[0];
-}
 
 function parseWorkflowRunExecutionContext(row: {
   deliveryJson: string;
@@ -747,10 +622,6 @@ function getStepToolDisplayName(step: WorkflowStepV1) {
   return "document";
 }
 
-function buildStepRuntimeToolCallId(runId: string, stepKey: string) {
-  return `workflow-run:${runId}:step:${stepKey}:${Date.now()}`;
-}
-
 async function executeWorkflowStep(input: {
   executionRole: UserRole;
   organizationId: string;
@@ -761,154 +632,16 @@ async function executeWorkflowStep(input: {
   step: WorkflowStepV1;
   stepOutputs: Map<string, StepExecutionState>;
 }) {
-  const inputFiles = resolveStepInputFiles({
+  resolveStepInputFiles({
     resolvedInputs: input.resolvedInputs,
     step: input.step,
     stepOutputs: input.stepOutputs,
   });
 
-  if (input.step.tool === "run_data_analysis") {
-    const pythonCode = input.step.config.python_code?.trim();
-
-    if (!pythonCode) {
-      throw new WorkflowEngineError(
-        `Analysis step ${input.step.step_key} is missing python_code.`,
-        "analysis_code_missing",
-      );
-    }
-
-    const result = await executeSandboxedCommand({
-      code: pythonCode,
-      inputFiles,
-      organizationId: input.organizationId,
-      organizationSlug: input.organizationSlug,
-      role: input.executionRole,
-      runtimeToolCallId: buildStepRuntimeToolCallId(input.runId, input.step.step_key),
-      toolName: "run_data_analysis",
-      userId: input.runAsUserId,
-    });
-
-    return {
-      chartPayload: parseChartAnalysisStdout(result.stdout),
-      generatedAssets: result.generatedAssets,
-      inputFiles,
-      sandboxResult: result,
-      toolName: input.step.tool,
-    };
-  }
-
-  if (input.step.tool === "generate_visual_graph") {
-    const pythonCode = input.step.config.python_code?.trim();
-
-    if (pythonCode) {
-      const result = await executeSandboxedCommand({
-        code: buildVisualGraphCode(pythonCode),
-        inputFiles,
-        organizationId: input.organizationId,
-        organizationSlug: input.organizationSlug,
-        role: input.executionRole,
-        runtimeToolCallId: buildStepRuntimeToolCallId(input.runId, input.step.step_key),
-        toolName: "generate_visual_graph",
-        userId: input.runAsUserId,
-      });
-      expectSingleAsset(result.generatedAssets, {
-        label: "generate_visual_graph",
-        mimeType: "image/png",
-      });
-
-      return {
-        chartPayload: null,
-        generatedAssets: result.generatedAssets,
-        inputFiles,
-        sandboxResult: result,
-        toolName: input.step.tool,
-      };
-    }
-
-    const chartSourceRef = input.step.input_refs.find((inputRef) => inputRef.type === "step_output");
-
-    if (!chartSourceRef) {
-      throw new WorkflowEngineError(
-        `Chart step ${input.step.step_key} has no step_output reference for chart data.`,
-        "chart_payload_missing",
-      );
-    }
-
-    const chartSource = input.stepOutputs.get(chartSourceRef.step_key);
-
-    if (!chartSource || !chartSource.chartPayload) {
-      throw new WorkflowEngineError(
-        `Chart step ${input.step.step_key} could not find chart payload from ${chartSourceRef.step_key}.`,
-        "chart_payload_missing",
-      );
-    }
-
-    const chartPayload = buildStoredChartPayload(chartSource.chartPayload, {
-      chartType: input.step.config.chart_type,
-      title: input.step.config.title,
-    });
-
-    const result = await executeSandboxedCommand({
-      code: buildStoredChartRenderCode(),
-      inlineWorkspaceFiles: [
-        {
-          content: JSON.stringify(chartPayload),
-          relativePath: "chart_payload.json",
-        },
-      ],
-      inputFiles: [],
-      organizationId: input.organizationId,
-      organizationSlug: input.organizationSlug,
-      role: input.executionRole,
-      runtimeToolCallId: buildStepRuntimeToolCallId(input.runId, input.step.step_key),
-      toolName: "generate_visual_graph",
-      userId: input.runAsUserId,
-    });
-    expectSingleAsset(result.generatedAssets, {
-      label: "generate_visual_graph",
-      mimeType: "image/png",
-    });
-
-    return {
-      chartPayload: null,
-      generatedAssets: result.generatedAssets,
-      inputFiles,
-      sandboxResult: result,
-      toolName: input.step.tool,
-    };
-  }
-
-  const pythonCode = input.step.config.python_code?.trim();
-
-  if (!pythonCode) {
-    throw new WorkflowEngineError(
-      `Document step ${input.step.step_key} is missing python_code.`,
-      "document_code_missing",
-    );
-  }
-
-  const result = await executeSandboxedCommand({
-    code: pythonCode,
-    inputFiles,
-    organizationId: input.organizationId,
-    organizationSlug: input.organizationSlug,
-    role: input.executionRole,
-    runtimeToolCallId: buildStepRuntimeToolCallId(input.runId, input.step.step_key),
-    toolName: "generate_document",
-    userId: input.runAsUserId,
-  });
-  expectSingleAsset(result.generatedAssets, {
-    label: "generate_document",
-    mimeType: "application/pdf",
-  });
-
-  return {
-    chartPayload: null,
-    generatedAssets: result.generatedAssets,
-    inputFiles,
-    sandboxResult: result,
-    toolName: input.step.tool,
-  };
+  throw new WorkflowEngineError(
+    `Legacy workflow step ${input.step.step_key} uses removed tool ${input.step.tool}. Notebook-native workflow execution has not been rebuilt yet.`,
+    "legacy_workflow_tool_removed",
+  );
 }
 
 async function createRunningWorkflowStep(input: {
@@ -1098,9 +831,10 @@ export async function executeWorkflowRun(input: {
   let completedStepCount = 0;
   let totalStepCount = 0;
   let validationSummary: WorkflowInputValidationSummary | null = null;
+  let contracts: WorkflowVersionContractsV1 | null = null;
 
   try {
-    const contracts = parseWorkflowVersionContracts({
+    contracts = parseWorkflowVersionContracts({
       deliveryJson: runContext.version.deliveryJson,
       executionIdentityJson: runContext.version.executionIdentityJson,
       inputBindingsJson: runContext.version.inputBindingsJson,
@@ -1111,6 +845,10 @@ export async function executeWorkflowRun(input: {
       scheduleJson: runContext.version.scheduleJson,
       thresholdsJson: runContext.version.thresholdsJson,
     });
+
+    if (!contracts) {
+      throw new WorkflowEngineError("Workflow contracts could not be parsed.", "contract_parse_failed");
+    }
 
     const executionRole = await assertRunExecutionIdentity({
       contracts,
@@ -1201,6 +939,33 @@ export async function executeWorkflowRun(input: {
         workflowId: runContext.workflow.id,
       });
 
+      if (validation.status === "waiting_for_input" && inputRequestNotification?.notificationDispatched) {
+        await sendWorkflowRunEmailAlert({
+          channels: contracts.delivery.channels,
+          event: "waiting_for_input",
+          knowledgeUploadPath: inputRequestNotification.knowledgeUploadPath,
+          organizationId: input.organizationId,
+          requestedInputKeys: missingRequiredInputKeys,
+          runId: input.runId,
+          runStatus: "waiting_for_input",
+          workflowId: runContext.workflow.id,
+          workflowName: runContext.workflow.name,
+        });
+      }
+
+      if (validation.status === "blocked_validation") {
+        await sendWorkflowRunEmailAlert({
+          channels: contracts.delivery.channels,
+          event: "run_failed",
+          failureReason: `validation_failed: ${validation.summary.failedCheckCount} check(s) failed across ${validation.summary.failedInputCount} input(s).`,
+          organizationId: input.organizationId,
+          runId: input.runId,
+          runStatus: "blocked_validation",
+          workflowId: runContext.workflow.id,
+          workflowName: runContext.workflow.name,
+        });
+      }
+
       const blockedRun = await getWorkflowRunById({
         organizationId: input.organizationId,
         runId: input.runId,
@@ -1281,7 +1046,6 @@ export async function executeWorkflowRun(input: {
         });
 
         stepOutputs.set(step.step_key, {
-          chartPayload: execution.chartPayload,
           generatedAssets: execution.generatedAssets,
           inputFiles: execution.inputFiles,
           sandboxRunId: execution.sandboxResult.sandboxRunId,
@@ -1437,6 +1201,17 @@ export async function executeWorkflowRun(input: {
       runId: input.runId,
       status: "failed",
       workflowId: runContext.workflow.id,
+    });
+
+    await sendWorkflowRunEmailAlert({
+      channels: contracts?.delivery.channels ?? [],
+      event: "run_failed",
+      failureReason: `${failureCode}: ${failureMessage}`,
+      organizationId: input.organizationId,
+      runId: input.runId,
+      runStatus: "failed",
+      workflowId: runContext.workflow.id,
+      workflowName: runContext.workflow.name,
     });
 
     logStructuredEvent("workflow.run_failed", {

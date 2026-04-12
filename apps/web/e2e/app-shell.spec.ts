@@ -64,80 +64,6 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
     });
   });
 
-  await page.route("**/api/workflows/from-chat-turn", async (route) => {
-    await route.fulfill({
-      body: JSON.stringify({
-        draft: {
-          conversationId: "conversation-1",
-          inputFilePaths: [],
-          sourceSummary: {
-            analysisToolCallCount: 1,
-            chartToolCallCount: 0,
-            documentToolCallCount: 0,
-            sandboxRunIds: [],
-            selectedToolCallIds: ["tool-call-1"],
-          },
-          status: "draft",
-          suggestedDescription: "Generated from conversation.",
-          suggestedName: "Budget review workflow",
-          turnId: "turn-1",
-          unresolvedInputPaths: [],
-          version: {
-            delivery: {
-              channels: [],
-              retry_policy: {
-                backoff_multiplier: 2,
-                initial_backoff_seconds: 30,
-                max_attempts: 3,
-              },
-              schema_version: 1,
-            },
-            executionIdentity: {
-              mode: "fixed_membership_user",
-              on_identity_invalid: "block_run",
-              recheck_at_enqueue: true,
-              recheck_at_execution: true,
-              required_membership_roles: ["admin", "owner"],
-              require_membership_status: "active",
-              run_as_user_id: "user-1",
-              schema_version: 1,
-            },
-            inputBindings: {
-              bindings: [],
-              schema_version: 1,
-            },
-            inputContract: {
-              inputs: [],
-              schema_version: 1,
-            },
-            outputs: {
-              schema_version: 1,
-              summary_template: "standard_v1",
-            },
-            provenance: {
-              schema_version: 1,
-              source_kind: "manual_builder",
-            },
-            recipe: {
-              schema_version: 1,
-              steps: [],
-            },
-            schedule: {
-              kind: "manual_only",
-              schema_version: 1,
-            },
-            thresholds: {
-              rules: [],
-              schema_version: 1,
-            },
-          },
-          visibility: "organization",
-        },
-      }),
-      contentType: "application/json",
-    });
-  });
-
   await page.route("**/api/workflows", async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({
@@ -476,12 +402,6 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
   await page.getByRole("button", { name: /Budget review/ }).first().click();
   await expect(page.getByText("Budget review").first()).toBeVisible();
 
-  await page.locator(".chat-toolbar__summary").click();
-  await page.getByRole("button", { name: "Save as workflow" }).click();
-  await expect(page.getByRole("heading", { name: "Finalize workflow draft" })).toBeVisible();
-  await page.getByRole("button", { name: "Save workflow" }).click();
-  await expect(page.getByText("Saved workflow")).toBeVisible();
-
   await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "Saved workflows and execution history" })).toBeVisible();
@@ -498,6 +418,133 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
   await page.locator(".shell-menu__summary").click();
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings and Governance" })).toBeVisible();
+});
+
+test("opening an existing analysis conversation from chat restores workspace mode", async ({ page }) => {
+  await page.route("**/api/conversations*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        conversations: [
+          {
+            createdAt: new Date("2026-03-25T12:00:00.000Z").toISOString(),
+            id: "conversation-1",
+            lastModified: new Date().toISOString(),
+            messageCount: 2,
+            preview: "Budget review preview",
+            thinkingLevel: "medium",
+            title: "Budget review",
+            usage: {
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: {
+                cacheRead: 0,
+                cacheWrite: 0,
+                input: 0.001,
+                output: 0.002,
+                total: 0.003,
+              },
+              input: 10,
+              output: 20,
+              totalTokens: 30,
+            },
+          },
+        ],
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/conversations/conversation-1", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        conversation: {
+          createdAt: new Date("2026-03-25T12:00:00.000Z").toISOString(),
+          id: "conversation-1",
+          lastModified: new Date().toISOString(),
+          messages: [],
+          model: {
+            api: "openai",
+            id: "gpt-5.4-mini",
+            name: "GPT-5.4 Mini",
+            provider: "openai",
+          },
+          thinkingLevel: "medium",
+          title: "Budget review",
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/analysis/workspaces/conversation-1", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        latestRevision: {
+          createdAt: Date.now(),
+          htmlExportPath: "outputs/notebook.html",
+          id: "revision-1",
+          notebookPath: "analysis_workspaces/workspace-1/revisions/1/notebook.py",
+          notebookSource: "import marimo",
+          revisionNumber: 1,
+          sandboxRunId: "run-1",
+          status: "completed",
+          structuredResultPath: null,
+          summary: "Done",
+          turnId: "turn-1",
+          workspaceId: "workspace-1",
+        },
+        workspace: {
+          conversationId: "conversation-1",
+          createdAt: Date.now(),
+          id: "workspace-1",
+          latestRevisionId: "revision-1",
+          latestSandboxRunId: "run-1",
+          organizationId: "org-1",
+          status: "completed",
+          title: "Budget review",
+          updatedAt: Date.now(),
+          userId: "user-1",
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/analysis/workspaces/conversation-1/preview", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        expiresAt: Date.now() + 15 * 60 * 1000,
+        fallbackHtmlUrl: "/api/generated-files/run-1/outputs/notebook.html",
+        port: 27123,
+        proxyUrl: "/api/analysis/workspaces/conversation-1/preview/proxy/?token=preview-token",
+        revisionId: "revision-1",
+        sessionId: "session-1",
+        workspaceId: "workspace-1",
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.route("**/api/analysis/workspaces/conversation-1/preview/proxy/?token=*", async (route) => {
+    await route.fulfill({
+      body: "<html><body>preview</body></html>",
+      contentType: "text/html",
+    });
+  });
+
+  await page.route("**/api/analysis/workspaces/conversation-1/preview/proxy/**", async (route) => {
+    await route.fulfill({
+      body: "<html><body>preview</body></html>",
+      contentType: "text/html",
+    });
+  });
+
+  await login(page, "owner@example.com", "owner-password");
+
+  await page.getByRole("button", { name: /Budget review/ }).first().click();
+  await page.waitForURL("**/analysis/conversation-1");
+  await expect(page.getByRole("link", { name: "Back to chats" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "History" })).toHaveCount(0);
 });
 
 test("intern is redirected away from owner admin pages", async ({ page }) => {

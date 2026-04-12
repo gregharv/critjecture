@@ -105,7 +105,7 @@ describe("POST /api/company-knowledge/search", () => {
     expect(body.summary).toContain("Role: Owner.");
     expect(body.summary).toContain("lightweight file manifest");
     expect(body.summary).toContain("Selected CSV columns: ledger_year, contractor, payout.");
-    expect(body.summary).toContain("Use the selected file path in inputFiles for run_data_analysis");
+    expect(body.summary).toContain("Use the selected file path in inputFiles for run_marimo_analysis");
     expect(body.summary).not.toContain("[admin/contractors_2026.csv:1]");
   });
 

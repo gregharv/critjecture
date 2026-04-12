@@ -7,7 +7,11 @@ import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { getAppDatabase } from "@/lib/app-db";
 import { workflowInputRequests } from "@/lib/app-schema";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
-import { parseWorkflowJsonStringArray } from "@/lib/workflow-types";
+import {
+  parseWorkflowJsonStringArray,
+  type WorkflowDeliveryChannelV1,
+  type WorkflowEmailAlertEvent,
+} from "@/lib/workflow-types";
 
 export const WORKFLOW_INPUT_REQUEST_NOTIFICATION_CHANNELS = [
   "in_app",
@@ -20,6 +24,7 @@ export type WorkflowInputRequestNotificationChannel =
 export type EnsureWorkflowInputRequestNotificationResult = {
   knowledgeUploadPath: string;
   notificationChannels: WorkflowInputRequestNotificationChannel[];
+  notificationDispatched: boolean;
   requestId: string;
   requestedInputKeys: string[];
 };
@@ -95,6 +100,117 @@ function buildInputRequestMessage(input: {
   const keys = input.requestedInputKeys.join(", ");
 
   return `Workflow \"${input.workflowName}\" is waiting for required inputs: ${keys}. Upload or refresh files at ${input.knowledgeUploadPath}.`;
+}
+
+function normalizeRecipientEmails(values: string[]) {
+  return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))].sort();
+}
+
+function getWorkflowEmailProviderWebhookUrl() {
+  return (process.env.CRITJECTURE_WORKFLOW_EMAIL_DELIVERY_WEBHOOK_URL ?? "").trim();
+}
+
+function getWorkflowEmailAlertChannel(channels: WorkflowDeliveryChannelV1[]) {
+  return (
+    channels.find(
+      (channel): channel is Extract<WorkflowDeliveryChannelV1, { kind: "email" }> =>
+        channel.kind === "email",
+    ) ?? null
+  );
+}
+
+export async function sendWorkflowRunEmailAlert(input: {
+  channels: WorkflowDeliveryChannelV1[];
+  event: Exclude<WorkflowEmailAlertEvent, "run_completed">;
+  failureReason?: string | null;
+  knowledgeUploadPath?: string | null;
+  organizationId: string;
+  requestedInputKeys?: string[];
+  runId: string;
+  runStatus: "waiting_for_input" | "blocked_validation" | "failed";
+  workflowId: string;
+  workflowName: string;
+}) {
+  const channel = getWorkflowEmailAlertChannel(input.channels);
+
+  if (!channel || !channel.enabled) {
+    return false;
+  }
+
+  const configuredEvents = new Set(
+    channel.events.length > 0 ? channel.events : (["run_completed"] as WorkflowEmailAlertEvent[]),
+  );
+
+  if (!configuredEvents.has(input.event)) {
+    return false;
+  }
+
+  const recipients = normalizeRecipientEmails(channel.recipients);
+
+  if (recipients.length === 0) {
+    return false;
+  }
+
+  const providerWebhookUrl = getWorkflowEmailProviderWebhookUrl();
+
+  if (!providerWebhookUrl) {
+    return false;
+  }
+
+  const requestedInputKeys = normalizeInputKeys(input.requestedInputKeys ?? []);
+
+  const payload = {
+    event: "workflow.alert.email",
+    alert_event: input.event,
+    failure_reason: input.failureReason ?? null,
+    knowledge_upload_path: input.knowledgeUploadPath ?? null,
+    organization_id: input.organizationId,
+    recipients,
+    requested_input_keys: requestedInputKeys,
+    run: {
+      id: input.runId,
+      status: input.runStatus,
+    },
+    timestamp: new Date().toISOString(),
+    workflow: {
+      id: input.workflowId,
+      name: input.workflowName,
+    },
+  };
+
+  try {
+    const response = await fetch(providerWebhookUrl, {
+      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Email alert provider responded with HTTP ${response.status}.`);
+    }
+
+    logStructuredEvent("workflow.email_alert_sent", {
+      alert_event: input.event,
+      organizationId: input.organizationId,
+      routeGroup: "workflow",
+      routeKey: "workflow.notifications.email_alert",
+      workflowRunId: input.runId,
+    });
+
+    return true;
+  } catch (caughtError) {
+    logStructuredError("workflow.email_alert_failed", caughtError, {
+      alert_event: input.event,
+      organizationId: input.organizationId,
+      routeGroup: "workflow",
+      routeKey: "workflow.notifications.email_alert",
+      workflowRunId: input.runId,
+    });
+
+    return false;
+  }
 }
 
 async function sendWorkflowInputRequestWebhook(input: {
@@ -326,6 +442,7 @@ export async function ensureWorkflowInputRequestNotification(input: {
   return {
     knowledgeUploadPath,
     notificationChannels,
+    notificationDispatched: shouldSendNotification,
     requestId,
     requestedInputKeys,
   };

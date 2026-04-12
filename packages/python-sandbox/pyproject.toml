@@ -5,6 +5,7 @@ description = "Isolated Python runtime for Critjecture data analysis tools"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "marimo>=0.23.1",
     "matplotlib>=3.10.8",
     "polars>=1.39.3",
     "reportlab>=4.4.10",

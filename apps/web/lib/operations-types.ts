@@ -100,7 +100,9 @@ export type RecentFailureSummary = {
   governanceJobId: string | null;
   knowledgeImportJobId: string | null;
   outcome: string;
+  previewSessionId: string | null;
   requestId: string;
+  revisionId: string | null;
   runtimeToolCallId: string | null;
   routeGroup: OperationsRouteGroup;
   routeKey: string;
@@ -109,6 +111,7 @@ export type RecentFailureSummary = {
   toolName: string | null;
   turnId: string | null;
   userEmail: string | null;
+  workspaceId: string | null;
 };
 
 export type OperationsAlertSummary = {

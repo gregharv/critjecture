@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useRouter } from "next/navigation";
+
 import type { Agent, AgentMessage, SessionData } from "@mariozechner/pi-web-ui";
 
-import {
-  WorkflowBuilderModal,
-  type SaveWorkflowDraftInput,
-} from "@/components/workflow-builder-modal";
 import type {
   CompanyKnowledgeCandidateFile,
   CompanyKnowledgeMatch,
@@ -43,14 +41,9 @@ import type {
   ToolCallStatus,
 } from "@/lib/audit-types";
 import type {
-  BuildWorkflowFromChatTurnResponse,
-  WorkflowDraftFromChatTurn,
-} from "@/lib/workflow-builder-types";
-import type {
-  DataAnalysisToolResponse,
-  GeneratedAssetToolResponse,
-  SandboxToolResponse,
-} from "@/lib/sandbox-tool-types";
+  AnalysisWorkspaceResponse,
+  RunMarimoAnalysisResponse,
+} from "@/lib/marimo-types";
 import { registerCritjectureToolRenderers } from "@/lib/tool-renderers";
 import {
   DATA_ANALYSIS_CHAT_MODEL_ID,
@@ -143,17 +136,6 @@ type ConversationBootstrapState = {
   initialSessionData: SessionData | null;
 };
 
-type CreateWorkflowResponse = {
-  workflow?: {
-    workflow?: {
-      id?: string;
-      name?: string;
-    };
-  };
-};
-
-const GRAPH_REVIEW_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
-const DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES = 512 * 1024;
 const DATA_ANALYSIS_TEXT_ASSET_PREVIEW_MAX_CHARS = 50_000;
 
 function isUserAgentMessage(value: unknown): value is Extract<AgentMessage, { role: "user" }> {
@@ -278,6 +260,27 @@ function extractSandboxRunId(value: unknown) {
   return null;
 }
 
+async function conversationHasAnalysisWorkspace(conversationId: string) {
+  const response = await fetch(
+    `/api/analysis/workspaces/${encodeURIComponent(conversationId)}`,
+    {
+      cache: "no-store",
+    },
+  );
+
+  if (response.status === 404) {
+    return false;
+  }
+
+  if (!response.ok) {
+    throw new Error("Failed to check analysis workspace state.");
+  }
+
+  const data = (await response.json()) as AnalysisWorkspaceResponse | { error: string };
+
+  return "workspace" in data;
+}
+
 function getUniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -320,7 +323,7 @@ function getMostRecentToolResultName(context: unknown) {
 function shouldUseDataAnalysisModel(context: unknown) {
   const toolName = getMostRecentToolResultName(context);
 
-  return toolName === "search_company_knowledge" || toolName === "run_data_analysis";
+  return toolName === "search_company_knowledge" || toolName === "run_marimo_analysis";
 }
 
 function getDataAnalysisReasoning(
@@ -565,78 +568,11 @@ function createToolRouteError(
   return error;
 }
 
-function isImageMimeType(mimeType: string) {
-  return mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
-}
-
-async function convertBlobToBase64(blob: Blob) {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onerror = () => {
-      reject(reader.error ?? new Error("Unable to read generated image for graph review."));
-    };
-
-    reader.onload = () => {
-      if (typeof reader.result !== "string") {
-        reject(new Error("Generated image did not produce a valid data URL."));
-        return;
-      }
-
-      resolve(reader.result);
-    };
-
-    reader.readAsDataURL(blob);
-  });
-
-  const commaIndex = dataUrl.indexOf(",");
-
-  return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : null;
-}
-
-function getGraphReviewAsset(
-  result: SandboxToolResponse,
-): GeneratedAssetToolResponse["generatedAsset"] | null {
-  if (!("generatedAsset" in result)) {
-    return null;
-  }
-
-  const generatedAsset = (result as GeneratedAssetToolResponse).generatedAsset;
-
-  if (!generatedAsset || !isImageMimeType(generatedAsset.mimeType)) {
-    return null;
-  }
-
-  if (generatedAsset.byteSize > GRAPH_REVIEW_IMAGE_MAX_BYTES) {
-    return null;
-  }
-
-  return generatedAsset;
-}
-
-function getDataAnalysisTextAsset(result: SandboxToolResponse) {
-  const generatedAssets = Array.isArray(result.generatedAssets) ? result.generatedAssets : [];
-
-  return (
-    generatedAssets.find((asset) => {
-      if (asset.byteSize > DATA_ANALYSIS_TEXT_ASSET_MAX_BYTES) {
-        return false;
-      }
-
-      return (
-        asset.mimeType === "text/csv" ||
-        asset.mimeType === "application/json" ||
-        asset.mimeType === "text/plain"
-      );
-    }) ?? null
-  );
-}
-
-async function buildDataAnalysisTextAssetContent(
-  result: SandboxToolResponse,
+async function buildMarimoStructuredResultContent(
+  result: RunMarimoAnalysisResponse,
   signal?: AbortSignal,
 ) {
-  const generatedAsset = getDataAnalysisTextAsset(result);
+  const generatedAsset = result.structuredResultAsset;
 
   if (!generatedAsset) {
     return null;
@@ -663,41 +599,7 @@ async function buildDataAnalysisTextAssetContent(
 
     return {
       type: "text" as const,
-      text: `Analysis output file (${generatedAsset.relativePath}):\n${preview}`,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function buildGraphReviewImageContent(
-  result: SandboxToolResponse,
-  signal?: AbortSignal,
-) {
-  const generatedAsset = getGraphReviewAsset(result);
-
-  if (!generatedAsset) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(generatedAsset.downloadUrl, { signal });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const blob = await response.blob();
-    const data = await convertBlobToBase64(blob);
-
-    if (!data) {
-      return null;
-    }
-
-    return {
-      data,
-      mimeType: generatedAsset.mimeType,
-      type: "image" as const,
+      text: `Notebook output file (${generatedAsset.path}):\n${preview}`,
     };
   } catch {
     return null;
@@ -1004,12 +906,25 @@ function ChatHistoryDialog({
 }
 
 type ChatShellProps = {
+  initialConversationId?: string;
   organizationSlug: string;
+  redirectToAnalysisOnNotebookRun?: boolean;
   role: UserRole;
+  showHistory?: boolean;
+  showToolbar?: boolean;
   userId: string;
 };
 
-export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellProps) {
+export function ChatShellWithRole({
+  initialConversationId,
+  organizationSlug,
+  redirectToAnalysisOnNotebookRun = false,
+  role,
+  showHistory = true,
+  showToolbar = true,
+  userId,
+}: ChatShellProps) {
+  const router = useRouter();
   const activeTurnIdRef = useRef<string | null>(null);
   const awaitingFileSelectionRef = useRef(false);
   const browserSessionIdRef = useRef<string>("");
@@ -1020,7 +935,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const historyRequestIdRef = useRef(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const messageIndexRef = useRef(0);
-  const lastCompletedTurnIdRef = useRef<string | null>(null);
   const runDataAnalysisFailureStreakRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
@@ -1038,15 +952,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     [],
   );
   const [isStreaming, setIsStreaming] = useState(false);
-  const [workflowBuilderOpen, setWorkflowBuilderOpen] = useState(false);
-  const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraftFromChatTurn | null>(
-    null,
-  );
-  const [workflowDraftError, setWorkflowDraftError] = useState<string | null>(null);
-  const [workflowDraftLoading, setWorkflowDraftLoading] = useState(false);
-  const [workflowSaveError, setWorkflowSaveError] = useState<string | null>(null);
-  const [workflowSaveSuccess, setWorkflowSaveSuccess] = useState<string | null>(null);
-  const [workflowSaving, setWorkflowSaving] = useState(false);
   const [{ error, ready }, setState] = useState<ChatShellState>({
     error: null,
     ready: false,
@@ -1061,7 +966,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
     async function initializeConversation() {
       const url = new URL(window.location.href);
-      const requestedConversationId = url.searchParams.get("conversation")?.trim() ?? "";
+      const requestedConversationId =
+        initialConversationId?.trim() || url.searchParams.get("conversation")?.trim() || "";
 
       if (!requestedConversationId) {
         const draft = createDraftConversation();
@@ -1070,12 +976,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
           conversationPersistedRef.current = false;
-          lastCompletedTurnIdRef.current = null;
-          setWorkflowBuilderOpen(false);
-          setWorkflowDraft(null);
-          setWorkflowDraftError(null);
-          setWorkflowSaveError(null);
-          setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
           setConversationBootstrap(draft);
         }
@@ -1112,12 +1012,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         conversationCreatedAtRef.current = bootstrap.createdAt;
         conversationIdRef.current = bootstrap.id;
         conversationPersistedRef.current = true;
-        lastCompletedTurnIdRef.current = null;
-        setWorkflowBuilderOpen(false);
-        setWorkflowDraft(null);
-        setWorkflowDraftError(null);
-        setWorkflowSaveError(null);
-        setWorkflowSaveSuccess(null);
         setActiveConversationTitle(data.conversation.title);
         setConversationBootstrap(bootstrap);
       } catch (caughtError) {
@@ -1125,18 +1019,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         const draft = createDraftConversation();
 
         if (!cancelled) {
-          const nextUrl = new URL(window.location.href);
-          nextUrl.searchParams.delete("conversation");
-          window.history.replaceState({}, "", nextUrl.toString());
+          if (!initialConversationId) {
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.delete("conversation");
+            window.history.replaceState({}, "", nextUrl.toString());
+          }
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
           conversationPersistedRef.current = false;
-          lastCompletedTurnIdRef.current = null;
-          setWorkflowBuilderOpen(false);
-          setWorkflowDraft(null);
-          setWorkflowDraftError(null);
-          setWorkflowSaveError(null);
-          setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
           setConversationBootstrap(draft);
         }
@@ -1148,7 +1038,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialConversationId]);
 
   useEffect(() => {
     if (!conversationBootstrap) {
@@ -1321,9 +1211,11 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               return upsertConversationMetadata(current, result.metadata);
             });
 
-            const url = new URL(window.location.href);
-            url.searchParams.set("conversation", result.conversationId);
-            window.history.replaceState({}, "", url.toString());
+            if (!initialConversationId) {
+              const url = new URL(window.location.href);
+              url.searchParams.set("conversation", result.conversationId);
+              window.history.replaceState({}, "", url.toString());
+            }
           });
         };
 
@@ -1553,10 +1445,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           });
         };
 
-        const sandboxToolParameters = Type.Object({
-          code: Type.String({
+        const runMarimoAnalysisParameters = Type.Object({
+          notebookSource: Type.String({
             description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. inputs/ is read-only; never write or overwrite files there. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a short summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
+              "A complete marimo notebook as Python source. The notebook must import marimo, define app = marimo.App(...), use @app.cell cells, read staged company files only from inputs/<company_data-relative-path>, use Polars with pl.scan_csv(...).collect() for CSV-backed analysis, write generated files only under outputs/, and end with if __name__ == '__main__': app.run().",
             minLength: 1,
           }),
           inputFiles: Type.Optional(
@@ -1568,57 +1460,37 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               }),
             ),
           ),
-        });
-
-        const generateVisualGraphParameters = Type.Object({
-          analysisResultId: Type.Optional(
+          title: Type.Optional(
             Type.String({
-              description:
-                "Optional analysisResultId returned by run_data_analysis for chart-ready data. If present, the server renders the stored chart without rerunning analysis code.",
+              description: "Optional notebook title shown in the analysis workspace.",
               minLength: 1,
             }),
           ),
-          chartType: Type.Optional(
-            Type.Union([
-              Type.Literal("bar"),
-              Type.Literal("line"),
-              Type.Literal("scatter"),
-            ]),
-          ),
-          code: Type.Optional(
-            Type.String({
-              description:
-                "Python plotting code to execute inside the sandbox. This may read staged company CSV files from inputs/<same-relative-path> or render a manual/synthetic chart. Save exactly one PNG to outputs/chart.png and print a short summary.",
-              minLength: 1,
-            }),
-          ),
-          inputFiles: Type.Optional(
-            Type.Array(
-              Type.String({
-                description:
-                  "Optional company_data-relative paths to stage for plotting code, such as admin/quarterly_report_2026.csv. These are ignored when analysisResultId is used.",
-                minLength: 1,
-              }),
-            ),
-          ),
-          title: Type.Optional(Type.String({ minLength: 1 })),
-          xLabel: Type.Optional(Type.String({ minLength: 1 })),
-          yLabel: Type.Optional(Type.String({ minLength: 1 })),
         });
 
         const createSandboxTool = <
           TParams extends Record<string, unknown>,
-          TResponse extends SandboxToolResponse,
+          TResponse extends {
+            sandboxRunId: string;
+            stagedFiles: Array<{
+              sourcePath: string;
+              stagedPath: string;
+            }>;
+            status: string;
+            stderr: string;
+            stdout: string;
+            summary: string;
+          },
         >(
           options: {
-            attachDataAnalysisTextOutput?: boolean;
-            attachGraphImageForReview?: boolean;
+            attachStructuredTextOutput?: boolean;
             buildRequestBody: (runtimeToolCallId: string, params: TParams) => Record<string, unknown>;
             description: string;
             label: string;
             name: string;
+            onSuccess?: (result: TResponse, params: TParams) => void | Promise<void>;
             parameters: unknown;
-            route: string;
+            route: string | ((params: TParams) => string);
           },
         ) => ({
           name: options.name,
@@ -1636,7 +1508,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               );
             }
 
-            const response = await fetch(options.route, {
+            const route = typeof options.route === "function" ? options.route(params) : options.route;
+            const response = await fetch(route, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1655,37 +1528,29 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             }
 
             const result = data as TResponse;
-            const content: Array<
-              | {
-                  text: string;
-                  type: "text";
-                }
-              | {
-                  data: string;
-                  mimeType: string;
-                  type: "image";
-                }
-            > = [
+            const content: Array<{
+              text: string;
+              type: "text";
+            }> = [
               {
                 type: "text",
                 text: result.summary,
               },
             ];
 
-            if (options.attachDataAnalysisTextOutput) {
-              const textAssetContent = await buildDataAnalysisTextAssetContent(result, signal);
+            if (options.attachStructuredTextOutput) {
+              const textAssetContent = await buildMarimoStructuredResultContent(
+                result as RunMarimoAnalysisResponse,
+                signal,
+              );
 
               if (textAssetContent) {
                 content.push(textAssetContent);
               }
             }
 
-            if (options.attachGraphImageForReview) {
-              const imageContent = await buildGraphReviewImageContent(result, signal);
-
-              if (imageContent) {
-                content.push(imageContent);
-              }
+            if (options.onSuccess) {
+              await options.onSuccess(result, params);
             }
 
             return {
@@ -2021,70 +1886,40 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           },
         };
 
-        const runDataAnalysisTool = createSandboxTool<
-          { code: string; inputFiles?: string[] },
-          DataAnalysisToolResponse
+        const runMarimoAnalysisTool = createSandboxTool<
+          { inputFiles?: string[]; notebookSource: string; title?: string },
+          RunMarimoAnalysisResponse
         >({
           buildRequestBody: (runtimeToolCallId, params) => ({
-            code: params.code,
             inputFiles: params.inputFiles ?? [],
-            runtimeToolCallId,
-          }),
-          name: "run_data_analysis",
-          label: "Run Data Analysis",
-          description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. inputs/ is read-only staged data; never write there. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a compact summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
-          parameters: sandboxToolParameters,
-          route: "/api/data-analysis/run",
-          attachDataAnalysisTextOutput: true,
-        });
-
-        const generateVisualGraphTool = createSandboxTool<
-          {
-            analysisResultId?: string;
-            chartType?: "bar" | "line" | "scatter";
-            code?: string;
-            inputFiles?: string[];
-            title?: string;
-            xLabel?: string;
-            yLabel?: string;
-          },
-          GeneratedAssetToolResponse
-        >({
-          buildRequestBody: (runtimeToolCallId, params) => ({
-            analysisResultId: params.analysisResultId,
-            chartType: params.chartType,
-            code: params.code,
-            inputFiles: params.inputFiles ?? [],
+            notebookSource: params.notebookSource,
             runtimeToolCallId,
             title: params.title,
-            xLabel: params.xLabel,
-            yLabel: params.yLabel,
           }),
-          name: "generate_visual_graph",
-          label: "Generate Visual Graph",
+          name: "run_marimo_analysis",
+          label: "Run Marimo Analysis",
           description:
-            "Generate exactly one PNG chart inside outputs/. This can either render a stored chart via analysisResultId or run arbitrary matplotlib code directly against staged company files passed in inputFiles.",
-          parameters: generateVisualGraphParameters,
-          route: "/api/visual-graph/run",
-          attachGraphImageForReview: true,
-        });
+            "Execute business-data analysis as a marimo notebook. Use this whenever the answer requires Python, tables, charts, or computed analysis. Provide full marimo notebook source, pass staged company files in inputFiles, read data only from inputs/, use Polars for CSVs, and write generated files only under outputs/.",
+          onSuccess: async (result) => {
+            if (!redirectToAnalysisOnNotebookRun || !conversationIdRef.current) {
+              return;
+            }
 
-        const generateDocumentTool = createSandboxTool<
-          { code: string; inputFiles?: string[] },
-          GeneratedAssetToolResponse
-        >({
-          buildRequestBody: (runtimeToolCallId, params) => ({
-            code: params.code,
-            inputFiles: params.inputFiles ?? [],
-            runtimeToolCallId,
-          }),
-          name: "generate_document",
-          label: "Generate Document",
-          description:
-            "Execute Python in the isolated sandbox to generate exactly one PDF document inside outputs/. Use reportlab and print a one-line summary after writing the file.",
-          parameters: sandboxToolParameters,
-          route: "/api/document/generate",
+            if (typeof result.workspaceId === "string" && result.workspaceId.trim()) {
+              router.push(`/analysis/${encodeURIComponent(conversationIdRef.current)}`);
+            }
+          },
+          parameters: runMarimoAnalysisParameters,
+          route: () => {
+            const conversationId = conversationIdRef.current?.trim();
+
+            if (!conversationId) {
+              throw new Error("Conversation id is missing for marimo analysis.");
+            }
+
+            return `/api/analysis/workspaces/${encodeURIComponent(conversationId)}/run`;
+          },
+          attachStructuredTextOutput: true,
         });
 
         agent = new Agent({
@@ -2102,9 +1937,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               braveSearchTool,
               braveGroundingTool,
               askUserTool,
-              runDataAnalysisTool,
-              generateVisualGraphTool,
-              generateDocumentTool,
+              runMarimoAnalysisTool,
             ],
           },
           convertToLlm: (messages) =>
@@ -2190,7 +2023,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           return undefined;
         });
         agent.setAfterToolCall(async ({ args, isError, result, toolCall }) => {
-          if (toolCall.name === "run_data_analysis") {
+          if (toolCall.name === "run_marimo_analysis") {
             runDataAnalysisFailureStreakRef.current = isError
               ? runDataAnalysisFailureStreakRef.current + 1
               : 0;
@@ -2308,7 +2141,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             const turnId = activeTurnIdRef.current;
 
             if (turnId) {
-              lastCompletedTurnIdRef.current = turnId;
             }
 
             activeTurnIdRef.current = null;
@@ -2389,9 +2221,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           braveSearchTool,
           braveGroundingTool,
           askUserTool,
-          runDataAnalysisTool,
-          generateVisualGraphTool,
-          generateDocumentTool,
+          runMarimoAnalysisTool,
         ]);
         hostRef.current.replaceChildren(element);
         cleanup = () => {
@@ -2434,7 +2264,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         saveTimerRef.current = null;
       }
       messageIndexRef.current = 0;
-      lastCompletedTurnIdRef.current = null;
       pendingChatTurnRef.current = null;
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
@@ -2442,7 +2271,15 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       setIsStreaming(false);
       cleanup?.();
     };
-  }, [conversationBootstrap, organizationSlug, role, userId]);
+  }, [
+    conversationBootstrap,
+    initialConversationId,
+    organizationSlug,
+    redirectToAnalysisOnNotebookRun,
+    role,
+    router,
+    userId,
+  ]);
 
   const loadConversationHistory = useCallback(async (query: string) => {
     const requestId = historyRequestIdRef.current + 1;
@@ -2498,127 +2335,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     };
   }, [historyQuery, loadConversationHistory]);
 
-  const canSaveAsWorkflow = role === "admin" || role === "owner";
-
-  function handleCloseWorkflowBuilder() {
-    if (workflowSaving) {
-      return;
-    }
-
-    setWorkflowBuilderOpen(false);
-    setWorkflowSaveError(null);
-  }
-
-  async function handleOpenWorkflowBuilder() {
-    if (!canSaveAsWorkflow || isStreaming) {
-      return;
-    }
-
-    setWorkflowDraftLoading(true);
-    setWorkflowDraftError(null);
-    setWorkflowSaveError(null);
-    setWorkflowSaveSuccess(null);
-
-    const turnId = lastCompletedTurnIdRef.current;
-    const conversationId = conversationIdRef.current;
-    const requestBody: Record<string, string> = {};
-
-    if (turnId) {
-      requestBody.turnId = turnId;
-    }
-
-    if (conversationId) {
-      requestBody.conversationId = conversationId;
-    }
-
-    if (Object.keys(requestBody).length === 0) {
-      setWorkflowDraftLoading(false);
-      setWorkflowDraftError("Start and complete a chat turn before saving as workflow.");
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/workflows/from-chat-turn", {
-        body: JSON.stringify(requestBody),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const data = (await response.json()) as
-        | BuildWorkflowFromChatTurnResponse
-        | {
-            error: string;
-          };
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(data, "Failed to build workflow draft."));
-      }
-
-      if (!("draft" in data)) {
-        throw new Error("Workflow draft payload was missing from the response.");
-      }
-
-      setWorkflowDraft(data.draft);
-      setWorkflowBuilderOpen(true);
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to build workflow draft.";
-      setWorkflowDraftError(message);
-      setWorkflowBuilderOpen(false);
-    } finally {
-      setWorkflowDraftLoading(false);
-    }
-  }
-
-  async function handleSaveWorkflowDraft(input: SaveWorkflowDraftInput) {
-    setWorkflowSaving(true);
-    setWorkflowSaveError(null);
-
-    try {
-      const response = await fetch("/api/workflows", {
-        body: JSON.stringify({
-          description: input.description,
-          name: input.name,
-          status: input.status,
-          version: input.version,
-          visibility: input.visibility,
-        }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const data = (await response.json()) as CreateWorkflowResponse | { error: string };
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(data, "Failed to save workflow draft."));
-      }
-
-      const savedName =
-        "workflow" in data &&
-        typeof data.workflow?.workflow?.name === "string" &&
-        data.workflow.workflow.name.trim()
-          ? data.workflow.workflow.name.trim()
-          : input.name;
-
-      setWorkflowSaveSuccess(`Saved workflow “${savedName}”.`);
-      setWorkflowBuilderOpen(false);
-      setWorkflowDraft(null);
-      setWorkflowDraftError(null);
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to save workflow draft.";
-      setWorkflowSaveError(message);
-    } finally {
-      setWorkflowSaving(false);
-    }
-  }
-
   function handleOpenHistory() {
     if (isStreaming) {
       return;
@@ -2637,6 +2353,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     setState({ error: null, ready: false });
 
     try {
+      const hasAnalysisWorkspace = await conversationHasAnalysisWorkspace(conversationId);
+
+      if (hasAnalysisWorkspace) {
+        setHistoryOpen(false);
+        router.push(`/analysis/${encodeURIComponent(conversationId)}`);
+        return;
+      }
+
       const response = await fetch(`/api/conversations/${conversationId}`);
       const data = (await response.json()) as
         | GetConversationResponse
@@ -2655,12 +2379,6 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       conversationIdRef.current = data.conversation.id;
       conversationCreatedAtRef.current = data.conversation.createdAt;
       conversationPersistedRef.current = true;
-      lastCompletedTurnIdRef.current = null;
-      setWorkflowBuilderOpen(false);
-      setWorkflowDraft(null);
-      setWorkflowDraftError(null);
-      setWorkflowSaveError(null);
-      setWorkflowSaveSuccess(null);
       setActiveConversationTitle(data.conversation.title);
       setConversationBootstrap({
         createdAt: data.conversation.createdAt,
@@ -2681,18 +2399,15 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     }
 
     const draft = createDraftConversation();
-    const url = new URL(window.location.href);
-    url.searchParams.delete("conversation");
-    window.history.replaceState({}, "", url.toString());
+
+    if (!initialConversationId) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("conversation");
+      window.history.replaceState({}, "", url.toString());
+    }
     conversationIdRef.current = draft.id;
     conversationCreatedAtRef.current = draft.createdAt;
     conversationPersistedRef.current = false;
-    lastCompletedTurnIdRef.current = null;
-    setWorkflowBuilderOpen(false);
-    setWorkflowDraft(null);
-    setWorkflowDraftError(null);
-    setWorkflowSaveError(null);
-    setWorkflowSaveSuccess(null);
     setActiveConversationTitle("");
     setHistoryOpen(false);
     setConversationBootstrap(draft);
@@ -2707,84 +2422,68 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   }
 
   return (
-    <div className="chat-shell">
-      <ChatHistorySidebar
-        activeConversationId={conversationIdRef.current}
-        conversations={historyConversations}
-        loading={historyLoading}
-        onNewChat={handleNewChat}
-        onQueryChange={setHistoryQuery}
-        onSelect={(conversationId) => {
-          void handleSelectConversation(conversationId);
-        }}
-        query={historyQuery}
-        streaming={isStreaming}
-      />
+    <div className={`chat-shell ${showHistory ? "" : "chat-shell--history-hidden"}`.trim()}>
+      {showHistory ? (
+        <ChatHistorySidebar
+          activeConversationId={conversationIdRef.current}
+          conversations={historyConversations}
+          loading={historyLoading}
+          onNewChat={handleNewChat}
+          onQueryChange={setHistoryQuery}
+          onSelect={(conversationId) => {
+            void handleSelectConversation(conversationId);
+          }}
+          query={historyQuery}
+          streaming={isStreaming}
+        />
+      ) : null}
       <div className="chat-main">
-        <div className="chat-toolbar">
-          <details
-            className="chat-toolbar__menu"
-            data-dismiss-on-outside="true"
-            ref={toolbarMenuRef}
-          >
-            <summary className="chat-toolbar__summary">
-              <span className="chat-toolbar__title">
-                {activeConversationTitle || "New conversation"}
-              </span>
-              <span aria-hidden="true" className="chat-toolbar__caret">
-                ⌄
-              </span>
-            </summary>
+        {showToolbar ? (
+          <>
+            <div className="chat-toolbar">
+              <details
+                className="chat-toolbar__menu"
+                data-dismiss-on-outside="true"
+                ref={toolbarMenuRef}
+              >
+                <summary className="chat-toolbar__summary">
+                  <span className="chat-toolbar__title">
+                    {activeConversationTitle || "New conversation"}
+                  </span>
+                  <span aria-hidden="true" className="chat-toolbar__caret">
+                    ⌄
+                  </span>
+                </summary>
 
-            <div className="chat-toolbar__actions">
-              <button
-                className="chat-toolbar__button chat-toolbar__button--mobile-only"
-                disabled={isStreaming || !conversationBootstrap}
-                onClick={() => {
-                  toolbarMenuRef.current?.removeAttribute("open");
-                  handleOpenHistory();
-                }}
-                type="button"
-              >
-                History
-              </button>
-              {canSaveAsWorkflow ? (
-                <button
-                  className="chat-toolbar__button"
-                  disabled={
-                    isStreaming ||
-                    !conversationBootstrap ||
-                    workflowDraftLoading ||
-                    workflowSaving
-                  }
-                  onClick={() => {
-                    toolbarMenuRef.current?.removeAttribute("open");
-                    void handleOpenWorkflowBuilder();
-                  }}
-                  type="button"
-                >
-                  {workflowDraftLoading ? "Compiling workflow draft…" : "Save as workflow"}
-                </button>
-              ) : null}
-              <button
-                className="chat-toolbar__button chat-toolbar__button--primary"
-                disabled={isStreaming || !conversationBootstrap}
-                onClick={() => {
-                  toolbarMenuRef.current?.removeAttribute("open");
-                  handleNewChat();
-                }}
-                type="button"
-              >
-                New chat
-              </button>
+                <div className="chat-toolbar__actions">
+                  {showHistory ? (
+                    <button
+                      className="chat-toolbar__button chat-toolbar__button--mobile-only"
+                      disabled={isStreaming || !conversationBootstrap}
+                      onClick={() => {
+                        toolbarMenuRef.current?.removeAttribute("open");
+                        handleOpenHistory();
+                      }}
+                      type="button"
+                    >
+                      History
+                    </button>
+                  ) : null}
+                  <button
+                    className="chat-toolbar__button chat-toolbar__button--primary"
+                    disabled={isStreaming || !conversationBootstrap}
+                    onClick={() => {
+                      toolbarMenuRef.current?.removeAttribute("open");
+                      handleNewChat();
+                    }}
+                    type="button"
+                  >
+                    New chat
+                  </button>
+                </div>
+              </details>
             </div>
-          </details>
-        </div>
-        {workflowDraftError ? (
-          <p className="chat-toolbar__status chat-toolbar__status--error">{workflowDraftError}</p>
-        ) : null}
-        {workflowSaveSuccess ? (
-          <p className="chat-toolbar__status chat-toolbar__status--success">{workflowSaveSuccess}</p>
+          </>
         ) : null}
         <div className="chat-host" ref={hostRef} />
         {!ready ? (
@@ -2793,19 +2492,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           </div>
         ) : null}
       </div>
-      {workflowBuilderOpen && workflowDraft ? (
-        <WorkflowBuilderModal
-          key={workflowDraft.turnId}
-          draft={workflowDraft}
-          error={workflowSaveError}
-          onClose={handleCloseWorkflowBuilder}
-          onSave={(input) => {
-            void handleSaveWorkflowDraft(input);
-          }}
-          saving={workflowSaving}
-        />
-      ) : null}
-      {historyOpen ? (
+      {showHistory && historyOpen ? (
         <ChatHistoryDialog
           activeConversationId={conversationIdRef.current}
           conversations={historyConversations}

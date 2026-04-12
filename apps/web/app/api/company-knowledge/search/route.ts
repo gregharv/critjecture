@@ -60,7 +60,7 @@ function buildSelectedCsvSummary(
     diagnosticsLine,
     `Automatically selected ${result.selectedFiles.join(", ")} because it was the only candidate file found${result.selectionReason === "unique-year-match" ? " for the requested year" : ""}.`,
     csvColumns ? `Selected CSV columns: ${csvColumns}.` : null,
-    "Use the selected file path in inputFiles for run_data_analysis instead of trying to reason through rows in chat context.",
+    "Use the selected file path in inputFiles for run_marimo_analysis instead of trying to reason through rows in chat context.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -142,7 +142,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
       diagnosticsLine,
       selectionLine,
       describeCsvPreview(result, result.selectedFiles),
-      "Use the selected file path in inputFiles when a Python sandbox tool is needed.",
+      "Use the selected file path in inputFiles when run_marimo_analysis is needed.",
       citations,
     ]
       .filter(Boolean)
@@ -158,7 +158,7 @@ function buildSummary(query: string, roleLabel: string, result: CompanyKnowledge
     `Found ${result.candidateFiles.length} candidate files for "${query}" in ${result.scopeDescription}.`,
     `Role: ${roleLabel}.`,
     diagnosticsLine,
-    "Selection pending. A multi-select file picker will appear after the assistant finishes gathering candidates. Do not call a Python sandbox tool yet.",
+    "Selection pending. A multi-select file picker will appear after the assistant finishes gathering candidates. Do not call run_marimo_analysis yet.",
     recommendedLine,
     describeCsvPreview(result, result.recommendedFiles),
     candidateLines,

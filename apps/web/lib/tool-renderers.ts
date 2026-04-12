@@ -1,13 +1,9 @@
 import type { ToolResultMessage } from "@mariozechner/pi-ai";
 import { html, nothing } from "lit";
 
-import type {
-  GeneratedAssetToolResponse,
-  SandboxGeneratedAsset,
-  SandboxToolResponse,
-} from "@/lib/sandbox-tool-types";
+import type { SandboxToolResponse } from "@/lib/sandbox-tool-types";
 
-type SandboxToolDetails = SandboxToolResponse | GeneratedAssetToolResponse;
+type SandboxToolDetails = SandboxToolResponse;
 type AnyToolDetails = Record<string, unknown>;
 type ToolRendererResult = ToolResultMessage<AnyToolDetails>;
 
@@ -25,7 +21,6 @@ type ToolRendererRegistry = {
 };
 
 type SandboxCardOptions = {
-  assetKind?: "image" | "pdf";
   emptyCopy: string;
   eyebrow: string;
 };
@@ -199,61 +194,6 @@ function getToolLimits(details: SandboxToolDetails | undefined) {
   return details?.limits;
 }
 
-function getGeneratedAsset(details: SandboxToolDetails | undefined) {
-  if (!details || !("generatedAsset" in details)) {
-    return undefined;
-  }
-
-  return details.generatedAsset;
-}
-
-function renderGeneratedAsset(asset: SandboxGeneratedAsset, kind: "image" | "pdf") {
-  if (kind === "image") {
-    return html`
-      <section class="crit-tool__section">
-        <div class="crit-tool__label">Generated Graph</div>
-        <div class="crit-tool__asset-card crit-tool__asset-card--image">
-          <img
-            alt=${asset.fileName}
-            class="crit-tool__image"
-            loading="lazy"
-            src=${asset.downloadUrl}
-          />
-          <div class="crit-tool__asset-footer">
-            <div class="crit-tool__asset-copy">
-              <div class="crit-tool__asset-name">${asset.fileName}</div>
-              <div class="crit-tool__asset-path">${asset.relativePath}</div>
-            </div>
-            <a
-              class="crit-tool__asset-link"
-              href=${asset.downloadUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Open Image
-            </a>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  return html`
-    <section class="crit-tool__section">
-      <div class="crit-tool__label">Generated Document</div>
-      <div class="crit-tool__asset-card crit-tool__asset-card--document">
-        <div class="crit-tool__asset-copy">
-          <div class="crit-tool__asset-name">${asset.fileName}</div>
-          <div class="crit-tool__asset-path">${asset.relativePath}</div>
-        </div>
-        <a class="crit-tool__download-button" href=${asset.downloadUrl}>
-          Download Document
-        </a>
-      </div>
-    </section>
-  `;
-}
-
 function renderSandboxToolCard(
   options: SandboxCardOptions,
   params: unknown,
@@ -272,12 +212,10 @@ function renderSandboxToolCard(
   const stderr = formatBlockContent(details?.stderr);
   const state = getToolState(result, isStreaming);
   const summary = getToolSummary(result);
-  const generatedAsset = getGeneratedAsset(details);
   const sandboxRunId = getToolSandboxRunId(details);
   const runner = getToolRunner(details);
   const limits = getToolLimits(details);
-  const shouldCollapseLogsByDefault =
-    state === "complete" && (Boolean(generatedAsset) || Boolean(summary));
+  const shouldCollapseLogsByDefault = state === "complete" && Boolean(summary);
   const hasLogOutput = !stdout.empty || !stderr.empty || result?.isError;
 
   return {
@@ -329,12 +267,6 @@ function renderSandboxToolCard(
                           </div>
                         </section>
                       `
-                    : nothing
-                }
-
-                ${
-                  generatedAsset && options.assetKind
-                    ? renderGeneratedAsset(generatedAsset, options.assetKind)
                     : nothing
                 }
 
@@ -805,45 +737,13 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
     },
   });
 
-  registry.registerToolRenderer("run_data_analysis", {
+  registry.registerToolRenderer("run_marimo_analysis", {
     render(params, result, isStreaming) {
       return renderSandboxToolCard(
         {
           emptyCopy:
-            "No stdout captured. The Python code should use print(...) for the final answer.",
-          eyebrow: "Python Sandbox",
-        },
-        params,
-        result,
-        isStreaming,
-      );
-    },
-  });
-
-  registry.registerToolRenderer("generate_visual_graph", {
-    render(params, result, isStreaming) {
-      return renderSandboxToolCard(
-        {
-          assetKind: "image",
-          emptyCopy:
-            "No stdout captured. Save the PNG to outputs/chart.png and print a short summary.",
-          eyebrow: "Chart Generator",
-        },
-        params,
-        result,
-        isStreaming,
-      );
-    },
-  });
-
-  registry.registerToolRenderer("generate_document", {
-    render(params, result, isStreaming) {
-      return renderSandboxToolCard(
-        {
-          assetKind: "pdf",
-          emptyCopy:
-            "No stdout captured. Save the PDF to outputs/notice.pdf and print a short summary.",
-          eyebrow: "Document Generator",
+            "No notebook summary was captured. The notebook should print a short summary and export outputs/notebook.html.",
+          eyebrow: "Marimo Notebook",
         },
         params,
         result,

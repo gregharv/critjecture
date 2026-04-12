@@ -77,6 +77,14 @@ function getToneLabel(tone: "ok" | "warning" | "critical") {
 
 function getFailureActionLabel(failure: RecentFailure) {
   switch (failure.routeKey) {
+    case "analysis.workspace.run":
+      return "run a notebook analysis";
+    case "analysis.workspace.preview":
+      return "start a notebook preview";
+    case "analysis.workspace.preview.restart":
+      return "restart a notebook preview";
+    case "analysis.workspace.preview.proxy":
+      return "load a notebook preview asset";
     case "data-analysis.run":
       return "generate a chart";
     case "visual-graph.run":
@@ -116,8 +124,6 @@ function getFailureActionLabel(failure: RecentFailure) {
       return "start a workflow run";
     case "workflow.runs.detail":
       return "view workflow run details";
-    case "workflow.from_chat_turn":
-      return "build a workflow draft from chat";
     case "workflow.internal.process_queue":
     case "workflow.internal.tick":
     case "workflow.internal.recheck_waiting":
@@ -160,6 +166,21 @@ function getFailureHeadline(failure: RecentFailure) {
   }
 
   return `Failed to ${action} for ${actor}.`;
+}
+
+function getUsageEventLabel(eventType: string) {
+  switch (eventType) {
+    case "analysis_notebook_run":
+      return "Notebook run";
+    case "analysis_preview_bootstrap":
+      return "Preview bootstrap";
+    case "analysis_preview_restart":
+      return "Preview restart";
+    case "sandbox_run":
+      return "Sandbox run";
+    default:
+      return eventType;
+  }
 }
 
 export function OperationsPageClient() {
@@ -230,7 +251,7 @@ export function OperationsPageClient() {
         rateLimited: 0,
         remainingCredits: 0,
         requests: 0,
-        sandboxRuns: 0,
+        notebookRuns: 0,
         totalTokens: 0,
       };
     }
@@ -245,8 +266,10 @@ export function OperationsPageClient() {
       ),
       remainingCredits: summary.workspace.remainingCredits,
       requests: summary.routeMetrics.reduce((sum, item) => sum + item.requestCount, 0),
-      sandboxRuns: summary.usageSummary.byEventType
-        .filter((item) => item.eventType === "sandbox_run")
+      notebookRuns: summary.usageSummary.byEventType
+        .filter(
+          (item) => item.eventType === "analysis_notebook_run" || item.eventType === "sandbox_run",
+        )
         .reduce((sum, item) => sum + item.quantity, 0),
       totalTokens: summary.usageSummary.byEventType.reduce(
         (sum, item) => sum + item.totalTokens,
@@ -364,8 +387,8 @@ export function OperationsPageClient() {
                 <strong>{formatCredits(headlineMetrics.remainingCredits)}</strong>
               </article>
               <article className="operations-metric">
-                <span className="operations-metric__label">Sandbox Runs</span>
-                <strong>{formatInteger(headlineMetrics.sandboxRuns)}</strong>
+                <span className="operations-metric__label">Notebook Runs</span>
+                <strong>{formatInteger(headlineMetrics.notebookRuns)}</strong>
               </article>
               <article className="operations-metric">
                 <span className="operations-metric__label">Internal Cost</span>
@@ -793,7 +816,7 @@ export function OperationsPageClient() {
                   className="operations-table__row"
                   key={`${metric.routeGroup}:${metric.eventType}`}
                 >
-                  <span>{metric.eventType}</span>
+                  <span>{getUsageEventLabel(metric.eventType)}</span>
                   <span>{metric.routeGroup}</span>
                   <span>{formatInteger(metric.requestCount)}</span>
                   <span>{formatCredits(metric.commercialCredits)}</span>
@@ -854,6 +877,9 @@ export function OperationsPageClient() {
                     { label: "Route", value: failure.routeKey },
                     { label: "Route group", value: failure.routeGroup },
                     { label: "Request ID", value: failure.requestId },
+                    { label: "Workspace ID", value: failure.workspaceId },
+                    { label: "Revision ID", value: failure.revisionId },
+                    { label: "Preview session ID", value: failure.previewSessionId },
                     { label: "Sandbox run ID", value: failure.sandboxRunId },
                     { label: "Governance job ID", value: failure.governanceJobId },
                     { label: "Knowledge import job ID", value: failure.knowledgeImportJobId },

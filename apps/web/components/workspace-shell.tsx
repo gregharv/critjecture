@@ -14,21 +14,24 @@ import { getRoleLabel } from "@/lib/roles";
 import { THEME_COOKIE_NAME, normalizeThemePreference } from "@/lib/theme";
 
 type WorkspaceShellProps = {
-  activePage: "chat" | "knowledge" | "workflows" | "logs" | "operations" | "settings";
+  activePage: "chat" | "analysis" | "knowledge" | "workflows" | "logs" | "operations" | "settings";
   children: ReactNode;
+  returnTo?: string;
   user: SessionUser;
 };
 
 export async function WorkspaceShell({
   activePage,
   children,
+  returnTo,
   user,
 }: WorkspaceShellProps) {
   const displayName = user.name || user.email;
   const cookieStore = await cookies();
   const themePreference = normalizeThemePreference(cookieStore.get(THEME_COOKIE_NAME)?.value);
-  const returnTo =
-    activePage === "chat"
+  const resolvedReturnTo =
+    returnTo ??
+    (activePage === "chat" || activePage === "analysis"
       ? "/chat"
       : activePage === "knowledge"
         ? "/knowledge"
@@ -38,7 +41,7 @@ export async function WorkspaceShell({
             ? "/admin/logs"
             : activePage === "operations"
               ? "/admin/operations"
-              : "/admin/settings";
+              : "/admin/settings");
 
   return (
     <main className="shell-page">
@@ -69,7 +72,7 @@ export async function WorkspaceShell({
             <div className="shell-menu__panel">
               <nav className="shell-nav" aria-label="Workspace navigation">
                 <Link
-                  className={`shell-nav__link ${activePage === "chat" ? "is-active" : ""}`}
+                  className={`shell-nav__link ${activePage === "chat" || activePage === "analysis" ? "is-active" : ""}`}
                   href="/chat"
                 >
                   Chat
@@ -129,7 +132,7 @@ export async function WorkspaceShell({
                   <span className="shell-theme__label">Appearance</span>
                   <div className="shell-theme__actions">
                     <form action={setThemePreferenceAction}>
-                      <input name="returnTo" type="hidden" value={returnTo} />
+                      <input name="returnTo" type="hidden" value={resolvedReturnTo} />
                       <input name="theme" type="hidden" value="dark" />
                       <button
                         className={`shell-theme__button ${themePreference === "dark" ? "is-active" : ""}`}
@@ -140,7 +143,7 @@ export async function WorkspaceShell({
                       </button>
                     </form>
                     <form action={setThemePreferenceAction}>
-                      <input name="returnTo" type="hidden" value={returnTo} />
+                      <input name="returnTo" type="hidden" value={resolvedReturnTo} />
                       <input name="theme" type="hidden" value="light" />
                       <button
                         className={`shell-theme__button ${themePreference === "light" ? "is-active" : ""}`}

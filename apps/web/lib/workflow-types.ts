@@ -35,6 +35,11 @@ export const WORKFLOW_DELIVERY_CHANNEL_KINDS = [
   "email",
 ] as const;
 export const WORKFLOW_DELIVERY_STATUSES = ["pending", "sent", "failed"] as const;
+export const WORKFLOW_EMAIL_ALERT_EVENTS = [
+  "run_completed",
+  "run_failed",
+  "waiting_for_input",
+] as const;
 
 export type WorkflowVisibility = (typeof WORKFLOW_VISIBILITIES)[number];
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
@@ -45,6 +50,7 @@ export type WorkflowInputCheckStatus = (typeof WORKFLOW_INPUT_CHECK_STATUSES)[nu
 export type WorkflowInputRequestStatus = (typeof WORKFLOW_INPUT_REQUEST_STATUSES)[number];
 export type WorkflowDeliveryChannelKind = (typeof WORKFLOW_DELIVERY_CHANNEL_KINDS)[number];
 export type WorkflowDeliveryStatus = (typeof WORKFLOW_DELIVERY_STATUSES)[number];
+export type WorkflowEmailAlertEvent = (typeof WORKFLOW_EMAIL_ALERT_EVENTS)[number];
 
 export function isWorkflowVisibility(value: unknown): value is WorkflowVisibility {
   return typeof value === "string" && WORKFLOW_VISIBILITIES.includes(value as WorkflowVisibility);
@@ -225,6 +231,7 @@ export type WorkflowDeliveryChannelV1 =
     }
   | {
       enabled: boolean;
+      events: WorkflowEmailAlertEvent[];
       kind: "email";
       recipients: string[];
     };
@@ -1512,8 +1519,24 @@ function parseDeliveryChannel(
     };
   }
 
+  const events =
+    typeof value.events === "undefined"
+      ? (["run_completed"] as WorkflowEmailAlertEvent[])
+      : parseStringArrayValue(value.events, `channels[${index}].events`, contractName, {
+          allowEmpty: false,
+          unique: true,
+        }).map((entry) =>
+          parseEnumValue(
+            entry,
+            WORKFLOW_EMAIL_ALERT_EVENTS,
+            `channels[${index}].events[]`,
+            contractName,
+          ),
+        );
+
   return {
     enabled: parseBooleanValue(value.enabled, `channels[${index}].enabled`, contractName),
+    events,
     kind,
     recipients: parseStringArrayValue(value.recipients, `channels[${index}].recipients`, contractName, {
       allowEmpty: true,

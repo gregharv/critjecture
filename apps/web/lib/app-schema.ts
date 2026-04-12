@@ -406,6 +406,125 @@ export const analysisResults = sqliteTable(
   ],
 );
 
+export const analysisWorkspaces = sqliteTable(
+  "analysis_workspaces",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    title: text("title"),
+    status: text("status", { enum: ["idle", "running", "completed", "failed"] })
+      .notNull()
+      .default("idle"),
+    latestRevisionId: text("latest_revision_id"),
+    latestSandboxRunId: text("latest_sandbox_run_id").references(() => sandboxRuns.runId, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "analysis_workspaces_status_check",
+      sql`${table.status} in ('idle', 'running', 'completed', 'failed')`,
+    ),
+    uniqueIndex("analysis_workspaces_conversation_id_idx").on(table.conversationId),
+    index("analysis_workspaces_org_updated_at_idx").on(table.organizationId, table.updatedAt),
+    index("analysis_workspaces_user_updated_at_idx").on(table.userId, table.updatedAt),
+    index("analysis_workspaces_latest_sandbox_run_id_idx").on(table.latestSandboxRunId),
+  ],
+);
+
+export const analysisNotebookRevisions = sqliteTable(
+  "analysis_notebook_revisions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => analysisWorkspaces.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").references(() => chatTurns.id, { onDelete: "set null" }),
+    revisionNumber: integer("revision_number").notNull(),
+    notebookSource: text("notebook_source").notNull(),
+    notebookPath: text("notebook_path").notNull(),
+    htmlExportPath: text("html_export_path"),
+    structuredResultPath: text("structured_result_path"),
+    summary: text("summary"),
+    sandboxRunId: text("sandbox_run_id").references(() => sandboxRuns.runId, {
+      onDelete: "set null",
+    }),
+    status: text("status", {
+      enum: ["running", "completed", "failed", "timed_out", "rejected"],
+    }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    check(
+      "analysis_notebook_revisions_status_check",
+      sql`${table.status} in ('running', 'completed', 'failed', 'timed_out', 'rejected')`,
+    ),
+    uniqueIndex("analysis_notebook_revisions_workspace_revision_number_idx").on(
+      table.workspaceId,
+      table.revisionNumber,
+    ),
+    index("analysis_notebook_revisions_workspace_created_at_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    index("analysis_notebook_revisions_turn_id_idx").on(table.turnId),
+    index("analysis_notebook_revisions_sandbox_run_id_idx").on(table.sandboxRunId),
+    index("analysis_notebook_revisions_status_created_at_idx").on(table.status, table.createdAt),
+  ],
+);
+
+export const analysisPreviewSessions = sqliteTable(
+  "analysis_preview_sessions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => analysisWorkspaces.id, { onDelete: "cascade" }),
+    revisionId: text("revision_id")
+      .notNull()
+      .references(() => analysisNotebookRevisions.id, { onDelete: "cascade" }),
+    sandboxRunId: text("sandbox_run_id").references(() => sandboxRuns.runId, {
+      onDelete: "set null",
+    }),
+    previewTokenHash: text("preview_token_hash"),
+    previewUrl: text("preview_url"),
+    port: integer("port"),
+    status: text("status", { enum: ["starting", "ready", "stopped", "failed"] })
+      .notNull()
+      .default("starting"),
+    expiresAt: integer("expires_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "analysis_preview_sessions_status_check",
+      sql`${table.status} in ('starting', 'ready', 'stopped', 'failed')`,
+    ),
+    uniqueIndex("analysis_preview_sessions_preview_token_hash_idx").on(table.previewTokenHash),
+    index("analysis_preview_sessions_workspace_updated_at_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    index("analysis_preview_sessions_revision_created_at_idx").on(
+      table.revisionId,
+      table.createdAt,
+    ),
+    index("analysis_preview_sessions_status_expires_at_idx").on(table.status, table.expiresAt),
+    index("analysis_preview_sessions_sandbox_run_id_idx").on(table.sandboxRunId),
+  ],
+);
+
 export const sandboxGeneratedAssets = sqliteTable(
   "sandbox_generated_assets",
   {

@@ -293,6 +293,149 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   min-height: 0;
 }
 
+.chat-shell--history-hidden {
+  gap: 0;
+}
+
+.analysis-workspace {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+}
+
+.analysis-workspace__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 4px 0;
+}
+
+.analysis-workspace__eyebrow {
+  margin: 0 0 6px;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.analysis-workspace__title {
+  margin: 0;
+  color: var(--shell-title-ink);
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.analysis-workspace__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.analysis-workspace__mobile-tabs {
+  display: none;
+  gap: 8px;
+}
+
+.analysis-workspace__mobile-tab {
+  flex: 1 1 0;
+  min-height: 40px;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent 30%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.analysis-workspace__mobile-tab.is-active {
+  border-color: color-mix(in oklab, var(--primary) 64%, white 36%);
+  color: var(--primary);
+}
+
+.analysis-workspace__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.analysis-workspace__chat-pane,
+.analysis-workspace__notebook-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.analysis-workspace__chat-pane {
+  border: 1px solid var(--shell-panel-border);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent 45%),
+    var(--shell-panel);
+  box-shadow: 0 18px 56px -40px var(--shell-panel-shadow);
+  overflow: hidden;
+}
+
+.analysis-workspace__chat-pane .chat-shell {
+  height: 100%;
+}
+
+.analysis-workspace__notebook-pane {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--shell-panel-border);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent 45%),
+    var(--shell-panel);
+  box-shadow: 0 18px 56px -40px var(--shell-panel-shadow);
+  overflow: hidden;
+}
+
+.analysis-preview-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.analysis-preview-pane__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 14px 16px 10px;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+}
+
+.analysis-preview-pane__frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: white;
+}
+
+.analysis-preview-pane__empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 320px;
+  padding: 24px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.analysis-preview-pane__empty a {
+  color: var(--primary);
+}
+
 .chat-history-sidebar {
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -483,140 +626,6 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
 .chat-toolbar__status--success {
   color: color-mix(in oklab, var(--primary) 66%, var(--foreground) 34%);
-}
-
-.workflow-builder-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 35;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(3 7 18 / 0.66);
-}
-
-.workflow-builder-modal {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 16px;
-  width: min(760px, 100%);
-  max-height: min(760px, calc(100dvh - 64px));
-  padding: 22px;
-  border: 1px solid var(--shell-panel-border);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent 45%),
-    var(--shell-panel);
-  box-shadow: 0 30px 90px -50px var(--shell-panel-shadow);
-}
-
-.workflow-builder-modal__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.workflow-builder-modal__eyebrow {
-  margin: 0 0 6px;
-  color: var(--shell-kicker);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.workflow-builder-modal__title {
-  margin: 0;
-  color: var(--shell-title-ink);
-  font-size: 1.15rem;
-  letter-spacing: -0.03em;
-}
-
-.workflow-builder-modal__body {
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  gap: 14px;
-}
-
-.workflow-builder-modal__field {
-  display: grid;
-  gap: 8px;
-  color: var(--muted-foreground);
-  font-size: 0.84rem;
-  font-weight: 600;
-}
-
-.workflow-builder-modal__input,
-.workflow-builder-modal__textarea {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--card) 90%, transparent 10%);
-  color: var(--foreground);
-  font: inherit;
-}
-
-.workflow-builder-modal__input:focus-visible,
-.workflow-builder-modal__textarea:focus-visible {
-  outline: 2px solid color-mix(in oklab, var(--primary) 64%, white 36%);
-  outline-offset: 1px;
-}
-
-.workflow-builder-modal__textarea {
-  resize: vertical;
-  min-height: 96px;
-}
-
-.workflow-builder-modal__row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.workflow-builder-modal__summary,
-.workflow-builder-modal__warning {
-  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent 30%);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
-}
-
-.workflow-builder-modal__summary h3,
-.workflow-builder-modal__warning h3 {
-  margin: 0 0 8px;
-  font-size: 0.9rem;
-  color: var(--foreground);
-}
-
-.workflow-builder-modal__summary ul,
-.workflow-builder-modal__warning ul {
-  margin: 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 4px;
-  font-size: 0.82rem;
-  color: var(--muted-foreground);
-}
-
-.workflow-builder-modal__warning p {
-  margin: 0 0 8px;
-  font-size: 0.82rem;
-  color: var(--muted-foreground);
-}
-
-.workflow-builder-modal__error {
-  margin: 0;
-  color: color-mix(in oklab, var(--destructive) 72%, white 28%);
-  font-size: 0.82rem;
-}
-
-.workflow-builder-modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .chat-history-backdrop {
@@ -1504,6 +1513,30 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   .chat-toolbar__button--mobile-only {
     display: block;
   }
+
+  .analysis-workspace__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .analysis-workspace__panes {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-workspace__mobile-tabs {
+    display: flex;
+  }
+
+  .analysis-workspace__chat-pane,
+  .analysis-workspace__notebook-pane {
+    display: none;
+    min-height: 520px;
+  }
+
+  .analysis-workspace__chat-pane.is-active,
+  .analysis-workspace__notebook-pane.is-active {
+    display: block;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1552,17 +1585,18 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
     padding: 16px;
   }
 
-  .workflow-builder-backdrop {
-    padding: 16px;
+  .analysis-workspace {
+    gap: 12px;
+    padding: 0 12px 12px;
   }
 
-  .workflow-builder-modal {
-    width: 100%;
-    padding: 16px;
+  .analysis-workspace__actions {
+    justify-content: stretch;
   }
 
-  .workflow-builder-modal__row {
-    grid-template-columns: minmax(0, 1fr);
+  .analysis-workspace__actions > * {
+    flex: 1 1 0;
+    text-align: center;
   }
 
   .chat-history-card__title {

@@ -668,6 +668,17 @@ async function attemptEmailDelivery(input: {
   manifest: DeliveryArtifactManifestEntry[];
   payloadSnapshot: WorkflowDeliverySnapshotV1;
 }) {
+  const configuredEvents = new Set(input.channel.events ?? ["run_completed"]);
+
+  if (!configuredEvents.has("run_completed")) {
+    return {
+      ok: true,
+      responseBody: "Email channel is not configured for run_completed alerts.",
+      responseStatusCode: null,
+      sentAt: Date.now(),
+    } satisfies DeliveryAttemptOutcome;
+  }
+
   if (!input.channel.enabled) {
     return {
       ok: true,

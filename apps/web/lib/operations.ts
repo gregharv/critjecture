@@ -21,7 +21,6 @@ import { NextResponse } from "next/server";
 import type { SessionUser } from "@/lib/auth-state";
 import { ensureStorageRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
-import { cleanupExpiredAnalysisResults } from "@/lib/analysis-results";
 import {
   operationalAlerts,
   knowledgeImportJobFiles,
@@ -1079,7 +1078,6 @@ export async function runOperationsMaintenance() {
     db.delete(rateLimitBuckets).where(lt(rateLimitBuckets.updatedAt, bucketCutoff)),
     db.delete(operationalAlerts).where(alertsCleanupWhere),
   ]);
-  await cleanupExpiredAnalysisResults();
 
   await evaluateSandboxOperationalAlerts().catch((caughtError) => {
     logStructuredError("operations.sandbox_alert_evaluation_failed", caughtError);
@@ -1848,6 +1846,7 @@ export async function getOperationsSummary(input: {
           errorCode: requestLogs.errorCode,
           governanceJobId: requestLogs.governanceJobId,
           knowledgeImportJobId: requestLogs.knowledgeImportJobId,
+          metadataJson: requestLogs.metadataJson,
           outcome: requestLogs.outcome,
           requestId: requestLogs.requestId,
           runtimeToolCallId: requestLogs.runtimeToolCallId,
@@ -2006,22 +2005,30 @@ export async function getOperationsSummary(input: {
       count: Number(row.count ?? 0),
       routeGroup: row.routeGroup as OperationsRouteGroup,
     })),
-    recentFailures: recentFailures.map((row) => ({
-      completedAt: row.completedAt,
-      errorCode: row.errorCode,
-      governanceJobId: row.governanceJobId,
-      knowledgeImportJobId: row.knowledgeImportJobId,
-      outcome: row.outcome,
-      requestId: row.requestId,
-      runtimeToolCallId: row.runtimeToolCallId,
-      routeGroup: row.routeGroup as OperationsRouteGroup,
-      routeKey: row.routeKey,
-      sandboxRunId: row.sandboxRunId,
-      statusCode: row.statusCode,
-      toolName: row.toolName,
-      turnId: row.turnId,
-      userEmail: row.userEmail,
-    })),
+    recentFailures: recentFailures.map((row) => {
+      const metadata = parseMetadataJson(row.metadataJson);
+
+      return {
+        completedAt: row.completedAt,
+        errorCode: row.errorCode,
+        governanceJobId: row.governanceJobId,
+        knowledgeImportJobId: row.knowledgeImportJobId,
+        outcome: row.outcome,
+        previewSessionId:
+          typeof metadata.previewSessionId === "string" ? metadata.previewSessionId : null,
+        requestId: row.requestId,
+        revisionId: typeof metadata.revisionId === "string" ? metadata.revisionId : null,
+        runtimeToolCallId: row.runtimeToolCallId,
+        routeGroup: row.routeGroup as OperationsRouteGroup,
+        routeKey: row.routeKey,
+        sandboxRunId: row.sandboxRunId,
+        statusCode: row.statusCode,
+        toolName: row.toolName,
+        turnId: row.turnId,
+        userEmail: row.userEmail,
+        workspaceId: typeof metadata.workspaceId === "string" ? metadata.workspaceId : null,
+      };
+    }),
     routeMetrics: routeMetrics.map((row) => ({
       avgDurationMs: Number(row.avgDurationMs ?? 0),
       errorCount: Number(row.errorCount ?? 0),

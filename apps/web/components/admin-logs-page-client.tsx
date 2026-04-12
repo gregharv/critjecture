@@ -35,11 +35,7 @@ type AuditTimelineEvent =
       toolCall: ToolCallLog;
     };
 
-const PYTHON_TOOL_NAMES = new Set([
-  "run_data_analysis",
-  "generate_visual_graph",
-  "generate_document",
-]);
+const NOTEBOOK_TOOL_NAMES = new Set(["run_marimo_analysis"]);
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
@@ -116,6 +112,18 @@ function getTurnAccessedFiles(turn: ChatTurnLog) {
   return [...new Set(turn.toolCalls.flatMap((toolCall) => parseInputFilesFromToolParameters(toolCall)))];
 }
 
+function getToolDisplayName(toolName: string) {
+  if (toolName === "run_marimo_analysis") {
+    return "Marimo Notebook Analysis";
+  }
+
+  return toolName;
+}
+
+function getToolSourceLabel(toolName: string) {
+  return NOTEBOOK_TOOL_NAMES.has(toolName) ? "Notebook Source" : "Python Code";
+}
+
 function getToolParameterDisplay(toolCall: ToolCallLog) {
   const parsed = parseToolParameters(toolCall);
 
@@ -127,13 +135,14 @@ function getToolParameterDisplay(toolCall: ToolCallLog) {
   }
 
   const nextParameters = { ...parsed };
+  const codeFieldName = NOTEBOOK_TOOL_NAMES.has(toolCall.toolName) ? "notebookSource" : "code";
   const code =
-    PYTHON_TOOL_NAMES.has(toolCall.toolName) && typeof nextParameters.code === "string"
-      ? nextParameters.code.trim()
+    typeof nextParameters[codeFieldName] === "string"
+      ? String(nextParameters[codeFieldName]).trim()
       : "";
 
   if (code) {
-    delete nextParameters.code;
+    delete nextParameters[codeFieldName];
   }
 
   return {
@@ -286,7 +295,7 @@ function ToolTimelineEvent({ toolCall }: { toolCall: ToolCallLog }) {
         <div>
           <div className="audit-timeline__heading-row">
             <span className="audit-badge audit-badge--trace">Tool</span>
-            <div className="audit-tool__name">{toolCall.toolName}</div>
+            <div className="audit-tool__name">{getToolDisplayName(toolCall.toolName)}</div>
           </div>
           <div className="audit-tool__meta">
             <span className={`audit-status audit-status--${toolCall.status}`}>
@@ -346,7 +355,7 @@ function ToolTimelineEvent({ toolCall }: { toolCall: ToolCallLog }) {
 
       {parameterDisplay.code ? (
         <div className="audit-tool__section">
-          <div className="audit-tool__label">Python Code</div>
+          <div className="audit-tool__label">{getToolSourceLabel(toolCall.toolName)}</div>
           <pre className="audit-tool__code audit-tool__code--python">
             {parameterDisplay.code}
           </pre>
@@ -356,7 +365,7 @@ function ToolTimelineEvent({ toolCall }: { toolCall: ToolCallLog }) {
       {hasRemainingParameters ? (
         <div className="audit-tool__section">
           <div className="audit-tool__label">
-            {parameterDisplay.code ? "Other Parameters" : "Parameters"}
+            {parameterDisplay.code ? "Other Notebook Parameters" : "Parameters"}
           </div>
           <pre className="audit-tool__code">{remainingParameters}</pre>
         </div>

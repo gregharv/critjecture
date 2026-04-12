@@ -31,20 +31,33 @@ describe("buildChatSystemPrompt", () => {
     );
   });
 
-  it("includes sandbox guardrails to prevent write-permission errors and ungrounded numeric answers", () => {
+  it("includes marimo guardrails to prevent write-permission errors and ungrounded numeric answers", () => {
     const prompt = buildChatSystemPrompt("owner");
 
     expect(prompt).toContain("inputs/ directory is read-only");
-    expect(prompt).toContain("save at most one file");
+    expect(prompt).toContain("outputs/notebook.html as the primary rendered artifact");
+    expect(prompt).toContain("save at most one additional file");
     expect(prompt).toContain("do not present computed values as final facts");
     expect(prompt).toContain("only provide numeric conclusions from successful tool output");
+  });
+
+  it("prefers marimo notebooks over one-off Python tools", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("run_marimo_analysis");
+    expect(prompt).toContain("full marimo notebook");
+    expect(prompt).toContain("define app = marimo.App(...)");
+    expect(prompt).toContain("Use notebook cells to show tables, charts, and summary text");
+    expect(prompt).not.toContain("generate_visual_graph");
+    expect(prompt).not.toContain("generate_document");
+    expect(prompt).not.toContain("analysisResultId");
   });
 
   it("prefers sandbox preflight hints over manual CSV sniffing in Python", () => {
     const prompt = buildChatSystemPrompt("owner");
 
     expect(prompt).toContain("rely on sandbox preflight diagnostics");
-    expect(prompt).toContain("Do not add manual delimiter/line-ending sniffing code in Python");
+    expect(prompt).toContain("Do not add manual delimiter or line-ending sniffing code in Python");
     expect(prompt).not.toContain("inspect a small sample");
   });
 });
