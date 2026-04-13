@@ -343,7 +343,7 @@ describe("POST /api/visual-graph/run", () => {
     ]);
   });
 
-  it("keeps a follow-up contractor spend chart grounded in the 2026 file instead of reusing stale 2025 chart data", async () => {
+  it("keeps a follow-up 2025 vs 2026 contractor spend chart grounded in fresh 2026 data instead of stale 2025 chart payload", async () => {
     const firstPrompt = "can you chart our spend for the contractors in 2025";
     const followUpPrompt = "can you chart spend for 2026 next to it in a different color";
     const initialChartCode = [
@@ -416,6 +416,7 @@ describe("POST /api/visual-graph/run", () => {
 
     expect(followUpResponse.status).toBe(200);
     expect(followUpBody.generatedAsset.relativePath).toBe("outputs/chart.png");
+    expect(mocks.getStoredAnalysisResult).not.toHaveBeenCalled();
 
     const followUpSandboxCall = mocks.executeSandboxedCommand.mock.calls[1]?.[0];
 
@@ -427,7 +428,9 @@ describe("POST /api/visual-graph/run", () => {
         toolName: "generate_visual_graph",
       }),
     );
+    expect(followUpSandboxCall?.code).toContain('values_2026 = frame_2026["payout"].to_list()');
     expect(followUpSandboxCall?.code).toContain('label="2026"');
     expect(followUpSandboxCall?.code).toContain('color="#F58518"');
+    expect(followUpSandboxCall?.code).not.toContain("chart_payload.json");
   });
 });

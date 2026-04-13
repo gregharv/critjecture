@@ -308,10 +308,10 @@ async function resolveSelectedTurn(input: BuildWorkflowDraftInput) {
   return row;
 }
 
-function ensureWorkflowRecipeHasAnalysis(analysisToolCallCount: number) {
-  if (analysisToolCallCount <= 0) {
+function ensureWorkflowRecipeHasExecutableSteps(stepCount: number) {
+  if (stepCount <= 0) {
     throw new WorkflowBuilderError(
-      "Selected chat turn does not include a completed data analysis step. Run analysis first, then save as workflow.",
+      "Selected chat turn does not include a completed analysis or chart step that can be replayed as a workflow.",
       "analysis_step_missing",
     );
   }
@@ -558,11 +558,6 @@ export async function buildWorkflowDraftFromChatTurn(
     }
 
     if (toolCall.toolName === "generate_visual_graph") {
-      if (!lastAnalysisStepRef) {
-        continue;
-      }
-
-      chartToolCallCount += 1;
       const chartTypeValue = toolCall.parameters.chartType;
       const chartType =
         chartTypeValue === "line" || chartTypeValue === "bar" || chartTypeValue === "scatter"
@@ -577,7 +572,20 @@ export async function buildWorkflowDraftFromChatTurn(
         typeof toolCall.parameters.code === "string" && toolCall.parameters.code.trim()
           ? toolCall.parameters.code.trim()
           : undefined;
+
+      if (!lastAnalysisStepRef && !chartCode) {
+        continue;
+      }
+
+      chartToolCallCount += 1;
       const chartInputFiles = extractInputFilesFromParameters(toolCall.parameters);
+      const selectedInputKeys =
+        chartInputFiles.length > 0
+          ? chartInputFiles
+              .map((inputFile) => inputKeyByPath.get(inputFile) ?? null)
+              .filter((inputKey): inputKey is string => Boolean(inputKey))
+          : inputContractInputs.map((entry) => entry.input_key);
+      const stepKey = `chart_${chartToolCallCount}`;
 
       recipeSteps.push({
         config: {
@@ -588,15 +596,20 @@ export async function buildWorkflowDraftFromChatTurn(
           ...(chartCode ? { python_code: chartCode } : {}),
           title: titleValue,
         },
-        input_refs: [
-          {
-            output_key: lastAnalysisStepRef.outputKey,
-            step_key: lastAnalysisStepRef.stepKey,
-            type: "step_output",
-          },
-        ],
+        input_refs: lastAnalysisStepRef
+          ? [
+              {
+                output_key: lastAnalysisStepRef.outputKey,
+                step_key: lastAnalysisStepRef.stepKey,
+                type: "step_output" as const,
+              },
+            ]
+          : [...new Set(selectedInputKeys)].map((inputKey) => ({
+              input_key: inputKey,
+              type: "workflow_input" as const,
+            })),
         kind: "chart",
-        step_key: `chart_${chartToolCallCount}`,
+        step_key: stepKey,
         tool: "generate_visual_graph",
       });
       continue;
@@ -638,7 +651,7 @@ export async function buildWorkflowDraftFromChatTurn(
     }
   }
 
-  ensureWorkflowRecipeHasAnalysis(analysisToolCallCount);
+  ensureWorkflowRecipeHasExecutableSteps(recipeSteps.length);
 
   const sandboxRunIds = [...new Set(
     relevantToolCalls

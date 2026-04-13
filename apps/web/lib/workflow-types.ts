@@ -155,7 +155,7 @@ export type WorkflowStepV1 =
         python_code?: string;
         title: string;
       };
-      input_refs: Array<{ output_key: string; step_key: string; type: "step_output" }>;
+      input_refs: WorkflowStepInputRefV1[];
       kind: "chart";
       step_key: string;
       tool: "generate_visual_graph";
@@ -1160,11 +1160,17 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
       contractName,
     );
 
+    const pythonCode = parseOptionalStringValue(
+      value.config.python_code,
+      `steps[${index}].config.python_code`,
+      contractName,
+    );
+
     const chartRefs = refs.map((ref) => {
-      if (ref.type !== "step_output") {
+      if (!pythonCode && ref.type !== "step_output") {
         throw new WorkflowContractValidationError(
           contractName,
-          `steps[${index}] chart refs must use step_output.`,
+          `steps[${index}] chart refs must use step_output when python_code is omitted.`,
           "invalid_field",
         );
       }
@@ -1172,11 +1178,14 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
       return ref;
     });
 
-    const pythonCode = parseOptionalStringValue(
-      value.config.python_code,
-      `steps[${index}].config.python_code`,
-      contractName,
-    );
+    if (!pythonCode && !chartRefs.some((ref) => ref.type === "step_output")) {
+      throw new WorkflowContractValidationError(
+        contractName,
+        `steps[${index}] chart steps without python_code must reference a prior step output.`,
+        "invalid_field",
+      );
+    }
+
     const inputFiles =
       typeof value.config.input_files === "undefined"
         ? undefined
