@@ -5,12 +5,12 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, dataAssetVersions, dataConnections } from "@/lib/app-schema";
+import { dataAssets, dataAssetVersions, dataConnections, documents } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { ensureFilesystemAssetVersion } from "@/lib/data-assets";
 import { getAuthenticatedUserByEmail } from "@/lib/users";
 import { decodeTextBuffer, normalizeCsvLineEndings } from "@/lib/knowledge-ingestion";
-import { uploadKnowledgeFile } from "@/lib/knowledge-files";
+import { deleteKnowledgeFile, getKnowledgeFilePreview, uploadKnowledgeFile } from "@/lib/knowledge-files";
 import { createTestAppEnvironment } from "@/tests/helpers/test-environment";
 
 describe("knowledge ingestion text decoding", () => {
@@ -82,6 +82,119 @@ describe("knowledge ingestion text decoding", () => {
         }),
       );
       expect(connection?.kind).toBe("upload");
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("returns a read-only CSV preview for ready uploaded files", async () => {
+    const env = await createTestAppEnvironment({ organizationSlug: "critjecture-test-org" });
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const uploaded = await uploadKnowledgeFile({
+        file: new File([
+          'Region,"Product, Name","Memo ""quoted"""\nWest,"Desk, Platinum","He said ""hello"""\n',
+        ], "preview.csv", { type: "text/csv" }),
+        requestedScope: "public",
+        user: owner!,
+      });
+
+      const preview = await getKnowledgeFilePreview({
+        fileId: uploaded.id,
+        user: owner!,
+      });
+
+      expect(preview).toEqual({
+        columns: ["Region", "Product, Name", 'Memo "quoted"'],
+        kind: "csv",
+        rows: [["West", "Desk, Platinum", 'He said "hello"']],
+        truncated: false,
+      });
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("reuses the same uploaded asset when the same file name is uploaded again", async () => {
+    const env = await createTestAppEnvironment({ organizationSlug: "critjecture-test-org" });
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const firstUpload = await uploadKnowledgeFile({
+        file: new File(["ledger_year,contractor,payout\n2026,Acme,1200\n"], "superstore-sales.csv", {
+          type: "text/csv",
+        }),
+        requestedScope: "public",
+        user: owner!,
+      });
+      const secondUpload = await uploadKnowledgeFile({
+        file: new File(["ledger_year,contractor,payout\n2026,Acme,1200\n2026,Beacon,900\n"], "superstore-sales.csv", {
+          type: "text/csv",
+        }),
+        requestedScope: "public",
+        user: owner!,
+      });
+
+      expect(secondUpload.id).toBe(firstUpload.id);
+      expect(secondUpload.sourcePath).toBe(firstUpload.sourcePath);
+
+      const db = await getAppDatabase();
+      const matchingDocuments = await db.select().from(documents).where(eq(documents.displayName, "superstore-sales.csv"));
+      const matchingAssets = await db.select().from(dataAssets).where(eq(dataAssets.assetKey, firstUpload.sourcePath));
+      const versionRows = matchingAssets[0]
+        ? await db.select().from(dataAssetVersions).where(eq(dataAssetVersions.assetId, matchingAssets[0].id))
+        : [];
+
+      expect(matchingDocuments).toHaveLength(1);
+      expect(matchingAssets).toHaveLength(1);
+      expect(versionRows).toHaveLength(2);
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it("deletes a managed uploaded knowledge file and archives its asset", async () => {
+    const env = await createTestAppEnvironment({ organizationSlug: "critjecture-test-org" });
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const uploaded = await uploadKnowledgeFile({
+        file: new File(["ledger_year,contractor,payout\n2026,Acme,1200\n"], "delete-me.csv", {
+          type: "text/csv",
+        }),
+        requestedScope: "public",
+        user: owner!,
+      });
+
+      const deleted = await deleteKnowledgeFile({
+        fileId: uploaded.id,
+        user: owner!,
+      });
+
+      expect(deleted.sourcePath).toBe(uploaded.sourcePath);
+
+      const db = await getAppDatabase();
+      const document = await db.query.documents.findFirst({
+        where: eq(documents.id, uploaded.id),
+      });
+      const asset = await db.query.dataAssets.findFirst({
+        where: eq(dataAssets.assetKey, uploaded.sourcePath),
+      });
+
+      expect(document ?? null).toBeNull();
+      expect(asset).toEqual(
+        expect.objectContaining({
+          activeVersionId: null,
+          status: "archived",
+        }),
+      );
     } finally {
       await env.cleanup();
     }

@@ -553,6 +553,7 @@ async function resolveAssetBindingAssetInputs(input: {
     where: and(
       eq(dataAssets.organizationId, input.organizationId),
       eq(dataAssets.id, input.binding.binding.asset_id),
+      eq(dataAssets.status, "active"),
     ),
   });
 
@@ -593,7 +594,10 @@ async function resolveAssetSelectorBindingAssetInputs(input: {
   }
 
   const selector = input.binding.binding.selector;
-  const whereClauses = [eq(dataAssets.organizationId, input.organizationId)];
+  const whereClauses = [
+    eq(dataAssets.organizationId, input.organizationId),
+    eq(dataAssets.status, "active"),
+  ];
 
   if (selector.access_scope_in && selector.access_scope_in.length > 0) {
     whereClauses.push(inArray(dataAssets.accessScope, selector.access_scope_in));

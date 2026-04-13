@@ -1,8 +1,8 @@
 import "server-only";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID, createHash } from "node:crypto";
-import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -12,14 +12,16 @@ import type { SessionUser } from "@/lib/auth-state";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { ensureDocumentAsset } from "@/lib/data-assets";
 import { getAppDatabase } from "@/lib/app-db";
-import { documents, documentChunks, users } from "@/lib/app-schema";
+import { dataAssets, dataConnections, documents, documentChunks, users } from "@/lib/app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
+import { countCsvDelimiters, splitCsvRecord } from "@/lib/csv-utils";
 import { decodeTextBuffer, normalizeCsvLineEndings } from "@/lib/knowledge-ingestion";
 import {
   isKnowledgeAccessScope,
   KNOWLEDGE_UPLOAD_ACCEPT,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   type KnowledgeAccessScope,
+  type KnowledgeFilePreview,
   type KnowledgeFileRecord,
   type KnowledgeIngestionStatus,
 } from "@/lib/knowledge-types";
@@ -62,11 +64,19 @@ type UploadKnowledgeFileInput = {
   user: SessionUser;
 };
 
-function pathExists(targetPath: string) {
-  return access(targetPath).then(
-    () => true,
-    () => false,
-  );
+function parseJsonRecord(value: string | null | undefined) {
+  if (!value) {
+    return {} as Record<string, unknown>;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {} as Record<string, unknown>;
+  }
 }
 
 function normalizeTextContent(value: string) {
@@ -229,12 +239,31 @@ async function writeUploadAtomically(absolutePath: string, buffer: Buffer) {
   }
 }
 
-async function resolveUniqueUploadDestination(
-  companyDataRoot: string,
-  scope: KnowledgeAccessScope,
-  originalFileName: string,
-) {
-  const { ext, fileName } = sanitizeFileName(originalFileName);
+async function findExistingUploadedDocument(input: {
+  accessScope: KnowledgeAccessScope;
+  displayName: string;
+  organizationId: string;
+}) {
+  const db = await getAppDatabase();
+
+  return db.query.documents.findFirst({
+    orderBy: [asc(documents.createdAt), asc(documents.updatedAt)],
+    where: and(
+      eq(documents.organizationId, input.organizationId),
+      eq(documents.accessScope, input.accessScope),
+      eq(documents.sourceType, "uploaded"),
+      eq(documents.displayName, input.displayName),
+    ),
+  });
+}
+
+async function resolveManagedUploadDestination(input: {
+  accessScope: KnowledgeAccessScope;
+  companyDataRoot: string;
+  organizationId: string;
+  originalFileName: string;
+}) {
+  const { displayName, ext, fileName } = sanitizeFileName(input.originalFileName);
 
   if (!ext) {
     throw new Error("Uploaded files must include a supported file extension.");
@@ -242,33 +271,24 @@ async function resolveUniqueUploadDestination(
 
   getAllowedUploadConfig(ext);
 
-  const now = new Date();
-  const year = String(now.getUTCFullYear());
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const relativeDirectory = path.posix.join(scope, "uploads", year, month);
-  const absoluteDirectory = path.join(companyDataRoot, relativeDirectory);
-  const parsedName = path.parse(fileName);
+  const existingDocument = await findExistingUploadedDocument({
+    accessScope: input.accessScope,
+    displayName,
+    organizationId: input.organizationId,
+  });
+  const relativePath =
+    existingDocument?.sourcePath ?? path.posix.join(input.accessScope, "uploads", "current", fileName);
+  const absolutePath = path.join(input.companyDataRoot, relativePath);
 
-  await mkdir(absoluteDirectory, { recursive: true });
+  await mkdir(path.dirname(absolutePath), { recursive: true });
 
-  for (let attempt = 0; attempt < 1_000; attempt += 1) {
-    const candidateName =
-      attempt === 0
-        ? fileName
-        : `${parsedName.name}--${attempt}${parsedName.ext}`;
-    const relativePath = path.posix.join(relativeDirectory, candidateName);
-    const absolutePath = path.join(companyDataRoot, relativePath);
-
-    if (!(await pathExists(absolutePath))) {
-      return {
-        absolutePath,
-        extension: ext as AllowedUploadExtension,
-        relativePath,
-      };
-    }
-  }
-
-  throw new Error("Unable to allocate a unique upload path for this file.");
+  return {
+    absolutePath,
+    displayName,
+    existingDocumentId: existingDocument?.id ?? null,
+    extension: ext as AllowedUploadExtension,
+    relativePath,
+  };
 }
 
 function mapKnowledgeFileRow(row: {
@@ -353,6 +373,228 @@ export async function listKnowledgeFiles(
   return rows.map(mapKnowledgeFileRow);
 }
 
+function chooseCsvDelimiter(headerLine: string) {
+  const delimiterCandidates = [",", ";", "\t", "|"];
+  let selectedDelimiter = ",";
+  let maxDelimiterCount = -1;
+
+  for (const delimiter of delimiterCandidates) {
+    const count = countCsvDelimiters(headerLine, delimiter);
+
+    if (count > maxDelimiterCount) {
+      maxDelimiterCount = count;
+      selectedDelimiter = delimiter;
+    }
+  }
+
+  return selectedDelimiter;
+}
+
+function truncatePreviewCell(cell: string) {
+  const trimmed = cell.trim();
+  return trimmed.length > 120 ? `${trimmed.slice(0, 120).trimEnd()}…` : trimmed;
+}
+
+function buildCsvPreview(text: string): Extract<KnowledgeFilePreview, { kind: "csv" }> {
+  const lines = text
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
+  const [headerLine = "", ...dataLines] = lines;
+  const delimiter = chooseCsvDelimiter(headerLine);
+  const columns = headerLine ? splitCsvRecord(headerLine, delimiter).map(truncatePreviewCell) : [];
+  const rows = dataLines.slice(0, 20).map((line) => splitCsvRecord(line, delimiter).map(truncatePreviewCell));
+
+  return {
+    columns,
+    kind: "csv",
+    rows,
+    truncated: dataLines.length > 20,
+  };
+}
+
+function buildTextPreview(text: string): Extract<KnowledgeFilePreview, { kind: "text" }> {
+  const lines = text
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    kind: "text",
+    lines: lines.slice(0, 20).map((line) => (line.length > 240 ? `${line.slice(0, 240).trimEnd()}…` : line)),
+    truncated: lines.length > 20,
+  };
+}
+
+export async function getKnowledgeFilePreview(input: {
+  fileId: string;
+  user: SessionUser;
+}) {
+  const db = await getAppDatabase();
+  const whereClauses = [
+    eq(documents.id, input.fileId),
+    eq(documents.organizationId, input.user.organizationId),
+    inArray(documents.sourceType, [...KNOWLEDGE_MANAGED_SOURCE_TYPES]),
+  ];
+
+  if (!canRoleAccessKnowledgeScope(input.user.role, "admin")) {
+    whereClauses.push(eq(documents.accessScope, "public"));
+  }
+
+  const row = await db.query.documents.findFirst({
+    where: and(...whereClauses),
+  });
+
+  if (!row) {
+    throw new Error("Knowledge file not found.");
+  }
+
+  if (row.ingestionStatus !== "ready") {
+    throw new Error("Knowledge file preview is only available for ready files.");
+  }
+
+  const lowerPath = row.sourcePath.toLowerCase();
+  const lowerMimeType = (row.mimeType ?? "").toLowerCase();
+
+  if (lowerMimeType === "application/pdf") {
+    const chunks = await db.query.documentChunks.findMany({
+      columns: {
+        chunkText: true,
+      },
+      limit: 3,
+      orderBy: [asc(documentChunks.chunkIndex)],
+      where: eq(documentChunks.documentId, row.id),
+    });
+
+    const text = chunks.map((chunk) => chunk.chunkText.trim()).filter(Boolean).join("\n");
+
+    return text
+      ? buildTextPreview(text)
+      : {
+          kind: "unsupported",
+          message: "No preview text is available for this PDF yet.",
+        } satisfies KnowledgeFilePreview;
+  }
+
+  const companyDataRoot = await resolveCompanyDataRoot(input.user.organizationSlug);
+  const absolutePath = path.join(companyDataRoot, row.sourcePath);
+  const buffer = await readFile(absolutePath);
+  const text = decodeTextBuffer(buffer);
+
+  if (lowerMimeType === "text/csv" || lowerPath.endsWith(".csv") || lowerPath.endsWith(".tsv")) {
+    return buildCsvPreview(text);
+  }
+
+  if (
+    lowerMimeType.startsWith("text/") ||
+    lowerMimeType === "application/json" ||
+    lowerPath.endsWith(".json") ||
+    lowerPath.endsWith(".md") ||
+    lowerPath.endsWith(".txt")
+  ) {
+    return buildTextPreview(text);
+  }
+
+  return {
+    kind: "unsupported",
+    message: "Preview is not available for this file type.",
+  } satisfies KnowledgeFilePreview;
+}
+
+export async function deleteKnowledgeFile(input: {
+  fileId: string;
+  user: SessionUser;
+}) {
+  const db = await getAppDatabase();
+  const whereClauses = [
+    eq(documents.id, input.fileId),
+    eq(documents.organizationId, input.user.organizationId),
+    inArray(documents.sourceType, [...KNOWLEDGE_MANAGED_SOURCE_TYPES]),
+  ];
+
+  if (!canRoleAccessKnowledgeScope(input.user.role, "admin")) {
+    whereClauses.push(eq(documents.accessScope, "public"));
+  }
+
+  const document = await db.query.documents.findFirst({
+    where: and(...whereClauses),
+  });
+
+  if (!document) {
+    throw new Error("Knowledge file not found.");
+  }
+
+  const companyDataRoot = await resolveCompanyDataRoot(input.user.organizationSlug);
+  const absolutePath = path.join(companyDataRoot, document.sourcePath);
+  await unlink(absolutePath).catch(() => undefined);
+
+  const asset = await db.query.dataAssets.findFirst({
+    where: and(
+      eq(dataAssets.organizationId, input.user.organizationId),
+      eq(dataAssets.assetKey, document.sourcePath),
+    ),
+  });
+  const now = Date.now();
+
+  await db.delete(documents).where(eq(documents.id, document.id));
+
+  if (asset) {
+    await db
+      .update(dataAssets)
+      .set({
+        activeVersionId: null,
+        metadataJson: JSON.stringify({
+          ...parseJsonRecord(asset.metadataJson),
+          deleted_at: now,
+          deleted_document_id: document.id,
+        }),
+        status: "archived",
+        updatedAt: now,
+      })
+      .where(eq(dataAssets.id, asset.id));
+
+    const connection = asset.connectionId
+      ? await db.query.dataConnections.findFirst({
+          where: eq(dataConnections.id, asset.connectionId),
+        })
+      : null;
+
+    if (connection?.kind === "google_drive" && asset.externalObjectId) {
+      const config = parseJsonRecord(connection.configJson);
+      const selectedFiles = Array.isArray(config.selected_files)
+        ? config.selected_files.filter((entry) => {
+            return !(
+              typeof entry === "object" &&
+              entry !== null &&
+              !Array.isArray(entry) &&
+              "file_id" in entry &&
+              entry.file_id === asset.externalObjectId
+            );
+          })
+        : [];
+
+      await db
+        .update(dataConnections)
+        .set({
+          configJson: JSON.stringify({
+            ...config,
+            selected_files: selectedFiles,
+          }),
+          updatedAt: now,
+        })
+        .where(eq(dataConnections.id, connection.id));
+    }
+  }
+
+  return {
+    deletedFileId: document.id,
+    sourcePath: document.sourcePath,
+  };
+}
+
 export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
   const { file, user } = input;
 
@@ -375,11 +617,12 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
   }
 
   const companyDataRoot = await resolveCompanyDataRoot(user.organizationSlug);
-  const uploadDestination = await resolveUniqueUploadDestination(
+  const uploadDestination = await resolveManagedUploadDestination({
+    accessScope: scope,
     companyDataRoot,
-    scope,
-    file.name,
-  );
+    organizationId: user.organizationId,
+    originalFileName: file.name,
+  });
   const { normalizedMimeType } = getAllowedUploadConfig(uploadDestination.extension);
 
   assertMimeMatchesExtension(file, uploadDestination.extension);
@@ -393,27 +636,47 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
   const fileContentSha256 = createHash("sha256").update(fileBuffer).digest("hex");
   const now = Date.now();
   const db = await getAppDatabase();
-  const documentId = randomUUID();
+  const documentId = uploadDestination.existingDocumentId ?? randomUUID();
 
   await writeUploadAtomically(uploadDestination.absolutePath, fileBuffer);
 
-  await db.insert(documents).values({
-    accessScope: scope,
-    byteSize: file.size,
-    contentSha256: fileContentSha256,
-    createdAt: now,
-    displayName: sanitizeFileName(file.name).displayName,
-    id: documentId,
-    ingestionError: null,
-    ingestionStatus: "pending",
-    lastIndexedAt: null,
-    mimeType: normalizedMimeType,
-    organizationId: user.organizationId,
-    sourcePath: uploadDestination.relativePath,
-    sourceType: "uploaded",
-    updatedAt: now,
-    uploadedByUserId: user.id,
-  });
+  if (uploadDestination.existingDocumentId) {
+    await db
+      .update(documents)
+      .set({
+        accessScope: scope,
+        byteSize: file.size,
+        contentSha256: fileContentSha256,
+        displayName: uploadDestination.displayName,
+        ingestionError: null,
+        ingestionStatus: "pending",
+        lastIndexedAt: null,
+        mimeType: normalizedMimeType,
+        sourcePath: uploadDestination.relativePath,
+        sourceType: "uploaded",
+        updatedAt: now,
+        uploadedByUserId: user.id,
+      })
+      .where(eq(documents.id, documentId));
+  } else {
+    await db.insert(documents).values({
+      accessScope: scope,
+      byteSize: file.size,
+      contentSha256: fileContentSha256,
+      createdAt: now,
+      displayName: uploadDestination.displayName,
+      id: documentId,
+      ingestionError: null,
+      ingestionStatus: "pending",
+      lastIndexedAt: null,
+      mimeType: normalizedMimeType,
+      organizationId: user.organizationId,
+      sourcePath: uploadDestination.relativePath,
+      sourceType: "uploaded",
+      updatedAt: now,
+      uploadedByUserId: user.id,
+    });
+  }
 
   try {
     const extractedText = await extractTextForUpload(
@@ -463,7 +726,7 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
         accessScope: scope,
         byteSize: fileBuffer.length,
         contentSha256: fileContentSha256,
-        displayName: sanitizeFileName(file.name).displayName,
+        displayName: uploadDestination.displayName,
         documentId,
         lastIndexedAt: indexedAt,
         mimeType: normalizedMimeType,

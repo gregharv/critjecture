@@ -12,7 +12,9 @@ import type {
   ListKnowledgeImportJobsResponse,
 } from "@/lib/knowledge-import-types";
 import type {
+  GetKnowledgeFilePreviewResponse,
   KnowledgeAccessScope,
+  KnowledgeFilePreview,
   KnowledgeFileRecord,
   KnowledgeIngestionStatus,
   ListKnowledgeFilesResponse,
@@ -35,16 +37,30 @@ type KnowledgePageClientProps = {
 type KnowledgePageState = {
   activeJobDetail: GetKnowledgeImportJobResponse | null;
   activeJobId: string | null;
+  activePreviewFileId: string | null;
   error: string | null;
+  filePreviewById: Record<string, KnowledgeFilePreview>;
   files: KnowledgeFileRecord[];
   jobs: KnowledgeImportJobRecord[];
   loading: boolean;
+  previewLoading: boolean;
   submitting: boolean;
 };
 
 type ScopeFilterValue = "all" | KnowledgeAccessScope;
 type StatusFilterValue = "all" | KnowledgeIngestionStatus;
 type ImportScopeValue = KnowledgeAccessScope;
+type KnowledgeSortColumn =
+  | "displayName"
+  | "sourcePath"
+  | "accessScope"
+  | "mimeType"
+  | "byteSize"
+  | "ingestionStatus"
+  | "uploadedBy"
+  | "createdAt"
+  | "lastIndexedAt";
+type SortDirection = "asc" | "desc";
 
 type UploadLikeFile = File & {
   webkitRelativePath?: string;
@@ -160,17 +176,38 @@ function getProgress(job: KnowledgeImportJobRecord) {
   );
 }
 
+function compareNullableNumbers(left: number | null, right: number | null) {
+  return (left ?? -1) - (right ?? -1);
+}
+
+function compareText(left: string | null | undefined, right: string | null | undefined) {
+  return (left ?? "").localeCompare(right ?? "", undefined, { sensitivity: "base" });
+}
+
+function formatSortLabel(column: KnowledgeSortColumn, activeColumn: KnowledgeSortColumn, direction: SortDirection) {
+  if (column !== activeColumn) {
+    return "";
+  }
+
+  return direction === "asc" ? " ↑" : " ↓";
+}
+
 export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
+  const [sortColumn, setSortColumn] = useState<KnowledgeSortColumn>("createdAt");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
   const [state, setState] = useState<KnowledgePageState>({
     activeJobDetail: null,
     activeJobId: null,
+    activePreviewFileId: null,
     error: null,
+    filePreviewById: {},
     files: [],
     jobs: [],
     loading: true,
+    previewLoading: false,
     submitting: false,
   });
 
@@ -181,6 +218,64 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
     return state.jobs.find((job) => job.id === state.activeJobId) ?? state.activeJobDetail?.job ?? null;
   }, [state.activeJobDetail, state.activeJobId, state.jobs]);
+
+  const activePreviewFile = useMemo(() => {
+    if (!state.activePreviewFileId) {
+      return null;
+    }
+
+    return state.files.find((file) => file.id === state.activePreviewFileId) ?? null;
+  }, [state.activePreviewFileId, state.files]);
+
+  const activePreview = state.activePreviewFileId
+    ? state.filePreviewById[state.activePreviewFileId] ?? null
+    : null;
+
+  const sortedFiles = useMemo(() => {
+    const files = [...state.files];
+
+    files.sort((left, right) => {
+      let comparison = 0;
+
+      switch (sortColumn) {
+        case "displayName":
+          comparison = compareText(left.displayName, right.displayName);
+          break;
+        case "sourcePath":
+          comparison = compareText(left.sourcePath, right.sourcePath);
+          break;
+        case "accessScope":
+          comparison = compareText(left.accessScope, right.accessScope);
+          break;
+        case "mimeType":
+          comparison = compareText(left.mimeType ?? left.sourceType, right.mimeType ?? right.sourceType);
+          break;
+        case "byteSize":
+          comparison = compareNullableNumbers(left.byteSize, right.byteSize);
+          break;
+        case "ingestionStatus":
+          comparison = compareText(left.ingestionStatus, right.ingestionStatus);
+          break;
+        case "uploadedBy":
+          comparison = compareText(getUploaderLabel(left), getUploaderLabel(right));
+          break;
+        case "createdAt":
+          comparison = left.createdAt - right.createdAt;
+          break;
+        case "lastIndexedAt":
+          comparison = compareNullableNumbers(left.lastIndexedAt, right.lastIndexedAt);
+          break;
+      }
+
+      if (comparison === 0) {
+        comparison = compareText(left.sourcePath, right.sourcePath);
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return files;
+  }, [sortColumn, sortDirection, state.files]);
 
   const loadFiles = useCallback(async (
     nextScopeFilter = scopeFilter,
@@ -234,6 +329,66 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
     return data;
   }, []);
 
+  const loadFilePreview = useCallback(async (fileId: string) => {
+    let shouldFetch = true;
+
+    setState((current) => {
+      shouldFetch = !(fileId in current.filePreviewById);
+
+      return {
+        ...current,
+        activePreviewFileId: fileId,
+        error: null,
+        previewLoading: shouldFetch,
+      };
+    });
+
+    if (!shouldFetch) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/knowledge/files/${encodeURIComponent(fileId)}/preview`, {
+        cache: "no-store",
+      });
+      const data = (await response.json()) as GetKnowledgeFilePreviewResponse | { error?: string };
+
+      if (!response.ok || !("preview" in data)) {
+        throw new Error(getErrorMessage(data, "Failed to load file preview."));
+      }
+
+      setState((current) => ({
+        ...current,
+        activePreviewFileId: fileId,
+        error: null,
+        filePreviewById: {
+          ...current.filePreviewById,
+          [fileId]: data.preview,
+        },
+        previewLoading: false,
+      }));
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Failed to load file preview.",
+        previewLoading: false,
+      }));
+    }
+  }, []);
+
+  const toggleSort = useCallback((column: KnowledgeSortColumn) => {
+    setSortColumn((currentColumn) => {
+      if (currentColumn === column) {
+        setSortDirection((currentDirection) => (currentDirection === "asc" ? "desc" : "asc"));
+        return currentColumn;
+      }
+
+      setSortDirection(column === "displayName" || column === "sourcePath" || column === "uploadedBy" ? "asc" : "desc");
+      return column;
+    });
+  }, []);
+
+
   const refreshAll = useCallback(async (options?: {
     keepSubmitting?: boolean;
     nextScopeFilter?: ScopeFilterValue;
@@ -285,6 +440,53 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
       }));
     }
   }, [loadFiles, loadJobDetail, loadJobs, scopeFilter, state.activeJobId, statusFilter]);
+
+  const handleDeleteFile = useCallback(async (file: KnowledgeFileRecord) => {
+    const confirmed = window.confirm(
+      `Delete ${file.displayName}? This removes the managed file from the knowledge base and future workflow/search resolution.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      error: null,
+      submitting: true,
+    }));
+
+    try {
+      const response = await fetch(`/api/knowledge/files/${encodeURIComponent(file.id)}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data, "Failed to delete knowledge file."));
+      }
+
+      await refreshAll({
+        keepSubmitting: false,
+        selectedJobId: state.activeJobId,
+      });
+      setState((current) => ({
+        ...current,
+        activePreviewFileId: current.activePreviewFileId === file.id ? null : current.activePreviewFileId,
+        error: null,
+        filePreviewById: Object.fromEntries(
+          Object.entries(current.filePreviewById).filter(([fileId]) => fileId !== file.id),
+        ),
+        submitting: false,
+      }));
+    } catch (caughtError) {
+      setState((current) => ({
+        ...current,
+        error: caughtError instanceof Error ? caughtError.message : "Failed to delete knowledge file.",
+        submitting: false,
+      }));
+    }
+  }, [refreshAll, state.activeJobId]);
 
   useEffect(() => {
     if (!access.canViewKnowledgeLibrary) {
@@ -903,49 +1105,186 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
         ) : state.files.length === 0 ? (
           <div className="knowledge-empty">No managed knowledge files yet.</div>
         ) : (
-          <div className="knowledge-table-wrap">
+          <>
+            <div className="knowledge-table-wrap">
             <table className="knowledge-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Relative path</th>
-                  <th>Scope</th>
-                  <th>Type</th>
-                  <th>Size</th>
-                  <th>Status</th>
-                  <th>Uploaded by</th>
-                  <th>Uploaded at</th>
-                  <th>Last indexed</th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("displayName")} type="button">
+                      Name{formatSortLabel("displayName", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("sourcePath")} type="button">
+                      Relative path{formatSortLabel("sourcePath", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("accessScope")} type="button">
+                      Scope{formatSortLabel("accessScope", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("mimeType")} type="button">
+                      Type{formatSortLabel("mimeType", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("byteSize")} type="button">
+                      Size{formatSortLabel("byteSize", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("ingestionStatus")} type="button">
+                      Status{formatSortLabel("ingestionStatus", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("uploadedBy")} type="button">
+                      Uploaded by{formatSortLabel("uploadedBy", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("createdAt")} type="button">
+                      Uploaded at{formatSortLabel("createdAt", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="knowledge-sort-button" onClick={() => toggleSort("lastIndexedAt")} type="button">
+                      Last indexed{formatSortLabel("lastIndexedAt", sortColumn, sortDirection)}
+                    </button>
+                  </th>
+                  <th>Preview</th>
+                  <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
-                {state.files.map((file) => (
-                  <tr key={file.id}>
-                    <td>
-                      <div className="knowledge-table__title">{file.displayName}</div>
-                    </td>
-                    <td>
-                      <code className="knowledge-code">{file.sourcePath}</code>
-                    </td>
-                    <td>{file.accessScope}</td>
-                    <td>{file.mimeType ?? file.sourceType}</td>
-                    <td>{formatBytes(file.byteSize)}</td>
-                    <td>
-                      <div className={`knowledge-status ${getFileStatusTone(file.ingestionStatus)}`}>
-                        {file.ingestionStatus}
-                      </div>
-                      {file.ingestionError ? (
-                        <div className="knowledge-status__error">{file.ingestionError}</div>
-                      ) : null}
-                    </td>
-                    <td>{getUploaderLabel(file)}</td>
-                    <td>{formatTimestamp(file.createdAt)}</td>
-                    <td>{formatTimestamp(file.lastIndexedAt)}</td>
-                  </tr>
-                ))}
+                {sortedFiles.map((file) => {
+                  const previewIsActive = state.activePreviewFileId === file.id;
+
+                  return (
+                    <tr key={file.id}>
+                      <td>
+                        <div className="knowledge-table__title">{file.displayName}</div>
+                      </td>
+                      <td>
+                        <code className="knowledge-code">{file.sourcePath}</code>
+                      </td>
+                      <td>{file.accessScope}</td>
+                      <td>{file.mimeType ?? file.sourceType}</td>
+                      <td>{formatBytes(file.byteSize)}</td>
+                      <td>
+                        <div className={`knowledge-status ${getFileStatusTone(file.ingestionStatus)}`}>
+                          {file.ingestionStatus}
+                        </div>
+                        {file.ingestionError ? (
+                          <div className="knowledge-status__error">{file.ingestionError}</div>
+                        ) : null}
+                      </td>
+                      <td>{getUploaderLabel(file)}</td>
+                      <td>{formatTimestamp(file.createdAt)}</td>
+                      <td>{formatTimestamp(file.lastIndexedAt)}</td>
+                      <td>
+                        {file.ingestionStatus === "ready" ? (
+                          <button
+                            className="knowledge-button"
+                            onClick={() => {
+                              if (previewIsActive) {
+                                setState((current) => ({
+                                  ...current,
+                                  activePreviewFileId: null,
+                                  previewLoading: false,
+                                }));
+                                return;
+                              }
+
+                              void loadFilePreview(file.id);
+                            }}
+                            type="button"
+                          >
+                            {previewIsActive ? "Hide" : "Preview"}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="knowledge-button knowledge-button--danger"
+                          disabled={state.submitting}
+                          onClick={() => {
+                            void handleDeleteFile(file);
+                          }}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+
+          {activePreviewFile ? (
+            <div className="knowledge-preview">
+              <div className="knowledge-toolbar">
+                <div>
+                  <p className="knowledge-panel__eyebrow">Preview</p>
+                  <h3 className="knowledge-subtitle">{activePreviewFile.displayName}</h3>
+                </div>
+                <div className="knowledge-job-card__meta">
+                  <code className="knowledge-code">{activePreviewFile.sourcePath}</code>
+                </div>
+              </div>
+
+              {state.previewLoading ? (
+                <div className="knowledge-empty">Loading preview…</div>
+              ) : activePreview?.kind === "csv" ? (
+                <>
+                  <div className="knowledge-table-wrap">
+                    <table className="knowledge-table knowledge-table--compact">
+                      <thead>
+                        <tr>
+                          {activePreview.columns.map((column, index) => (
+                            <th key={`${column}-${index}`}>{column || `Column ${index + 1}`}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activePreview.rows.map((row, rowIndex) => (
+                          <tr key={`preview-row-${rowIndex}`}>
+                            {activePreview.columns.map((_, columnIndex) => (
+                              <td key={`preview-cell-${rowIndex}-${columnIndex}`}>
+                                {row[columnIndex] ?? ""}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {activePreview.truncated ? (
+                    <p className="knowledge-upload__hint">Showing the first 20 rows.</p>
+                  ) : null}
+                </>
+              ) : activePreview?.kind === "text" ? (
+                <>
+                  <pre className="knowledge-preview__text">{activePreview.lines.join("\n")}</pre>
+                  {activePreview.truncated ? (
+                    <p className="knowledge-upload__hint">Showing the first 20 non-empty lines.</p>
+                  ) : null}
+                </>
+              ) : activePreview?.kind === "unsupported" ? (
+                <div className="knowledge-empty">{activePreview.message}</div>
+              ) : (
+                <div className="knowledge-empty">Preview unavailable.</div>
+              )}
+            </div>
+          ) : null}
+          </>
         )}
       </div>
     </section>

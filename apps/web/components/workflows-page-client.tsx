@@ -192,9 +192,11 @@ type MetadataResolvedInput = {
 
 type MetadataArtifact = {
   byte_size: number;
+  download_url: string | null;
   file_name: string;
   mime_type: string;
   relative_path: string;
+  sandbox_run_id: string | null;
 };
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -378,6 +380,7 @@ function toMetadataArtifacts(metadata: Record<string, unknown>) {
       const fileName = normalizeText(artifactValue.file_name);
       const mimeType = normalizeText(artifactValue.mime_type);
       const relativePath = normalizeText(artifactValue.relative_path);
+      const sandboxRunId = normalizeText(artifactValue.run_id);
       const byteSize = typeof artifactValue.byte_size === "number" ? artifactValue.byte_size : 0;
 
       if (!fileName || !mimeType || !relativePath) {
@@ -386,9 +389,17 @@ function toMetadataArtifacts(metadata: Record<string, unknown>) {
 
       return {
         byte_size: byteSize,
+        download_url:
+          sandboxRunId && relativePath
+            ? `/api/generated-files/${encodeURIComponent(sandboxRunId)}/${relativePath
+                .split("/")
+                .map((segment) => encodeURIComponent(segment))
+                .join("/")}`
+            : null,
         file_name: fileName,
         mime_type: mimeType,
         relative_path: relativePath,
+        sandbox_run_id: sandboxRunId || null,
       } satisfies MetadataArtifact;
     })
     .filter((entry): entry is MetadataArtifact => entry !== null);
@@ -1093,6 +1104,16 @@ export function WorkflowsPageClient({ access }: WorkflowsPageClientProps) {
                                   <strong>{artifact.file_name}</strong>
                                   <span>{artifact.mime_type}</span>
                                   <span>{formatByteSize(artifact.byte_size)}</span>
+                                  {artifact.download_url ? (
+                                    <a
+                                      className="workflows-button"
+                                      href={artifact.download_url}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      Open / download
+                                    </a>
+                                  ) : null}
                                 </li>
                               ))}
                             </ul>

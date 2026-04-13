@@ -2019,9 +2019,47 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   text-transform: uppercase;
 }
 
+.knowledge-sort-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.knowledge-sort-button:hover {
+  color: var(--foreground);
+}
+
 .knowledge-table__title {
   color: var(--shell-title-ink);
   font-weight: 700;
+}
+
+.knowledge-preview {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--card) 92%, var(--primary) 8%);
+}
+
+.knowledge-preview__text {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--background) 86%, black 14%);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .knowledge-code {

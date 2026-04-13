@@ -297,16 +297,63 @@ function createSourceRootPrefix(jobId: string) {
   return `import-${jobId.slice(0, 8)}`;
 }
 
-function buildManagedDocumentSourcePath(
-  accessScope: KnowledgeAccessScope,
-  jobId: string,
-  relativePath: string,
-) {
+async function findExistingUploadedDocument(input: {
+  accessScope: KnowledgeAccessScope;
+  displayName: string;
+  organizationId: string;
+}) {
+  const db = await getAppDatabase();
+
+  return db.query.documents.findFirst({
+    orderBy: [asc(documents.createdAt), asc(documents.updatedAt)],
+    where: and(
+      eq(documents.organizationId, input.organizationId),
+      eq(documents.accessScope, input.accessScope),
+      eq(documents.sourceType, "uploaded"),
+      eq(documents.displayName, input.displayName),
+    ),
+  });
+}
+
+async function buildManagedDocumentSourcePath(input: {
+  accessScope: KnowledgeAccessScope;
+  displayName: string;
+  jobId: string;
+  organizationId: string;
+  relativePath: string;
+  sourceKind: KnowledgeImportSourceKind;
+}) {
+  if (input.sourceKind === "single_file") {
+    const existing = await findExistingUploadedDocument({
+      accessScope: input.accessScope,
+      displayName: input.displayName,
+      organizationId: input.organizationId,
+    });
+
+    if (existing) {
+      return existing.sourcePath;
+    }
+
+    return path.posix.join(
+      input.accessScope,
+      "uploads",
+      "current",
+      path.posix.basename(input.relativePath),
+    );
+  }
+
   const now = new Date();
   const year = String(now.getUTCFullYear());
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
 
-  return path.posix.join(accessScope, "uploads", year, month, createSourceRootPrefix(jobId), relativePath);
+  return path.posix.join(
+    input.accessScope,
+    "uploads",
+    year,
+    month,
+    createSourceRootPrefix(input.jobId),
+    input.relativePath,
+  );
 }
 
 function mapJobRow(row: {
@@ -1336,11 +1383,18 @@ async function recordImportUsageEvent(input: {
 
 async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
   const db = await getAppDatabase();
+  const managedSourcePath = await buildManagedDocumentSourcePath({
+    accessScope: file.accessScope,
+    displayName: file.displayName,
+    jobId: file.jobId,
+    organizationId: file.organizationId,
+    relativePath: file.relativePath,
+    sourceKind: file.sourceKind,
+  });
   const absolutePromotionPath = path.join(
     await resolveCompanyDataRoot(file.organizationSlug),
-    ...buildManagedDocumentSourcePath(file.accessScope, file.jobId, file.relativePath).split("/"),
+    ...managedSourcePath.split("/"),
   );
-  const managedSourcePath = buildManagedDocumentSourcePath(file.accessScope, file.jobId, file.relativePath);
   const extension = path.posix.extname(file.relativePath).toLowerCase() as AllowedUploadExtension;
   const mimeType = getAllowedUploadConfig(extension).normalizedMimeType;
 

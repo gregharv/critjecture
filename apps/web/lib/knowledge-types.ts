@@ -30,6 +30,27 @@ export type ListKnowledgeFilesResponse = {
   files: KnowledgeFileRecord[];
 };
 
+export type KnowledgeFilePreview =
+  | {
+      columns: string[];
+      kind: "csv";
+      rows: string[][];
+      truncated: boolean;
+    }
+  | {
+      kind: "text";
+      lines: string[];
+      truncated: boolean;
+    }
+  | {
+      kind: "unsupported";
+      message: string;
+    };
+
+export type GetKnowledgeFilePreviewResponse = {
+  preview: KnowledgeFilePreview;
+};
+
 export type UploadKnowledgeFileResponse = CreateKnowledgeImportJobResponse;
 
 export function isKnowledgeAccessScope(value: string): value is KnowledgeAccessScope {

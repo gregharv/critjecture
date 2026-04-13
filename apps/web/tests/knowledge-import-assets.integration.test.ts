@@ -34,6 +34,71 @@ async function waitForImportJobCompletion(input: {
 }
 
 describe("knowledge import asset integration", () => {
+  it("reuses the same uploaded asset for repeated single-file imports with the same name", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const firstJob = await createKnowledgeImportJobFromFiles({
+        files: [
+          {
+            file: new File(["ledger_year,contractor,payout\n2026,Acme,1200\n"], "superstore-sales.csv", {
+              type: "text/csv",
+            }),
+            relativePath: "superstore-sales.csv",
+          },
+        ],
+        requestedScope: "public",
+        sourceKind: "single_file",
+        user: owner!,
+      });
+      const firstCompleted = await waitForImportJobCompletion({
+        jobId: firstJob.id,
+        user: owner!,
+      });
+
+      const firstDocumentId = firstCompleted.files[0]?.documentId;
+      expect(firstDocumentId).toEqual(expect.any(String));
+
+      const secondJob = await createKnowledgeImportJobFromFiles({
+        files: [
+          {
+            file: new File(["ledger_year,contractor,payout\n2026,Acme,1200\n2026,Beacon,900\n"], "superstore-sales.csv", {
+              type: "text/csv",
+            }),
+            relativePath: "superstore-sales.csv",
+          },
+        ],
+        requestedScope: "public",
+        sourceKind: "single_file",
+        user: owner!,
+      });
+      const secondCompleted = await waitForImportJobCompletion({
+        jobId: secondJob.id,
+        user: owner!,
+      });
+
+      expect(secondCompleted.files[0]?.documentId).toBe(firstDocumentId);
+
+      const db = await getAppDatabase();
+      const document = await db.query.documents.findFirst({
+        where: eq(documents.id, firstDocumentId!),
+      });
+      const assets = await db.select().from(dataAssets).where(eq(dataAssets.assetKey, document!.sourcePath));
+      const versions = assets[0]
+        ? await db.select().from(dataAssetVersions).where(eq(dataAssetVersions.assetId, assets[0].id))
+        : [];
+
+      expect(document?.sourcePath).toBe("public/uploads/current/superstore-sales.csv");
+      expect(assets).toHaveLength(1);
+      expect(versions).toHaveLength(2);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
   it("creates bulk import assets and versions for imported files", async () => {
     const environment = await createTestAppEnvironment();
 
