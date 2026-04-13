@@ -181,7 +181,7 @@ export async function POST(request: Request) {
 
     if (analysisResult) {
       summaryLines.push(
-        `Recorded chart-ready analysis as analysisResultId ${analysisResult.id}. Use generate_visual_graph with this analysisResultId instead of rescanning CSV files.`,
+        `Recorded chart-ready analysis as analysisResultId ${analysisResult.id}. Reuse this analysisResultId only when the follow-up chart still uses the same underlying files and scope. If the user asks for a new year, metric, group, comparison, or file, search again and run fresh analysis or plotting with the needed inputFiles.`,
       );
     }
 

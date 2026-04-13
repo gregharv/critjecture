@@ -47,4 +47,12 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("Do not add manual delimiter/line-ending sniffing code in Python");
     expect(prompt).not.toContain("inspect a small sample");
   });
+
+  it("tells follow-up chart requests to verify prior data still covers the new scope", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("Before reusing analysisResultId or previously selected files for a follow-up");
+    expect(prompt).toContain("If the user adds a new year, date range, metric, group, comparison, or file");
+    expect(prompt).toContain("search_company_knowledge again");
+  });
 });

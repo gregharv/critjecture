@@ -342,4 +342,92 @@ describe("POST /api/visual-graph/run", () => {
       },
     ]);
   });
+
+  it("keeps a follow-up contractor spend chart grounded in the 2026 file instead of reusing stale 2025 chart data", async () => {
+    const firstPrompt = "can you chart our spend for the contractors in 2025";
+    const followUpPrompt = "can you chart spend for 2026 next to it in a different color";
+    const initialChartCode = [
+      "import polars as pl",
+      "import matplotlib.pyplot as plt",
+      'frame = pl.scan_csv("inputs/admin/contractors.csv", encoding="utf8-lossy").collect()',
+      'plt.figure(figsize=(8, 5))',
+      'plt.bar(frame["contractor_name"].to_list(), frame["payout"].to_list(), color="#4C78A8")',
+      'plt.xticks(rotation=45, ha="right")',
+      'plt.tight_layout()',
+      'plt.savefig("outputs/chart.png", dpi=200)',
+      `print(${JSON.stringify(firstPrompt)})`,
+    ].join("\n");
+
+    const initialResponse = await POST(createJsonRequest("http://localhost/api/visual-graph/run", {
+      code: initialChartCode,
+      inputFiles: ["admin/contractors.csv"],
+      turnId: "turn-1",
+    }));
+    const initialBody = await readJson<{ generatedAsset: { relativePath: string } }>(initialResponse);
+
+    expect(initialResponse.status).toBe(200);
+    expect(initialBody.generatedAsset.relativePath).toBe("outputs/chart.png");
+
+    mocks.getStoredAnalysisResult.mockResolvedValue({
+      chart: {
+        chartType: "bar",
+        title: "Contractor spend in 2025",
+        x: [
+          "Ace Plumbing",
+          "Northside Electric",
+          "Sunrise Landscaping",
+          "ProClean Services",
+        ],
+        xLabel: "Contractor",
+        y: [980, 1325, 1840, 1110],
+        yLabel: "Spend",
+      },
+      id: "analysis-2025",
+    });
+
+    const followUpChartCode = [
+      "import polars as pl",
+      "import matplotlib.pyplot as plt",
+      "from pathlib import Path",
+      'frame_2025 = pl.scan_csv("inputs/admin/contractors.csv", encoding="utf8-lossy").collect()',
+      'frame_2026 = pl.scan_csv("inputs/admin/contractors_new.csv", encoding="utf8-lossy").collect()',
+      'labels = frame_2025["contractor_name"].to_list()',
+      'values_2025 = frame_2025["payout"].to_list()',
+      'values_2026 = frame_2026["payout"].to_list()',
+      'positions = list(range(len(labels)))',
+      'width = 0.35',
+      'plt.figure(figsize=(10, 6))',
+      'plt.bar([position - width / 2 for position in positions], values_2025, width=width, color="#4C78A8", label="2025")',
+      'plt.bar([position + width / 2 for position in positions], values_2026, width=width, color="#F58518", label="2026")',
+      'plt.xticks(positions, labels, rotation=45, ha="right")',
+      'plt.legend()',
+      'plt.tight_layout()',
+      'plt.savefig("outputs/chart.png", dpi=200)',
+      `print(${JSON.stringify(followUpPrompt)})`,
+    ].join("\n");
+
+    const followUpResponse = await POST(createJsonRequest("http://localhost/api/visual-graph/run", {
+      analysisResultId: "analysis-2025",
+      code: followUpChartCode,
+      inputFiles: ["admin/contractors.csv", "admin/contractors_new.csv"],
+      turnId: "turn-1",
+    }));
+    const followUpBody = await readJson<{ generatedAsset: { relativePath: string } }>(followUpResponse);
+
+    expect(followUpResponse.status).toBe(200);
+    expect(followUpBody.generatedAsset.relativePath).toBe("outputs/chart.png");
+
+    const followUpSandboxCall = mocks.executeSandboxedCommand.mock.calls[1]?.[0];
+
+    expect(followUpSandboxCall).toEqual(
+      expect.objectContaining({
+        code: expect.stringContaining('pl.scan_csv("inputs/admin/contractors_new.csv", encoding="utf8-lossy")'),
+        inputFiles: ["admin/contractors.csv", "admin/contractors_new.csv"],
+        inlineWorkspaceFiles: [],
+        toolName: "generate_visual_graph",
+      }),
+    );
+    expect(followUpSandboxCall?.code).toContain('label="2026"');
+    expect(followUpSandboxCall?.code).toContain('color="#F58518"');
+  });
 });

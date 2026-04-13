@@ -1574,7 +1574,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           analysisResultId: Type.Optional(
             Type.String({
               description:
-                "Optional analysisResultId returned by run_data_analysis for chart-ready data. If present, the server renders the stored chart without rerunning analysis code.",
+                "Optional analysisResultId returned by run_data_analysis for chart-ready data. Use this only when the same already-computed data still answers the current chart request. If the follow-up adds a new year, date range, metric, group, comparison, or file, omit this and gather fresh inputFiles instead.",
               minLength: 1,
             }),
           ),
@@ -1596,7 +1596,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             Type.Array(
               Type.String({
                 description:
-                  "Optional company_data-relative paths to stage for plotting code, such as admin/quarterly_report_2026.csv. These are ignored when analysisResultId is used.",
+                  "Optional company_data-relative paths to stage for plotting code, such as admin/quarterly_report_2026.csv. If code or inputFiles are provided, the server runs fresh plotting against those files instead of reusing stored analysisResultId.",
                 minLength: 1,
               }),
             ),
@@ -2064,7 +2064,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           name: "generate_visual_graph",
           label: "Generate Visual Graph",
           description:
-            "Generate exactly one PNG chart inside outputs/. This can either render a stored chart via analysisResultId or run arbitrary matplotlib code directly against staged company files passed in inputFiles.",
+            "Generate exactly one PNG chart inside outputs/. Use analysisResultId only for same-scope restyling of already-computed chart data. When a follow-up needs new years, files, groups, metrics, or comparisons, pass fresh code and inputFiles instead.",
           parameters: generateVisualGraphParameters,
           route: "/api/visual-graph/run",
           attachGraphImageForReview: true,

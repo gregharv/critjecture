@@ -292,8 +292,10 @@ export async function POST(request: Request) {
     });
   }
 
+  const hasFreshPlotRequest =
+    parsedRequest.inputFiles.length > 0 || parsedRequest.code !== null;
   const storedAnalysisResult =
-    parsedRequest.analysisResultId && parsedRequest.turnId
+    parsedRequest.analysisResultId && parsedRequest.turnId && !hasFreshPlotRequest
       ? await getStoredAnalysisResult({
           analysisResultId: parsedRequest.analysisResultId,
           organizationId: user.organizationId,
@@ -302,7 +304,7 @@ export async function POST(request: Request) {
         })
       : null;
 
-  if (parsedRequest.analysisResultId && !storedAnalysisResult) {
+  if (parsedRequest.analysisResultId && !storedAnalysisResult && !hasFreshPlotRequest) {
     return finalizeObservedRequest(observed, {
       errorCode: "unknown_analysis_result",
       outcome: "error",
