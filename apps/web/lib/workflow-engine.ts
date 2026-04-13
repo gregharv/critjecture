@@ -2,19 +2,24 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
-import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import { parseChartAnalysisStdout, type ChartAnalysisPayload } from "@/lib/analysis-results";
 import { getAppDatabase } from "@/lib/app-db";
 import {
-  documents,
   organizationMemberships,
   workflowRunSteps,
   workflowRuns,
   workflowVersions,
   workflows,
 } from "@/lib/app-schema";
+import {
+  DataAssetResolutionError,
+  freezeWorkflowInputSnapshot,
+  loadFrozenWorkflowInputSnapshot,
+  resolveWorkflowInputBindings,
+  type ResolvedWorkflowAssetInput,
+} from "@/lib/data-asset-resolution";
 import {
   executeSandboxedCommand,
   SandboxAdmissionError,
@@ -53,7 +58,7 @@ type WorkflowRunExecutionContext = {
   runAsRole: "admin" | "member" | "owner";
   runAsUserId: string | null;
   runId: string;
-  status: "blocked_validation" | "cancelled" | "completed" | "failed" | "queued" | "running" | "waiting_for_input";
+  status: "blocked_validation" | "cancelled" | "completed" | "failed" | "queued" | "running" | "skipped" | "waiting_for_input";
   version: {
     deliveryJson: string;
     executionIdentityJson: string;
@@ -73,7 +78,7 @@ type WorkflowRunExecutionContext = {
   };
 };
 
-type ResolvedWorkflowDocument = WorkflowValidatorResolvedDocument;
+type ResolvedWorkflowDocument = WorkflowValidatorResolvedDocument & ResolvedWorkflowAssetInput;
 
 type StepExecutionState = {
   chartPayload: ChartAnalysisPayload | null;
@@ -86,7 +91,7 @@ type StepExecutionState = {
 export type ExecuteWorkflowRunResult = {
   completedStepCount: number;
   run: WorkflowRunRecord;
-  status: "completed" | "failed" | "blocked_validation" | "waiting_for_input";
+  status: "completed" | "failed" | "blocked_validation" | "skipped" | "waiting_for_input";
   totalStepCount: number;
 };
 
@@ -417,7 +422,7 @@ async function markRunTerminal(input: {
   metadata: Record<string, unknown>;
   organizationId: string;
   runId: string;
-  status: "completed" | "failed";
+  status: "completed" | "failed" | "skipped";
   workflowId: string;
 }) {
   const db = await getAppDatabase();
@@ -512,182 +517,6 @@ async function assertRunExecutionIdentity(input: {
   }
 
   return membershipRole;
-}
-
-function buildSelectorRegex(pattern: string) {
-  try {
-    return new RegExp(pattern);
-  } catch {
-    throw new WorkflowEngineError(
-      `Invalid selector display_name_regex pattern: ${pattern}`,
-      "invalid_selector_regex",
-    );
-  }
-}
-
-async function resolveSelectorBindingDocuments(input: {
-  binding: WorkflowVersionContractsV1["inputBindings"]["bindings"][number];
-  organizationId: string;
-}) {
-  if (input.binding.binding.kind !== "selector") {
-    return [];
-  }
-
-  const selector = input.binding.binding.selector;
-  const whereClauses = [
-    eq(documents.organizationId, input.organizationId),
-    eq(documents.ingestionStatus, "ready"),
-  ];
-
-  if (selector.access_scope_in && selector.access_scope_in.length > 0) {
-    whereClauses.push(inArray(documents.accessScope, selector.access_scope_in));
-  }
-
-  if (selector.source_type_in && selector.source_type_in.length > 0) {
-    whereClauses.push(inArray(documents.sourceType, selector.source_type_in));
-  }
-
-  if (selector.mime_type_in && selector.mime_type_in.length > 0) {
-    whereClauses.push(inArray(documents.mimeType, selector.mime_type_in));
-  }
-
-  if (selector.display_name_equals) {
-    whereClauses.push(eq(documents.displayName, selector.display_name_equals));
-  }
-
-  if (selector.uploaded_by_user_id) {
-    whereClauses.push(eq(documents.uploadedByUserId, selector.uploaded_by_user_id));
-  }
-
-  const db = await getAppDatabase();
-  const maxDocuments = Math.min(Math.max(input.binding.binding.max_documents, 1), 100);
-  const fetchLimit = Math.min(Math.max(maxDocuments * 5, 50), 500);
-
-  const baseQuery = db
-    .select({
-      accessScope: documents.accessScope,
-      contentSha256: documents.contentSha256,
-      displayName: documents.displayName,
-      id: documents.id,
-      mimeType: documents.mimeType,
-      sourcePath: documents.sourcePath,
-      sourceType: documents.sourceType,
-      updatedAt: documents.updatedAt,
-      uploadedByUserId: documents.uploadedByUserId,
-    })
-    .from(documents)
-    .where(and(...whereClauses));
-
-  const orderedQuery =
-    input.binding.binding.selection === "latest_indexed_at"
-      ? baseQuery.orderBy(desc(documents.lastIndexedAt), desc(documents.updatedAt))
-      : baseQuery.orderBy(desc(documents.updatedAt));
-
-  const candidateRows = await orderedQuery.limit(fetchLimit);
-  const regex = selector.display_name_regex
-    ? buildSelectorRegex(selector.display_name_regex)
-    : null;
-
-  const filteredRows = regex
-    ? candidateRows.filter((row) => regex.test(row.displayName))
-    : candidateRows;
-
-  return filteredRows.slice(0, maxDocuments);
-}
-
-async function resolveDocumentBindingDocument(input: {
-  binding: WorkflowVersionContractsV1["inputBindings"]["bindings"][number];
-  organizationId: string;
-}) {
-  if (input.binding.binding.kind !== "document_id") {
-    return [];
-  }
-
-  const db = await getAppDatabase();
-  const documentRow = await db.query.documents.findFirst({
-    where: and(
-      eq(documents.organizationId, input.organizationId),
-      eq(documents.id, input.binding.binding.document_id),
-      eq(documents.ingestionStatus, "ready"),
-    ),
-  });
-
-  if (!documentRow) {
-    return [];
-  }
-
-  return [
-    {
-      accessScope: documentRow.accessScope,
-      contentSha256: documentRow.contentSha256,
-      displayName: documentRow.displayName,
-      id: documentRow.id,
-      mimeType: documentRow.mimeType,
-      sourcePath: documentRow.sourcePath,
-      sourceType: documentRow.sourceType,
-      updatedAt: documentRow.updatedAt,
-      uploadedByUserId: documentRow.uploadedByUserId,
-    },
-  ];
-}
-
-async function resolveWorkflowInputBindings(input: {
-  contracts: WorkflowVersionContractsV1;
-  executionRole: UserRole;
-  organizationId: string;
-}) {
-  const inputByKey = new Map(
-    input.contracts.inputContract.inputs.map((spec) => [spec.input_key, spec]),
-  );
-  const resolvedInputDocuments = new Map<string, ResolvedWorkflowDocument[]>();
-
-  for (const binding of input.contracts.inputBindings.bindings) {
-    const inputSpec = inputByKey.get(binding.input_key);
-
-    if (!inputSpec) {
-      throw new WorkflowEngineError(
-        `Unknown input binding key: ${binding.input_key}`,
-        "invalid_input_binding",
-      );
-    }
-
-    const boundDocuments =
-      binding.binding.kind === "document_id"
-        ? await resolveDocumentBindingDocument({
-            binding,
-            organizationId: input.organizationId,
-          })
-        : await resolveSelectorBindingDocuments({
-            binding,
-            organizationId: input.organizationId,
-          });
-
-    const accessibleDocuments = boundDocuments.filter((documentRow) =>
-      canRoleAccessKnowledgeScope(input.executionRole, documentRow.accessScope),
-    );
-
-    if (accessibleDocuments.length !== boundDocuments.length) {
-      throw new WorkflowEngineError(
-        `Workflow input ${binding.input_key} resolved files that are no longer accessible to the run identity.`,
-        "identity_invalid_document_access",
-      );
-    }
-
-    const normalizedDocuments =
-      inputSpec.multiplicity === "one"
-        ? accessibleDocuments.slice(0, 1)
-        : accessibleDocuments;
-
-    resolvedInputDocuments.set(binding.input_key, normalizedDocuments);
-  }
-
-  for (const inputSpec of input.contracts.inputContract.inputs) {
-    if (!resolvedInputDocuments.has(inputSpec.input_key)) {
-      resolvedInputDocuments.set(inputSpec.input_key, []);
-    }
-  }
-
-  return resolvedInputDocuments;
 }
 
 function resolveStepInputFiles(input: {
@@ -1003,10 +832,15 @@ function collectResolvedInputSummary(
   const summary: Array<{
     documents: Array<{
       access_scope: "admin" | "public";
+      asset_id?: string;
+      asset_version_id?: string;
       content_sha256: string;
       display_name: string;
       document_id: string;
+      materialized_path?: string;
       mime_type: string | null;
+      row_count?: number;
+      schema_hash?: string | null;
       source_path: string;
       updated_at: number;
     }>;
@@ -1017,10 +851,19 @@ function collectResolvedInputSummary(
     summary.push({
       documents: documentRows.map((documentRow) => ({
         access_scope: documentRow.accessScope,
+        ...(documentRow.assetId ? { asset_id: documentRow.assetId } : {}),
+        ...(documentRow.assetVersionId ? { asset_version_id: documentRow.assetVersionId } : {}),
         content_sha256: documentRow.contentSha256,
         display_name: documentRow.displayName,
-        document_id: documentRow.id,
+        document_id: documentRow.documentId ?? documentRow.id,
+        ...(documentRow.materializedPath
+          ? { materialized_path: documentRow.materializedPath }
+          : {}),
         mime_type: documentRow.mimeType,
+        ...(typeof documentRow.rowCount === "number" ? { row_count: documentRow.rowCount } : {}),
+        ...(typeof documentRow.schemaHash === "string" || documentRow.schemaHash === null
+          ? { schema_hash: documentRow.schemaHash }
+          : {}),
         source_path: documentRow.sourcePath,
         updated_at: documentRow.updatedAt,
       })),
@@ -1029,6 +872,46 @@ function collectResolvedInputSummary(
   }
 
   return summary.sort((left, right) => left.input_key.localeCompare(right.input_key));
+}
+
+function collectSnapshotSummary(
+  resolvedInputs: Map<string, ResolvedWorkflowDocument[]>,
+) {
+  const inputs = [...resolvedInputs.entries()]
+    .map(([inputKey, documentRows]) => ({
+      input_key: inputKey,
+      items: documentRows.map((documentRow) => ({
+        asset_id: documentRow.assetId,
+        asset_version_id: documentRow.assetVersionId,
+        content_hash: documentRow.contentSha256,
+        display_name: documentRow.displayName,
+        materialized_path: documentRow.materializedPath,
+        resolved_at: documentRow.resolvedAt,
+        schema_hash: documentRow.schemaHash,
+        source_updated_at: documentRow.updatedAt,
+      })),
+    }))
+    .sort((left, right) => left.input_key.localeCompare(right.input_key));
+
+  return {
+    asset_ids: normalizeUniqueStrings(
+      inputs.flatMap((inputEntry) => inputEntry.items.map((item) => item.asset_id)),
+    ),
+    asset_version_ids: normalizeUniqueStrings(
+      inputs.flatMap((inputEntry) => inputEntry.items.map((item) => item.asset_version_id)),
+    ),
+    content_hashes: normalizeUniqueStrings(
+      inputs.flatMap((inputEntry) => inputEntry.items.map((item) => item.content_hash)),
+    ),
+    inputs,
+    resolved_at_values: normalizeUniqueStrings(
+      inputs.flatMap((inputEntry) =>
+        inputEntry.items.flatMap((item) =>
+          typeof item.resolved_at === "number" ? [String(item.resolved_at)] : [],
+        ),
+      ),
+    ).map((value) => Number(value)),
+  };
 }
 
 function collectMissingRequiredInputKeys(validationReports: {
@@ -1075,7 +958,11 @@ export async function executeWorkflowRun(input: {
     });
   }
 
-  if (runContext.status === "completed" || runContext.status === "failed") {
+  if (
+    runContext.status === "completed" ||
+    runContext.status === "failed" ||
+    runContext.status === "skipped"
+  ) {
     const existingRun = await getWorkflowRunById({
       organizationId: input.organizationId,
       runId: input.runId,
@@ -1086,9 +973,14 @@ export async function executeWorkflowRun(input: {
     }
 
     return {
-      completedStepCount: existingRun.status === "completed" ? 0 : 0,
+      completedStepCount: 0,
       run: existingRun,
-      status: existingRun.status === "completed" ? "completed" : "failed",
+      status:
+        existingRun.status === "completed"
+          ? "completed"
+          : existingRun.status === "skipped"
+            ? "skipped"
+            : "failed",
       totalStepCount: 0,
     };
   }
@@ -1098,6 +990,7 @@ export async function executeWorkflowRun(input: {
   let completedStepCount = 0;
   let totalStepCount = 0;
   let validationSummary: WorkflowInputValidationSummary | null = null;
+  let snapshotSummary: Record<string, unknown> | null = null;
 
   try {
     const contracts = parseWorkflowVersionContracts({
@@ -1125,11 +1018,23 @@ export async function executeWorkflowRun(input: {
       );
     }
 
-    const resolvedInputs = await resolveWorkflowInputBindings({
-      contracts,
-      executionRole,
+    let resolvedInputs = await loadFrozenWorkflowInputSnapshot({
       organizationId: input.organizationId,
+      runId: input.runId,
     });
+
+    if (resolvedInputs) {
+      snapshotSummary = collectSnapshotSummary(resolvedInputs);
+    }
+
+    if (!resolvedInputs) {
+      resolvedInputs = await resolveWorkflowInputBindings({
+        contracts,
+        executionRole,
+        organizationId: input.organizationId,
+        organizationSlug: input.organizationSlug,
+      });
+    }
 
     totalStepCount = contracts.recipe.steps.length;
 
@@ -1158,43 +1063,93 @@ export async function executeWorkflowRun(input: {
             })
           : null;
 
-      if (validation.status === "blocked_validation") {
+      if (validation.status === "blocked_validation" || validation.status === "skip") {
         await cancelWorkflowInputRequestsForRun({
           organizationId: input.organizationId,
-          reason: "Input validation failed for non-missing reasons.",
+          reason:
+            validation.status === "skip"
+              ? "Run skipped because the resolved inputs did not require execution."
+              : "Input validation failed for non-missing reasons.",
           runId: input.runId,
         });
       }
 
-      await markRunValidationState({
-        metadata: {
-          ...baseMetadata,
-          completed_step_count: 0,
-          input_request:
-            validation.status === "waiting_for_input"
-              ? {
-                  knowledge_upload_path: inputRequestNotification?.knowledgeUploadPath ?? null,
-                  notification_channels: inputRequestNotification?.notificationChannels ?? ["in_app"],
-                  request_id: inputRequestNotification?.requestId ?? null,
-                  requested_input_keys: missingRequiredInputKeys,
-                }
-              : null,
-          input_validation: {
-            checked_at: validation.summary.checkedAt,
-            failed_check_count: validation.summary.failedCheckCount,
-            failed_input_count: validation.summary.failedInputCount,
-            missing_required_input_count: validation.summary.missingRequiredInputCount,
-            missing_required_input_keys: missingRequiredInputKeys,
-            status: validation.status,
-            warning_check_count: validation.summary.warningCheckCount,
-            warning_input_count: validation.summary.warningInputCount,
-          },
-          resolved_inputs: collectResolvedInputSummary(resolvedInputs),
-          total_step_count: totalStepCount,
-          workflow_name: runContext.workflow.name,
-          workflow_version_id: runContext.version.workflowVersionId,
-          workflow_version_number: runContext.version.workflowVersionNumber,
+      const validationMetadata = {
+        ...baseMetadata,
+        completed_step_count: 0,
+        input_request:
+          validation.status === "waiting_for_input"
+            ? {
+                knowledge_upload_path: inputRequestNotification?.knowledgeUploadPath ?? null,
+                notification_channels: inputRequestNotification?.notificationChannels ?? ["in_app"],
+                request_id: inputRequestNotification?.requestId ?? null,
+                requested_input_keys: missingRequiredInputKeys,
+              }
+            : null,
+        input_validation: {
+          checked_at: validation.summary.checkedAt,
+          failed_check_count: validation.summary.failedCheckCount,
+          failed_input_count: validation.summary.failedInputCount,
+          missing_required_input_count: validation.summary.missingRequiredInputCount,
+          missing_required_input_keys: missingRequiredInputKeys,
+          skipped_input_count: validation.summary.skippedInputCount,
+          status: validation.status,
+          warning_check_count: validation.summary.warningCheckCount,
+          warning_input_count: validation.summary.warningInputCount,
         },
+        resolved_inputs: collectResolvedInputSummary(resolvedInputs),
+        ...(snapshotSummary ? { snapshot_summary: snapshotSummary } : {}),
+        total_step_count: totalStepCount,
+        workflow_name: runContext.workflow.name,
+        workflow_version_id: runContext.version.workflowVersionId,
+        workflow_version_number: runContext.version.workflowVersionNumber,
+      };
+
+      if (validation.status === "skip") {
+        const skippedAt = Date.now();
+
+        await markRunTerminal({
+          completedAt: skippedAt,
+          failureReason: null,
+          metadata: {
+            ...validationMetadata,
+            skip_reason: "inputs_unchanged",
+          },
+          organizationId: input.organizationId,
+          runId: input.runId,
+          status: "skipped",
+          workflowId: runContext.workflow.id,
+        });
+
+        const skippedRun = await getWorkflowRunById({
+          organizationId: input.organizationId,
+          runId: input.runId,
+        });
+
+        if (!skippedRun) {
+          throw new WorkflowEngineError(
+            "Workflow run could not be reloaded after skip.",
+            "run_reload_failed",
+          );
+        }
+
+        logStructuredEvent("workflow.run_skipped", {
+          organizationId: input.organizationId,
+          routeGroup: "workflow",
+          routeKey: "workflow.engine.execute",
+          workflowRunId: input.runId,
+        });
+
+        return {
+          completedStepCount: 0,
+          run: skippedRun,
+          status: "skipped",
+          totalStepCount,
+        };
+      }
+
+      await markRunValidationState({
+        metadata: validationMetadata,
         organizationId: input.organizationId,
         runId: input.runId,
         status: validation.status,
@@ -1226,6 +1181,32 @@ export async function executeWorkflowRun(input: {
         status: validation.status,
         totalStepCount,
       };
+    }
+
+    const existingSnapshot = await loadFrozenWorkflowInputSnapshot({
+      organizationId: input.organizationId,
+      runId: input.runId,
+    });
+
+    if (!existingSnapshot) {
+      const resolvedAt = Date.now();
+
+      await freezeWorkflowInputSnapshot({
+        organizationId: input.organizationId,
+        resolvedAt,
+        resolvedInputs,
+        runId: input.runId,
+      });
+
+      resolvedInputs =
+        (await loadFrozenWorkflowInputSnapshot({
+          organizationId: input.organizationId,
+          runId: input.runId,
+        })) ?? resolvedInputs;
+      snapshotSummary = collectSnapshotSummary(resolvedInputs);
+    } else {
+      resolvedInputs = existingSnapshot;
+      snapshotSummary = collectSnapshotSummary(resolvedInputs);
     }
 
     await fulfillWorkflowInputRequestsForRun({
@@ -1363,12 +1344,14 @@ export async function executeWorkflowRun(input: {
               failed_check_count: validationSummary.failedCheckCount,
               failed_input_count: validationSummary.failedInputCount,
               missing_required_input_count: validationSummary.missingRequiredInputCount,
+              skipped_input_count: validationSummary.skippedInputCount,
               status: "pass",
               warning_check_count: validationSummary.warningCheckCount,
               warning_input_count: validationSummary.warningInputCount,
             }
           : null,
         resolved_inputs: collectResolvedInputSummary(resolvedInputs),
+        ...(snapshotSummary ? { snapshot_summary: snapshotSummary } : {}),
         sandbox_run_ids: normalizeUniqueStrings(sandboxRunIds),
         total_step_count: totalStepCount,
         workflow_name: runContext.workflow.name,
@@ -1405,7 +1388,9 @@ export async function executeWorkflowRun(input: {
     const failureCode =
       caughtError instanceof WorkflowEngineError
         ? caughtError.code
-        : "workflow_execution_failed";
+        : caughtError instanceof DataAssetResolutionError
+          ? caughtError.code
+          : "workflow_execution_failed";
     const failureMessage = getErrorMessage(caughtError, "Workflow execution failed.");
     const completedAt = Date.now();
 
@@ -1423,11 +1408,13 @@ export async function executeWorkflowRun(input: {
               failed_check_count: validationSummary.failedCheckCount,
               failed_input_count: validationSummary.failedInputCount,
               missing_required_input_count: validationSummary.missingRequiredInputCount,
+              skipped_input_count: validationSummary.skippedInputCount,
               status: "pass",
               warning_check_count: validationSummary.warningCheckCount,
               warning_input_count: validationSummary.warningInputCount,
             }
           : null,
+        ...(snapshotSummary ? { snapshot_summary: snapshotSummary } : {}),
         total_step_count: totalStepCount,
         workflow_name: runContext.workflow.name,
         workflow_version_id: runContext.version.workflowVersionId,
@@ -1460,11 +1447,13 @@ export async function executeWorkflowRun(input: {
   const normalizedStatus: ExecuteWorkflowRunResult["status"] =
     finalizedRun.status === "completed"
       ? "completed"
-      : finalizedRun.status === "waiting_for_input"
-        ? "waiting_for_input"
-        : finalizedRun.status === "blocked_validation"
-          ? "blocked_validation"
-          : "failed";
+      : finalizedRun.status === "skipped"
+        ? "skipped"
+        : finalizedRun.status === "waiting_for_input"
+          ? "waiting_for_input"
+          : finalizedRun.status === "blocked_validation"
+            ? "blocked_validation"
+            : "failed";
 
   return {
     completedStepCount,

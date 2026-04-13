@@ -7,15 +7,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { getAppDatabase } from "@/lib/app-db";
 import {
+  dataAssets,
+  dataAssetVersions,
   documents,
   organizationMemberships,
   workflowDeliveries,
   workflowInputRequests,
   workflowRunInputChecks,
+  workflowRunResolvedInputs,
   workflowRuns,
   workflowRunSteps,
 } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { ensureFilesystemAssetVersion } from "@/lib/data-assets";
 import { executeWorkflowRun } from "@/lib/workflow-engine";
 import { recheckWaitingWorkflowRuns } from "@/lib/workflow-resume";
 import { createManualWorkflowRun, getWorkflowRunById } from "@/lib/workflow-runs";
@@ -27,7 +31,7 @@ import {
   resetTestAppState,
 } from "@/tests/helpers/test-environment";
 
-function buildRequiredInputWorkflowVersion(ownerUserId: string) {
+function buildWorkflowVersionBase(ownerUserId: string) {
   return {
     delivery: {
       channels: [],
@@ -48,6 +52,32 @@ function buildRequiredInputWorkflowVersion(ownerUserId: string) {
       run_as_user_id: ownerUserId,
       schema_version: 1,
     },
+    outputs: {
+      schema_version: 1,
+      summary_template: "standard_v1",
+    },
+    provenance: {
+      schema_version: 1,
+      source_kind: "manual_builder",
+    },
+    recipe: {
+      schema_version: 1,
+      steps: [],
+    },
+    schedule: {
+      kind: "manual_only",
+      schema_version: 1,
+    },
+    thresholds: {
+      rules: [],
+      schema_version: 1,
+    },
+  };
+}
+
+function buildRequiredInputWorkflowVersion(ownerUserId: string) {
+  return {
+    ...buildWorkflowVersionBase(ownerUserId),
     inputBindings: {
       bindings: [
         {
@@ -82,24 +112,90 @@ function buildRequiredInputWorkflowVersion(ownerUserId: string) {
       ],
       schema_version: 1,
     },
-    outputs: {
+  };
+}
+
+function buildAssetBoundWorkflowVersion(
+  ownerUserId: string,
+  assetId: string,
+  options?: {
+    mustBeNewerThanLastSuccessfulRun?: boolean;
+    skipIfUnchanged?: boolean;
+  },
+) {
+  return {
+    ...buildWorkflowVersionBase(ownerUserId),
+    inputBindings: {
+      bindings: [
+        {
+          binding: {
+            asset_id: assetId,
+            kind: "asset_id",
+          },
+          input_key: "contractors_csv",
+        },
+      ],
       schema_version: 1,
-      summary_template: "standard_v1",
     },
-    provenance: {
+    inputContract: {
+      inputs: [
+        {
+          allowed_mime_types: ["text/csv"],
+          csv_rules: {
+            min_row_count: 1,
+            required_columns: ["vendor", "payout"],
+          },
+          data_kind: "table",
+          input_key: "contractors_csv",
+          label: "Contractors CSV",
+          ...(options?.mustBeNewerThanLastSuccessfulRun
+            ? { must_be_newer_than_last_successful_run: true }
+            : {}),
+          multiplicity: "one",
+          required: true,
+          ...(options?.skipIfUnchanged ? { skip_if_unchanged: true } : {}),
+        },
+      ],
       schema_version: 1,
-      source_kind: "manual_builder",
     },
-    recipe: {
+  };
+}
+
+function buildAssetSelectorWorkflowVersion(ownerUserId: string, assetKey: string) {
+  return {
+    ...buildWorkflowVersionBase(ownerUserId),
+    inputBindings: {
+      bindings: [
+        {
+          binding: {
+            kind: "asset_selector",
+            max_assets: 1,
+            selection: "latest_updated_at",
+            selector: {
+              access_scope_in: [assetKey.startsWith("admin/") ? "admin" : "public"],
+              asset_key_equals: assetKey,
+            },
+          },
+          input_key: "selected_asset",
+        },
+      ],
       schema_version: 1,
-      steps: [],
     },
-    schedule: {
-      kind: "manual_only",
-      schema_version: 1,
-    },
-    thresholds: {
-      rules: [],
+    inputContract: {
+      inputs: [
+        {
+          allowed_mime_types: ["text/csv"],
+          csv_rules: {
+            min_row_count: 1,
+            required_columns: ["vendor", "payout"],
+          },
+          data_kind: "table",
+          input_key: "selected_asset",
+          label: "Selected Asset",
+          multiplicity: "one",
+          required: true,
+        },
+      ],
       schema_version: 1,
     },
   };
@@ -139,6 +235,275 @@ describe("workflow execution integration", () => {
 
       expect(execution.status).toBe("completed");
       expect(execution.run.status).toBe("completed");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("uses asset-bound local company_data files without waiting for input", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const sourcePath = "admin/contractors.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      const { asset } = await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      const detail = await createWorkflow({
+        createdByUserId: owner!.id,
+        name: "Asset-Bound Local File Workflow",
+        organizationId: owner!.organizationId,
+        status: "active",
+        version: buildAssetBoundWorkflowVersion(owner!.id, asset.id),
+      });
+
+      const run = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const execution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: run.id,
+      });
+
+      expect(execution.status).toBe("completed");
+      expect(execution.run.status).toBe("completed");
+      expect(execution.run.metadata.resolved_inputs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            input_key: "contractors_csv",
+          }),
+        ]),
+      );
+      expect(execution.run.metadata.resolved_inputs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            documents: expect.arrayContaining([
+              expect.objectContaining({
+                asset_id: asset.id,
+                source_path: sourcePath,
+              }),
+            ]),
+          }),
+        ]),
+      );
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("resolves asset_selector bindings against the asset registry", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const sourcePath = "public/uploads/selector-target.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      const detail = await createWorkflow({
+        createdByUserId: owner!.id,
+        name: "Asset Selector Workflow",
+        organizationId: owner!.organizationId,
+        status: "active",
+        version: buildAssetSelectorWorkflowVersion(owner!.id, sourcePath),
+      });
+
+      const run = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const execution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: run.id,
+      });
+
+      expect(execution.status).toBe("completed");
+      expect(execution.run.metadata.resolved_inputs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            input_key: "selected_asset",
+            documents: expect.arrayContaining([
+              expect.objectContaining({
+                source_path: sourcePath,
+              }),
+            ]),
+          }),
+        ]),
+      );
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("skips execution when inputs are unchanged and skip_if_unchanged is enabled", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const sourcePath = "admin/skip-if-unchanged.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      const { asset } = await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      const detail = await createWorkflow({
+        createdByUserId: owner!.id,
+        name: "Skip Unchanged Workflow",
+        organizationId: owner!.organizationId,
+        status: "active",
+        version: buildAssetBoundWorkflowVersion(owner!.id, asset.id, {
+          skipIfUnchanged: true,
+        }),
+      });
+
+      const firstRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const firstExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: firstRun.id,
+      });
+
+      expect(firstExecution.status).toBe("completed");
+
+      const secondRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const secondExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: secondRun.id,
+      });
+
+      expect(secondExecution.status).toBe("skipped");
+      expect(secondExecution.run.status).toBe("skipped");
+      expect(secondExecution.run.metadata.input_validation).toEqual(
+        expect.objectContaining({
+          skipped_input_count: 1,
+          status: "skip",
+        }),
+      );
+      expect(secondExecution.run.metadata.skip_reason).toBe("inputs_unchanged");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("blocks validation when inputs are not newer than the last successful run", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const sourcePath = "admin/must-be-newer.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      const { asset } = await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      const detail = await createWorkflow({
+        createdByUserId: owner!.id,
+        name: "Must Be Newer Workflow",
+        organizationId: owner!.organizationId,
+        status: "active",
+        version: buildAssetBoundWorkflowVersion(owner!.id, asset.id, {
+          mustBeNewerThanLastSuccessfulRun: true,
+        }),
+      });
+
+      const firstRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const firstExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: firstRun.id,
+      });
+
+      expect(firstExecution.status).toBe("completed");
+
+      const secondRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const secondExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: secondRun.id,
+      });
+
+      expect(secondExecution.status).toBe("blocked_validation");
+      expect(secondExecution.run.status).toBe("blocked_validation");
+      expect(secondExecution.run.metadata.input_validation).toEqual(
+        expect.objectContaining({
+          failed_input_count: 1,
+          status: "blocked_validation",
+        }),
+      );
     } finally {
       await environment.cleanup();
     }
@@ -220,6 +585,122 @@ describe("workflow execution integration", () => {
     }
   });
 
+  it("freezes asset versions per run and records snapshot summaries", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const sourcePath = "admin/frozen.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      const firstAssetState = await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      const detail = await createWorkflow({
+        createdByUserId: owner!.id,
+        name: "Frozen Snapshot Workflow",
+        organizationId: owner!.organizationId,
+        status: "active",
+        version: buildAssetBoundWorkflowVersion(owner!.id, firstAssetState.asset.id),
+      });
+
+      const firstRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const firstExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: firstRun.id,
+      });
+
+      expect(firstExecution.status).toBe("completed");
+
+      const firstSnapshotRows = await (await getAppDatabase()).query.workflowRunResolvedInputs.findMany({
+        where: and(
+          eq(workflowRunResolvedInputs.organizationId, owner!.organizationId),
+          eq(workflowRunResolvedInputs.runId, firstRun.id),
+        ),
+      });
+
+      expect(firstSnapshotRows).toHaveLength(1);
+      const firstSnapshot = firstSnapshotRows[0]!;
+      expect(firstExecution.run.metadata.snapshot_summary).toEqual(
+        expect.objectContaining({
+          asset_ids: [firstAssetState.asset.id],
+          asset_version_ids: [firstSnapshot.assetVersionId],
+        }),
+      );
+
+      await writeFile(absolutePath, "vendor,payout\nAcme,9999\n", "utf8");
+
+      const secondAssetState = await ensureFilesystemAssetVersion({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        relativePath: sourcePath,
+      });
+
+      expect(secondAssetState.version.id).not.toBe(firstSnapshot.assetVersionId);
+
+      const secondRun = await createManualWorkflowRun({
+        organizationId: owner!.organizationId,
+        runAsRole: "owner",
+        runAsUserId: owner!.id,
+        workflowId: detail!.workflow.id,
+      });
+
+      const secondExecution = await executeWorkflowRun({
+        organizationId: owner!.organizationId,
+        organizationSlug: owner!.organizationSlug,
+        runId: secondRun.id,
+      });
+
+      expect(secondExecution.status).toBe("completed");
+
+      const db = await getAppDatabase();
+      const secondSnapshotRows = await db.query.workflowRunResolvedInputs.findMany({
+        where: and(
+          eq(workflowRunResolvedInputs.organizationId, owner!.organizationId),
+          eq(workflowRunResolvedInputs.runId, secondRun.id),
+        ),
+      });
+
+      expect(secondSnapshotRows).toHaveLength(1);
+      expect(secondSnapshotRows[0]!.assetVersionId).toBe(secondAssetState.version.id);
+      expect(secondSnapshotRows[0]!.assetVersionId).not.toBe(firstSnapshot.assetVersionId);
+
+      const firstSnapshotRowsAfter = await db.query.workflowRunResolvedInputs.findMany({
+        where: and(
+          eq(workflowRunResolvedInputs.organizationId, owner!.organizationId),
+          eq(workflowRunResolvedInputs.runId, firstRun.id),
+        ),
+      });
+
+      expect(firstSnapshotRowsAfter[0]!.assetVersionId).toBe(firstSnapshot.assetVersionId);
+      expect(firstSnapshotRowsAfter[0]!.contentHash).toBe(firstSnapshot.contentHash);
+      expect(secondExecution.run.metadata.snapshot_summary).toEqual(
+        expect.objectContaining({
+          asset_ids: [firstAssetState.asset.id],
+          asset_version_ids: [secondAssetState.version.id],
+        }),
+      );
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
   it("fails closed when execution identity loses required membership state", async () => {
     const environment = await createTestAppEnvironment();
 
@@ -270,7 +751,7 @@ describe("workflow execution integration", () => {
     }
   });
 
-  it("reconciles stale running runs and clears stale execution rows", async () => {
+  it("reconciles stale running runs and preserves frozen input snapshots", async () => {
     const environment = await createTestAppEnvironment();
 
     try {
@@ -334,6 +815,57 @@ describe("workflow execution integration", () => {
         reportJson: JSON.stringify({ stale: true }),
         runId: run.id,
         status: "fail",
+        updatedAt: staleTimestamp,
+      });
+
+      const staleAssetId = randomUUID();
+      const staleAssetVersionId = randomUUID();
+
+      await db.insert(dataAssets).values({
+        accessScope: "public",
+        activeVersionId: staleAssetVersionId,
+        assetKey: "public/uploads/stale.csv",
+        createdAt: staleTimestamp,
+        dataKind: "table",
+        displayName: "stale.csv",
+        id: staleAssetId,
+        metadataJson: JSON.stringify({ relative_path: "public/uploads/stale.csv" }),
+        organizationId: owner!.organizationId,
+        status: "active",
+        updatedAt: staleTimestamp,
+      });
+
+      await db.insert(dataAssetVersions).values({
+        assetId: staleAssetId,
+        byteSize: 24,
+        contentHash: `sha-${randomUUID()}`,
+        createdAt: staleTimestamp,
+        id: staleAssetVersionId,
+        ingestionError: null,
+        ingestionStatus: "ready",
+        materializedPath: "public/uploads/stale.csv",
+        metadataJson: JSON.stringify({ source_type: "asset" }),
+        mimeType: "text/csv",
+        organizationId: owner!.organizationId,
+        sourceModifiedAt: staleTimestamp,
+        updatedAt: staleTimestamp,
+      });
+
+      await db.insert(workflowRunResolvedInputs).values({
+        assetId: staleAssetId,
+        assetVersionId: staleAssetVersionId,
+        contentHash: `sha-${randomUUID()}`,
+        createdAt: staleTimestamp,
+        displayName: "stale.csv",
+        id: randomUUID(),
+        inputItemIndex: 0,
+        inputKey: "stale_input",
+        materializedPath: "public/uploads/stale.csv",
+        metadataJson: JSON.stringify({ source_type: "asset" }),
+        organizationId: owner!.organizationId,
+        resolvedAt: staleTimestamp,
+        runId: run.id,
+        schemaHash: null,
         updatedAt: staleTimestamp,
       });
 
@@ -402,6 +934,12 @@ describe("workflow execution integration", () => {
           eq(workflowDeliveries.status, "pending"),
         ),
       });
+      const resolvedSnapshots = await db.query.workflowRunResolvedInputs.findMany({
+        where: and(
+          eq(workflowRunResolvedInputs.organizationId, owner!.organizationId),
+          eq(workflowRunResolvedInputs.runId, run.id),
+        ),
+      });
       const inputRequests = await db.query.workflowInputRequests.findMany({
         where: and(
           eq(workflowInputRequests.organizationId, owner!.organizationId),
@@ -413,6 +951,7 @@ describe("workflow execution integration", () => {
       expect(staleSteps).toHaveLength(0);
       expect(staleChecks).toHaveLength(0);
       expect(pendingDeliveries).toHaveLength(0);
+      expect(resolvedSnapshots).toHaveLength(1);
       expect(inputRequests[0]?.status).toBe("cancelled");
     } finally {
       await environment.cleanup();

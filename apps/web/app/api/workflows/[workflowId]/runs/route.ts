@@ -298,11 +298,13 @@ export async function POST(_request: Request, context: WorkflowRunsRouteContext)
           eventType:
             execution.status === "completed"
               ? "workflow_run_completed"
-              : execution.status === "waiting_for_input"
-                ? "workflow_run_waiting_for_input"
-                : execution.status === "blocked_validation"
-                  ? "workflow_run_blocked_validation"
-                  : "workflow_run_failed",
+              : execution.status === "skipped"
+                ? "workflow_run_skipped"
+                : execution.status === "waiting_for_input"
+                  ? "workflow_run_waiting_for_input"
+                  : execution.status === "blocked_validation"
+                    ? "workflow_run_blocked_validation"
+                    : "workflow_run_failed",
           quantity: 1,
           status: execution.status,
           usageClass: "system",

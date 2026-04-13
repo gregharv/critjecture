@@ -2,7 +2,7 @@ import "server-only";
 
 import { readFile } from "node:fs/promises";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
@@ -19,6 +19,7 @@ import {
 
 export type WorkflowValidatorResolvedDocument = {
   accessScope: "admin" | "public";
+  assetVersionId?: string | null;
   contentSha256: string;
   displayName: string;
   id: string;
@@ -31,6 +32,7 @@ export type WorkflowValidatorResolvedDocument = {
 
 export type WorkflowValidationOutcomeStatus =
   | "pass"
+  | "skip"
   | "blocked_validation"
   | "waiting_for_input";
 
@@ -39,6 +41,7 @@ export type WorkflowInputValidationSummary = {
   failedCheckCount: number;
   failedInputCount: number;
   missingRequiredInputCount: number;
+  skippedInputCount: number;
   warningCheckCount: number;
   warningInputCount: number;
 };
@@ -196,13 +199,148 @@ function normalizeShaList(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
 }
 
-async function loadHistoricalResolvedInputHashes(input: {
+type HistoricalInputSnapshot = {
+  assetVersionIds: string[];
+  contentHashes: string[];
+  maxSourceUpdatedAt: number | null;
+};
+
+function extractHistoricalInputSnapshotFromMetadata(
+  metadata: Record<string, unknown>,
+  inputKey: string,
+): HistoricalInputSnapshot | null {
+  const snapshotSummary = metadata.snapshot_summary;
+
+  if (typeof snapshotSummary === "object" && snapshotSummary !== null && !Array.isArray(snapshotSummary)) {
+    const inputs = (snapshotSummary as Record<string, unknown>).inputs;
+
+    if (Array.isArray(inputs)) {
+      for (const inputEntry of inputs) {
+        if (typeof inputEntry !== "object" || inputEntry === null || Array.isArray(inputEntry)) {
+          continue;
+        }
+
+        const entryInputKey = normalizeTextValue((inputEntry as Record<string, unknown>).input_key);
+
+        if (entryInputKey !== inputKey) {
+          continue;
+        }
+
+        const items = Array.isArray((inputEntry as Record<string, unknown>).items)
+          ? ((inputEntry as Record<string, unknown>).items as unknown[])
+          : [];
+        const assetVersionIds = normalizeShaList(
+          items.flatMap((item) => {
+            if (typeof item !== "object" || item === null || Array.isArray(item)) {
+              return [];
+            }
+
+            const assetVersionId = normalizeTextValue((item as Record<string, unknown>).asset_version_id);
+            return assetVersionId ? [assetVersionId] : [];
+          }),
+        );
+        const contentHashes = normalizeShaList(
+          items.flatMap((item) => {
+            if (typeof item !== "object" || item === null || Array.isArray(item)) {
+              return [];
+            }
+
+            const contentHash = normalizeTextValue((item as Record<string, unknown>).content_hash);
+            return contentHash ? [contentHash] : [];
+          }),
+        );
+        const sourceUpdatedAts = items.flatMap((item) => {
+          if (typeof item !== "object" || item === null || Array.isArray(item)) {
+            return [];
+          }
+
+          const sourceUpdatedAt = (item as Record<string, unknown>).source_updated_at;
+          return typeof sourceUpdatedAt === "number" && Number.isFinite(sourceUpdatedAt)
+            ? [Math.trunc(sourceUpdatedAt)]
+            : [];
+        });
+
+        return {
+          assetVersionIds,
+          contentHashes,
+          maxSourceUpdatedAt:
+            sourceUpdatedAts.length > 0 ? Math.max(...sourceUpdatedAts) : null,
+        } satisfies HistoricalInputSnapshot;
+      }
+    }
+  }
+
+  if (!Array.isArray(metadata.resolved_inputs)) {
+    return null;
+  }
+
+  for (const entry of metadata.resolved_inputs) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+
+    const entryInputKey = normalizeTextValue((entry as Record<string, unknown>).input_key);
+
+    if (entryInputKey !== inputKey) {
+      continue;
+    }
+
+    const documentsValue = (entry as Record<string, unknown>).documents;
+
+    if (!Array.isArray(documentsValue)) {
+      return {
+        assetVersionIds: [],
+        contentHashes: [],
+        maxSourceUpdatedAt: null,
+      };
+    }
+
+    const contentHashes = normalizeShaList(
+      documentsValue.flatMap((documentEntry) => {
+        if (
+          typeof documentEntry !== "object" ||
+          documentEntry === null ||
+          Array.isArray(documentEntry)
+        ) {
+          return [];
+        }
+
+        const sha = normalizeTextValue((documentEntry as Record<string, unknown>).content_sha256);
+        return sha ? [sha] : [];
+      }),
+    );
+    const sourceUpdatedAts = documentsValue.flatMap((documentEntry) => {
+      if (
+        typeof documentEntry !== "object" ||
+        documentEntry === null ||
+        Array.isArray(documentEntry)
+      ) {
+        return [];
+      }
+
+      const updatedAt = (documentEntry as Record<string, unknown>).updated_at;
+      return typeof updatedAt === "number" && Number.isFinite(updatedAt)
+        ? [Math.trunc(updatedAt)]
+        : [];
+    });
+
+    return {
+      assetVersionIds: [],
+      contentHashes,
+      maxSourceUpdatedAt: sourceUpdatedAts.length > 0 ? Math.max(...sourceUpdatedAts) : null,
+    } satisfies HistoricalInputSnapshot;
+  }
+
+  return null;
+}
+
+async function loadHistoricalResolvedInputSnapshots(input: {
   lookback: number;
   organizationId: string;
   workflowId: string;
 }) {
   if (input.lookback <= 0) {
-    return new Map<string, string[][]>();
+    return [] as Array<Record<string, HistoricalInputSnapshot>>;
   }
 
   const db = await getAppDatabase();
@@ -215,68 +353,13 @@ async function loadHistoricalResolvedInputHashes(input: {
       and(
         eq(workflowRuns.organizationId, input.organizationId),
         eq(workflowRuns.workflowId, input.workflowId),
-        eq(workflowRuns.status, "completed"),
+        inArray(workflowRuns.status, ["completed", "skipped"]),
       ),
     )
     .orderBy(desc(workflowRuns.completedAt), desc(workflowRuns.updatedAt))
     .limit(Math.max(1, input.lookback));
 
-  const hashesByInputKey = new Map<string, string[][]>();
-
-  for (const row of rows) {
-    const metadata = parseWorkflowJsonRecord(row.metadataJson);
-
-    if (!Array.isArray(metadata.resolved_inputs)) {
-      continue;
-    }
-
-    for (const entry of metadata.resolved_inputs) {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        continue;
-      }
-
-      const inputKey = normalizeTextValue((entry as Record<string, unknown>).input_key);
-
-      if (!inputKey) {
-        continue;
-      }
-
-      const documentsValue = (entry as Record<string, unknown>).documents;
-
-      if (!Array.isArray(documentsValue)) {
-        continue;
-      }
-
-      const shaValues = normalizeShaList(
-        documentsValue
-          .flatMap((documentEntry) => {
-            if (
-              typeof documentEntry !== "object" ||
-              documentEntry === null ||
-              Array.isArray(documentEntry)
-            ) {
-              return [];
-            }
-
-            const sha = normalizeTextValue(
-              (documentEntry as Record<string, unknown>).content_sha256,
-            );
-
-            return sha ? [sha] : [];
-          }),
-      );
-
-      if (shaValues.length === 0) {
-        continue;
-      }
-
-      const existing = hashesByInputKey.get(inputKey) ?? [];
-      existing.push(shaValues);
-      hashesByInputKey.set(inputKey, existing);
-    }
-  }
-
-  return hashesByInputKey;
+  return rows.map((row) => parseWorkflowJsonRecord(row.metadataJson));
 }
 
 async function persistWorkflowInputCheckReports(input: {
@@ -344,12 +427,14 @@ export async function validateWorkflowRunInputs(
   input: ValidateWorkflowRunInputsInput,
 ): Promise<ValidateWorkflowRunInputsResult> {
   const checkedAt = Date.now();
-  const maxDuplicateLookback = input.contracts.inputContract.inputs.reduce((maxValue, inputSpec) => {
-    const lookback = inputSpec.duplicate_policy?.lookback_successful_runs ?? 0;
-    return Math.max(maxValue, lookback);
+  const maxHistoricalLookback = input.contracts.inputContract.inputs.reduce((maxValue, inputSpec) => {
+    const duplicateLookback = inputSpec.duplicate_policy?.lookback_successful_runs ?? 0;
+    const skipLookback = inputSpec.skip_if_unchanged ? 1 : 0;
+    const newerThanLastLookback = inputSpec.must_be_newer_than_last_successful_run ? 1 : 0;
+    return Math.max(maxValue, duplicateLookback, skipLookback, newerThanLastLookback);
   }, 0);
-  const historicalHashesByInput = await loadHistoricalResolvedInputHashes({
-    lookback: maxDuplicateLookback,
+  const historicalRunMetadata = await loadHistoricalResolvedInputSnapshots({
+    lookback: maxHistoricalLookback,
     organizationId: input.organizationId,
     workflowId: input.workflowId,
   });
@@ -641,16 +726,30 @@ export async function validateWorkflowRunInputs(
       }
     }
 
-    if (inputSpec.duplicate_policy && resolvedDocuments.length > 0) {
-      const currentHashes = normalizeShaList(
+    const currentSnapshot: HistoricalInputSnapshot = {
+      assetVersionIds: normalizeShaList(
+        resolvedDocuments.flatMap((documentRow) =>
+          typeof documentRow.assetVersionId === "string" ? [documentRow.assetVersionId] : [],
+        ),
+      ),
+      contentHashes: normalizeShaList(
         resolvedDocuments.map((documentRow) => documentRow.contentSha256),
-      );
-      const historicalHashes =
-        historicalHashesByInput.get(inputSpec.input_key) ?? [];
+      ),
+      maxSourceUpdatedAt:
+        resolvedDocuments.length > 0
+          ? Math.max(...resolvedDocuments.map((documentRow) => documentRow.updatedAt))
+          : null,
+    };
+    const historicalSnapshots = historicalRunMetadata
+      .map((metadata) => extractHistoricalInputSnapshotFromMetadata(metadata, inputSpec.input_key))
+      .filter((entry): entry is HistoricalInputSnapshot => entry !== null);
+    const latestHistoricalSnapshot = historicalSnapshots[0] ?? null;
+
+    if (inputSpec.duplicate_policy && resolvedDocuments.length > 0) {
       const lookbackWindow = Math.max(1, inputSpec.duplicate_policy.lookback_successful_runs);
-      const recentHashes = historicalHashes.slice(0, lookbackWindow);
-      const unchanged = recentHashes.some((historicalValue) =>
-        arraysEqual(historicalValue, currentHashes),
+      const recentSnapshots = historicalSnapshots.slice(0, lookbackWindow);
+      const unchanged = recentSnapshots.some((historicalValue) =>
+        arraysEqual(historicalValue.contentHashes, currentSnapshot.contentHashes),
       );
 
       if (unchanged && inputSpec.duplicate_policy.mode !== "allow") {
@@ -658,13 +757,74 @@ export async function validateWorkflowRunInputs(
           createValidationCheck({
             code: "duplicate_unchanged_input",
             details: {
-              content_sha256: currentHashes,
+              content_sha256: currentSnapshot.contentHashes,
               input_key: inputSpec.input_key,
               lookback_successful_runs: lookbackWindow,
               mode: inputSpec.duplicate_policy.mode,
             },
             message: `Input ${inputSpec.input_key} is unchanged from a recent successful run.`,
             status: inputSpec.duplicate_policy.mode === "warn_if_unchanged" ? "warn" : "fail",
+          }),
+        );
+      }
+    }
+
+    if (
+      inputSpec.skip_if_unchanged &&
+      resolvedDocuments.length > 0 &&
+      latestHistoricalSnapshot &&
+      arraysEqual(latestHistoricalSnapshot.contentHashes, currentSnapshot.contentHashes)
+    ) {
+      checks.push(
+        createValidationCheck({
+          code: "duplicate_unchanged_input",
+          details: {
+            asset_version_ids: currentSnapshot.assetVersionIds,
+            content_sha256: currentSnapshot.contentHashes,
+            input_key: inputSpec.input_key,
+            skip_if_unchanged: true,
+          },
+          message: `Input ${inputSpec.input_key} is unchanged from the last successful run and is eligible to skip execution.`,
+          status: "warn",
+        }),
+      );
+    }
+
+    if (
+      inputSpec.must_be_newer_than_last_successful_run &&
+      resolvedDocuments.length > 0 &&
+      latestHistoricalSnapshot
+    ) {
+      const hasNewerAssetVersion =
+        currentSnapshot.assetVersionIds.length > 0 &&
+        !arraysEqual(currentSnapshot.assetVersionIds, latestHistoricalSnapshot.assetVersionIds);
+      const hasChangedContent = !arraysEqual(
+        currentSnapshot.contentHashes,
+        latestHistoricalSnapshot.contentHashes,
+      );
+      const hasNewerSourceTimestamp =
+        typeof currentSnapshot.maxSourceUpdatedAt === "number" &&
+        typeof latestHistoricalSnapshot.maxSourceUpdatedAt === "number"
+          ? currentSnapshot.maxSourceUpdatedAt > latestHistoricalSnapshot.maxSourceUpdatedAt
+          : typeof currentSnapshot.maxSourceUpdatedAt === "number" &&
+              latestHistoricalSnapshot.maxSourceUpdatedAt === null;
+      const isNewer = hasNewerAssetVersion || hasChangedContent || hasNewerSourceTimestamp;
+
+      if (!isNewer) {
+        checks.push(
+          createValidationCheck({
+            code: "input_not_newer_than_last_successful_run",
+            details: {
+              current_asset_version_ids: currentSnapshot.assetVersionIds,
+              current_content_sha256: currentSnapshot.contentHashes,
+              current_max_source_updated_at: currentSnapshot.maxSourceUpdatedAt,
+              input_key: inputSpec.input_key,
+              last_successful_asset_version_ids: latestHistoricalSnapshot.assetVersionIds,
+              last_successful_content_sha256: latestHistoricalSnapshot.contentHashes,
+              last_successful_max_source_updated_at: latestHistoricalSnapshot.maxSourceUpdatedAt,
+            },
+            message: `Input ${inputSpec.input_key} is not newer than the last successful run.`,
+            status: "fail",
           }),
         );
       }
@@ -702,6 +862,14 @@ export async function validateWorkflowRunInputs(
   }, 0);
   const failedInputCount = reports.filter((report) => report.status === "fail").length;
   const warningInputCount = reports.filter((report) => report.status === "warn").length;
+  const skippedInputCount = reports.filter((report) =>
+    report.checks.some(
+      (check) =>
+        check.code === "duplicate_unchanged_input" &&
+        check.status === "warn" &&
+        check.details?.skip_if_unchanged === true,
+    ),
+  ).length;
   const missingRequiredInputCount = reports.reduce((count, report) => {
     const missingRequiredChecks = report.checks.filter(
       (check) => check.code === "missing_required_input" && check.status === "fail",
@@ -714,7 +882,9 @@ export async function validateWorkflowRunInputs(
       ? "waiting_for_input"
       : failedInputCount > 0
         ? "blocked_validation"
-        : "pass";
+        : skippedInputCount > 0
+          ? "skip"
+          : "pass";
 
   return {
     reports,
@@ -724,6 +894,7 @@ export async function validateWorkflowRunInputs(
       failedCheckCount,
       failedInputCount,
       missingRequiredInputCount,
+      skippedInputCount,
       warningCheckCount,
       warningInputCount,
     },

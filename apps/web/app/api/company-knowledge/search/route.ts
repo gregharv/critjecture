@@ -84,7 +84,7 @@ function describeQueryDiagnostics(diagnostics: CompanyKnowledgeQueryDiagnostics)
       : null;
 
   return [
-    `Searched ${diagnostics.manifestFileCount} files in the lightweight file manifest (filename + CSV headers + short preview).`,
+    `Searched ${diagnostics.manifestFileCount} managed asset version${diagnostics.manifestFileCount === 1 ? "" : "s"} in the asset-backed manifest (filename + CSV headers + short preview).`,
     correctedTermsLine,
     expandedTermsLine,
     aiRewriteLine,

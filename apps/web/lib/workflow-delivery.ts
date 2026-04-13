@@ -59,7 +59,8 @@ type WorkflowDeliveryContext = {
       | "blocked_validation"
       | "completed"
       | "failed"
-      | "cancelled";
+      | "cancelled"
+      | "skipped";
     triggerKind: "manual" | "scheduled" | "resume";
     triggerWindowKey: string | null;
     workflowId: string;

@@ -2,7 +2,6 @@ import "server-only";
 
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { readdir } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
@@ -11,9 +10,10 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import { getAppDatabase } from "@/lib/app-db";
-import { documentChunks, documents } from "@/lib/app-schema";
+import { dataAssets, dataAssetVersions, documentChunks, documents } from "@/lib/app-schema";
 import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { syncFilesystemDataConnection } from "@/lib/connectors/filesystem-connector";
 import { splitCsvRecord } from "@/lib/csv-utils";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 import { isRipgrepAvailable } from "@/lib/runtime-toolchain";
@@ -80,9 +80,17 @@ type CandidateAccumulator = {
   matchesByLine: Map<string, CompanyKnowledgeMatch>;
 };
 
-type KnowledgeFileManifestEntry = {
-  csvColumns: string[];
+type ManagedKnowledgeAssetFile = {
+  assetId: string;
+  assetVersionId: string;
+  displayName: string;
   file: string;
+  materializedPath: string;
+  sourcePath: string;
+};
+
+type KnowledgeFileManifestEntry = ManagedKnowledgeAssetFile & {
+  csvColumns: string[];
   filenameTokens: Set<string>;
   previewTokens: Set<string>;
   tokens: Set<string>;
@@ -514,22 +522,60 @@ function truncateMatchText(text: string) {
   return `${trimmed.slice(0, SEARCH_RESULT_MAX_TEXT_CHARS).trimEnd()}…`;
 }
 
+async function loadManagedKnowledgeAssetFiles(input: {
+  organizationId: string;
+  role: UserRole;
+}) {
+  const db = await getAppDatabase();
+  const whereClauses = [
+    eq(dataAssets.organizationId, input.organizationId),
+    eq(dataAssets.status, "active"),
+    eq(dataAssetVersions.ingestionStatus, "ready"),
+  ];
+
+  if (!canRoleAccessKnowledgeScope(input.role, "admin")) {
+    whereClauses.push(eq(dataAssets.accessScope, "public"));
+  }
+
+  const rows = await db
+    .select({
+      assetId: dataAssets.id,
+      assetKey: dataAssets.assetKey,
+      assetVersionId: dataAssetVersions.id,
+      displayName: dataAssets.displayName,
+      materializedPath: dataAssetVersions.materializedPath,
+    })
+    .from(dataAssets)
+    .innerJoin(dataAssetVersions, eq(dataAssets.activeVersionId, dataAssetVersions.id))
+    .where(and(...whereClauses));
+
+  return rows
+    .map((row) => ({
+      assetId: row.assetId,
+      assetVersionId: row.assetVersionId,
+      displayName: row.displayName,
+      file: row.assetKey,
+      materializedPath: row.materializedPath,
+      sourcePath: row.assetKey,
+    }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}
+
 async function runFallbackSearch(
   pattern: string,
   companyDataRoot: string,
-  searchedDirectory: string,
+  manifest: KnowledgeFileManifest,
   maxMatches: number,
 ) {
   const loweredPattern = pattern.toLowerCase();
   const matches: CompanyKnowledgeMatch[] = [];
-  const relativeFiles = await listRelativeFiles(companyDataRoot, searchedDirectory);
 
-  for (const relativeFile of relativeFiles) {
-    if (!isTextSearchableFile(relativeFile)) {
+  for (const entry of manifest.entries) {
+    if (!isTextSearchableFile(entry.materializedPath)) {
       continue;
     }
 
-    const absolutePath = path.join(companyDataRoot, relativeFile);
+    const absolutePath = path.join(companyDataRoot, entry.materializedPath);
     const stream = createReadStream(absolutePath, { encoding: "utf8" });
     const lineReader = readline.createInterface({
       crlfDelay: Infinity,
@@ -553,7 +599,7 @@ async function runFallbackSearch(
           }
 
           matches.push({
-            file: relativeFile,
+            file: entry.file,
             line: lineNumber,
             text: truncateMatchText(logicalLine),
           });
@@ -577,9 +623,21 @@ async function runFallbackSearch(
 async function runRipgrepSearch(
   pattern: string,
   companyDataRoot: string,
-  searchedDirectory: string,
+  manifest: KnowledgeFileManifest,
   maxMatches: number,
 ) {
+  const searchableMaterializedPaths = [
+    ...new Set(
+      manifest.entries
+        .filter((entry) => isTextSearchableFile(entry.materializedPath))
+        .map((entry) => entry.materializedPath),
+    ),
+  ];
+
+  if (searchableMaterializedPaths.length === 0) {
+    return [];
+  }
+
   const args = [
     "--with-filename",
     "--line-number",
@@ -593,11 +651,14 @@ async function runRipgrepSearch(
     "--max-count",
     String(maxMatches),
     pattern,
-    searchedDirectory,
+    ...searchableMaterializedPaths,
   ];
+  const fileByMaterializedPath = new Map(
+    manifest.entries.map((entry) => [entry.materializedPath, entry.file]),
+  );
 
   if (!(await isRipgrepAvailable())) {
-    return runFallbackSearch(pattern, companyDataRoot, searchedDirectory, maxMatches);
+    return runFallbackSearch(pattern, companyDataRoot, manifest, maxMatches);
   }
 
   try {
@@ -621,10 +682,14 @@ async function runRipgrepSearch(
           return null;
         }
 
-        const [, absoluteFile, lineNumber, text] = match;
+        const [, matchedFilePath, lineNumber, text] = match;
+        const materializedPath = path.isAbsolute(matchedFilePath)
+          ? path.relative(companyDataRoot, matchedFilePath)
+          : matchedFilePath.split(path.sep).join("/");
+        const file = fileByMaterializedPath.get(materializedPath) ?? materializedPath;
 
         return {
-          file: path.relative(companyDataRoot, absoluteFile),
+          file,
           line: Number(lineNumber),
           text: truncateMatchText(text),
         } satisfies CompanyKnowledgeMatch;
@@ -643,41 +708,11 @@ async function runRipgrepSearch(
     }
 
     if (isCommandNotFoundError(caughtError) || isStdoutMaxBufferError(caughtError)) {
-      return runFallbackSearch(pattern, companyDataRoot, searchedDirectory, maxMatches);
+      return runFallbackSearch(pattern, companyDataRoot, manifest, maxMatches);
     }
 
     throw caughtError;
   }
-}
-
-async function listRelativeFiles(
-  companyDataRoot: string,
-  currentPath: string,
-): Promise<string[]> {
-  let entries;
-
-  try {
-    entries = await readdir(currentPath, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(currentPath, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...(await listRelativeFiles(companyDataRoot, entryPath)));
-      continue;
-    }
-
-    if (entry.isFile()) {
-      files.push(path.relative(companyDataRoot, entryPath));
-    }
-  }
-
-  return files;
 }
 
 async function readPreviewLines(absolutePath: string, maxLines: number) {
@@ -716,35 +751,39 @@ async function readPreviewLines(absolutePath: string, maxLines: number) {
   return lines;
 }
 
-async function buildManifestEntry(companyDataRoot: string, relativePath: string) {
-  const lowerFilePath = relativePath.toLowerCase();
+async function buildManifestEntry(
+  companyDataRoot: string,
+  assetFile: ManagedKnowledgeAssetFile,
+) {
+  const lowerFilePath = assetFile.file.toLowerCase();
   const filenameTokens = new Set<string>([
     ...tokenizeText(lowerFilePath),
     ...tokenizeText(path.basename(lowerFilePath)),
+    ...tokenizeText(assetFile.displayName.toLowerCase()),
   ]);
   const tokens = new Set<string>(filenameTokens);
   const previewTokens = new Set<string>();
   let csvColumns: string[] = [];
 
-  if (!isTextSearchableFile(relativePath)) {
+  if (!isTextSearchableFile(assetFile.materializedPath)) {
     return {
+      ...assetFile,
       csvColumns,
-      file: relativePath,
       filenameTokens,
       previewTokens,
       tokens,
     } satisfies KnowledgeFileManifestEntry;
   }
 
-  const absolutePath = path.join(companyDataRoot, relativePath);
+  const absolutePath = path.join(companyDataRoot, assetFile.materializedPath);
 
   try {
     const previewLines = await readPreviewLines(
       absolutePath,
-      lowerFilePath.endsWith(".csv") ? 3 : 2,
+      assetFile.materializedPath.toLowerCase().endsWith(".csv") ? 3 : 2,
     );
 
-    if (lowerFilePath.endsWith(".csv")) {
+    if (assetFile.materializedPath.toLowerCase().endsWith(".csv")) {
       const [headerLine, ...previewRows] = previewLines;
       csvColumns = headerLine ? splitCsvRow(headerLine) : [];
 
@@ -774,18 +813,25 @@ async function buildManifestEntry(companyDataRoot: string, relativePath: string)
   }
 
   return {
+    ...assetFile,
     csvColumns,
-    file: relativePath,
     filenameTokens,
     previewTokens,
     tokens,
   } satisfies KnowledgeFileManifestEntry;
 }
 
-async function buildKnowledgeFileManifest(companyDataRoot: string, searchedDirectory: string) {
-  const relativeFiles = await listRelativeFiles(companyDataRoot, searchedDirectory);
+async function buildKnowledgeFileManifest(input: {
+  companyDataRoot: string;
+  organizationId: string;
+  role: UserRole;
+}) {
+  const managedAssetFiles = await loadManagedKnowledgeAssetFiles({
+    organizationId: input.organizationId,
+    role: input.role,
+  });
   const entries = await Promise.all(
-    relativeFiles.map((relativePath) => buildManifestEntry(companyDataRoot, relativePath)),
+    managedAssetFiles.map((assetFile) => buildManifestEntry(input.companyDataRoot, assetFile)),
   );
   const vocabulary = new Set<string>();
 
@@ -845,21 +891,21 @@ function splitCsvRow(row: string) {
 
 async function buildPreview(
   companyDataRoot: string,
-  relativePath: string,
+  entry: KnowledgeFileManifestEntry,
 ): Promise<CompanyKnowledgePreview> {
-  const absolutePath = path.join(companyDataRoot, relativePath);
+  const absolutePath = path.join(companyDataRoot, entry.materializedPath);
   let previewLines: string[] = [];
 
   try {
     previewLines = await readPreviewLines(
       absolutePath,
-      relativePath.toLowerCase().endsWith(".csv") ? 4 : 3,
+      entry.materializedPath.toLowerCase().endsWith(".csv") ? 4 : 3,
     );
   } catch {
     previewLines = [];
   }
 
-  if (relativePath.toLowerCase().endsWith(".csv")) {
+  if (entry.materializedPath.toLowerCase().endsWith(".csv")) {
     const [header, ...rows] = previewLines;
 
     return {
@@ -877,12 +923,22 @@ async function buildPreview(
 
 async function buildCandidateFiles(
   companyDataRoot: string,
+  manifest: KnowledgeFileManifest,
   candidates: Map<string, CandidateAccumulator>,
   queryYear?: string,
 ) {
+  const manifestEntriesByFile = new Map(
+    manifest.entries.map((entry) => [entry.file, entry]),
+  );
   const candidateFiles = await Promise.all(
     [...candidates.values()].map(async (candidate): Promise<CompanyKnowledgeCandidateFile> => {
-      const preview = await buildPreview(companyDataRoot, candidate.file);
+      const manifestEntry = manifestEntriesByFile.get(candidate.file);
+      const preview = manifestEntry
+        ? await buildPreview(companyDataRoot, manifestEntry)
+        : {
+            kind: "text" as const,
+            lines: [],
+          };
       const matches = [...candidate.matchesByLine.values()].sort((left, right) => {
         if (left.line === right.line) {
           return left.text.localeCompare(right.text);
@@ -903,7 +959,11 @@ async function buildCandidateFiles(
       ].sort();
 
       return {
+        assetId: manifestEntry?.assetId ?? null,
+        assetVersionId: manifestEntry?.assetVersionId ?? null,
+        displayName: manifestEntry?.displayName ?? path.basename(candidate.file),
         file: candidate.file,
+        materializedPath: manifestEntry?.materializedPath ?? candidate.file,
         matchedTerms,
         matches,
         preview,
@@ -913,6 +973,7 @@ async function buildCandidateFiles(
           matchedTerms.length * 4 +
           filenameMatchCount * 3 +
           (yearMatch ? 25 : 0),
+        sourcePath: manifestEntry?.sourcePath ?? candidate.file,
       };
     }),
   );
@@ -932,13 +993,12 @@ async function searchFileSystemCandidates(input: {
   maxMatches: number;
   normalizedQuery: string;
   queryYear?: string;
-  searchedDirectory: string;
   tokenSearchTerms: string[];
 }) {
   const exactMatches = await runRipgrepSearch(
     input.normalizedQuery,
     input.companyDataRoot,
-    input.searchedDirectory,
+    input.manifest,
     input.maxMatches,
   );
   const candidates = new Map<string, CandidateAccumulator>();
@@ -948,7 +1008,7 @@ async function searchFileSystemCandidates(input: {
   if (exactMatches.length === 0) {
     const tokenMatches = await Promise.all(
       input.tokenSearchTerms.map(async (token) => ({
-        matches: await runRipgrepSearch(token, input.companyDataRoot, input.searchedDirectory, 3),
+        matches: await runRipgrepSearch(token, input.companyDataRoot, input.manifest, 3),
         token,
       })),
     );
@@ -963,6 +1023,7 @@ async function searchFileSystemCandidates(input: {
   return {
     candidateFiles: await buildCandidateFiles(
       input.companyDataRoot,
+      input.manifest,
       candidates,
       input.queryYear,
     ),
@@ -999,6 +1060,7 @@ async function searchIndexedPdfCandidates(
   query: string,
   organizationId: string,
   role: UserRole,
+  manifest: KnowledgeFileManifest,
   queryYear?: string,
   additionalSearchTerms: string[] = [],
 ) {
@@ -1103,17 +1165,30 @@ async function searchIndexedPdfCandidates(
     candidates.set(row.sourcePath, candidate);
   }
 
+  const manifestEntriesByFile = new Map(
+    manifest.entries.map((entry) => [entry.file, entry]),
+  );
+
   return [...candidates.entries()]
-    .map(([file, candidate]) => ({
-      file,
-      matchedTerms: [...new Set([...candidate.matchedTerms, ...candidate.filenameMatchedTerms])].sort(),
-      matches: candidate.matches,
-      preview: {
-        kind: "text" as const,
-        lines: candidate.previewLines.slice(0, 3),
-      },
-      score: candidate.score,
-    }))
+    .map(([file, candidate]) => {
+      const manifestEntry = manifestEntriesByFile.get(file);
+
+      return {
+        assetId: manifestEntry?.assetId ?? null,
+        assetVersionId: manifestEntry?.assetVersionId ?? null,
+        displayName: manifestEntry?.displayName ?? path.basename(file),
+        file,
+        materializedPath: manifestEntry?.materializedPath ?? file,
+        matchedTerms: [...new Set([...candidate.matchedTerms, ...candidate.filenameMatchedTerms])].sort(),
+        matches: candidate.matches,
+        preview: {
+          kind: "text" as const,
+          lines: candidate.previewLines.slice(0, 3),
+        },
+        score: candidate.score,
+        sourcePath: manifestEntry?.sourcePath ?? file,
+      };
+    })
     .sort((left, right) => {
       if (left.score === right.score) {
         return left.file.localeCompare(right.file);
@@ -1284,11 +1359,24 @@ export async function searchCompanyKnowledge(
   }
 
   const companyDataRoot = await resolveCompanyDataRoot(organizationSlug);
-  const searchedDirectory =
-    canRoleAccessKnowledgeScope(role, "admin")
-      ? companyDataRoot
-      : path.join(companyDataRoot, "public");
-  const manifest = await buildKnowledgeFileManifest(companyDataRoot, searchedDirectory);
+  const searchedDirectory = canRoleAccessKnowledgeScope(role, "admin")
+    ? "company_data"
+    : "company_data/public";
+
+  try {
+    await syncFilesystemDataConnection({
+      organizationId,
+      organizationSlug,
+    });
+  } catch {
+    // Best-effort filesystem reconciliation before searching managed assets.
+  }
+
+  const manifest = await buildKnowledgeFileManifest({
+    companyDataRoot,
+    organizationId,
+    role,
+  });
   const queryTokens = tokenizeQuery(normalizedQuery);
   const queryExpansion = expandQueryTokens(queryTokens, manifest);
   const queryYear = extractQueryYear(normalizedQuery);
@@ -1298,13 +1386,13 @@ export async function searchCompanyKnowledge(
     maxMatches,
     normalizedQuery,
     queryYear,
-    searchedDirectory,
     tokenSearchTerms: queryExpansion.tokenSearchTerms,
   });
   const primaryPdfCandidates = await searchIndexedPdfCandidates(
     normalizedQuery,
     organizationId,
     role,
+    manifest,
     queryYear,
     queryExpansion.tokenSearchTerms,
   );
@@ -1336,13 +1424,13 @@ export async function searchCompanyKnowledge(
         maxMatches,
         normalizedQuery,
         queryYear,
-        searchedDirectory,
         tokenSearchTerms: aiExpandedTerms,
       });
       const aiPdfCandidates = await searchIndexedPdfCandidates(
         normalizedQuery,
         organizationId,
         role,
+        manifest,
         queryYear,
         aiExpandedTerms,
       );

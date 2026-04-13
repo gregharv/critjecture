@@ -28,6 +28,7 @@ export type WorkflowWaitingRunRecheckSummary = {
   limit: number;
   organizationId: string | null;
   scannedCount: number;
+  skippedCount: number;
   waitingCount: number;
 };
 
@@ -118,6 +119,7 @@ export async function recheckWaitingWorkflowRuns(input?: {
     limit,
     organizationId: input?.organizationId ?? null,
     scannedCount: waitingRuns.length,
+    skippedCount: 0,
     waitingCount: 0,
   };
 
@@ -139,6 +141,8 @@ export async function recheckWaitingWorkflowRuns(input?: {
 
       if (execution.status === "completed") {
         summary.completedCount += 1;
+      } else if (execution.status === "skipped") {
+        summary.skippedCount += 1;
       } else if (execution.status === "waiting_for_input") {
         summary.waitingCount += 1;
       } else if (execution.status === "blocked_validation") {
@@ -166,6 +170,7 @@ export async function recheckWaitingWorkflowRuns(input?: {
     routeGroup: "workflow",
     routeKey: "workflow.waiting_run.recheck",
     scanned_count: summary.scannedCount,
+    skipped_count: summary.skippedCount,
     waiting_count: summary.waitingCount,
   });
 

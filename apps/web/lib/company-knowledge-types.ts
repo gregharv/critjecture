@@ -16,11 +16,16 @@ export type CompanyKnowledgePreview =
     };
 
 export type CompanyKnowledgeCandidateFile = {
+  assetId: string | null;
+  assetVersionId: string | null;
+  displayName: string;
   file: string;
+  materializedPath: string;
   matchedTerms: string[];
   matches: CompanyKnowledgeMatch[];
   preview: CompanyKnowledgePreview;
   score: number;
+  sourcePath: string;
 };
 
 export type CompanyKnowledgeSelectionReason =

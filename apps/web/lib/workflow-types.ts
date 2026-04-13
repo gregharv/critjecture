@@ -11,6 +11,7 @@ export const WORKFLOW_RUN_STATUSES = [
   "completed",
   "failed",
   "cancelled",
+  "skipped",
 ] as const;
 export const WORKFLOW_RUN_STEP_STATUSES = [
   "queued",
@@ -93,7 +94,9 @@ export type WorkflowInputSpecV1 = {
   input_key: string;
   label: string;
   multiplicity: "one" | "many";
+  must_be_newer_than_last_successful_run?: boolean;
   required: boolean;
+  skip_if_unchanged?: boolean;
 };
 
 export type WorkflowInputContractV1 = {
@@ -110,8 +113,29 @@ export type WorkflowInputBindingSelectorV1 = {
   uploaded_by_user_id?: string;
 };
 
+export type WorkflowAssetBindingSelectorV1 = {
+  access_scope_in?: Array<"public" | "admin">;
+  asset_key_equals?: string;
+  asset_key_prefix?: string;
+  connection_id?: string;
+  data_kind_in?: Array<"table" | "text_document" | "pdf" | "spreadsheet">;
+  external_object_id?: string;
+};
+
 export type WorkflowInputBindingV1 = {
   binding:
+    | {
+        asset_id: string;
+        kind: "asset_id";
+        lock_to_asset_version_id?: string | null;
+        lock_to_content_hash?: string | null;
+      }
+    | {
+        kind: "asset_selector";
+        max_assets: number;
+        selection: "latest_updated_at" | "all_matching";
+        selector: WorkflowAssetBindingSelectorV1;
+      }
     | {
         document_id: string;
         kind: "document_id";
@@ -325,6 +349,7 @@ export type WorkflowRunInputCheckReportV1 = {
       | "row_count_below_minimum"
       | "freshness_sla_failed"
       | "duplicate_unchanged_input"
+      | "input_not_newer_than_last_successful_run"
       | "null_ratio_exceeded";
     details?: Record<string, unknown>;
     message: string;
@@ -799,6 +824,22 @@ function parseInputSpec(
     };
   }
 
+  if (typeof value.skip_if_unchanged !== "undefined") {
+    parsed.skip_if_unchanged = parseBooleanValue(
+      value.skip_if_unchanged,
+      `inputs[${index}].skip_if_unchanged`,
+      contractName,
+    );
+  }
+
+  if (typeof value.must_be_newer_than_last_successful_run !== "undefined") {
+    parsed.must_be_newer_than_last_successful_run = parseBooleanValue(
+      value.must_be_newer_than_last_successful_run,
+      `inputs[${index}].must_be_newer_than_last_successful_run`,
+      contractName,
+    );
+  }
+
   return parsed;
 }
 
@@ -860,10 +901,174 @@ function parseInputBinding(
 
   const bindingKind = parseEnumValue(
     value.binding.kind,
-    ["document_id", "selector"] as const,
+    ["asset_id", "asset_selector", "document_id", "selector"] as const,
     `bindings[${index}].binding.kind`,
     contractName,
   );
+
+  if (bindingKind === "asset_id") {
+    const lockToAssetVersionId =
+      typeof value.binding.lock_to_asset_version_id === "undefined"
+        ? undefined
+        : value.binding.lock_to_asset_version_id === null
+          ? null
+          : parseStringValue(
+              value.binding.lock_to_asset_version_id,
+              `bindings[${index}].binding.lock_to_asset_version_id`,
+              contractName,
+            );
+    const lockToContentHash =
+      typeof value.binding.lock_to_content_hash === "undefined"
+        ? undefined
+        : value.binding.lock_to_content_hash === null
+          ? null
+          : parseStringValue(
+              value.binding.lock_to_content_hash,
+              `bindings[${index}].binding.lock_to_content_hash`,
+              contractName,
+            );
+
+    return {
+      binding: {
+        asset_id: parseStringValue(
+          value.binding.asset_id,
+          `bindings[${index}].binding.asset_id`,
+          contractName,
+        ),
+        kind: "asset_id",
+        ...(typeof lockToAssetVersionId === "undefined"
+          ? {}
+          : { lock_to_asset_version_id: lockToAssetVersionId }),
+        ...(typeof lockToContentHash === "undefined"
+          ? {}
+          : { lock_to_content_hash: lockToContentHash }),
+      },
+      input_key: inputKey,
+    };
+  }
+
+  if (bindingKind === "asset_selector") {
+    if (!isRecord(value.binding.selector)) {
+      throw new WorkflowContractValidationError(
+        contractName,
+        `bindings[${index}].binding.selector must be an object.`,
+        "invalid_field",
+      );
+    }
+
+    const selector: WorkflowAssetBindingSelectorV1 = {};
+
+    if (typeof value.binding.selector.access_scope_in !== "undefined") {
+      const values = parseStringArrayValue(
+        value.binding.selector.access_scope_in,
+        `bindings[${index}].binding.selector.access_scope_in`,
+        contractName,
+        { allowEmpty: true, unique: true },
+      ).map((entry) =>
+        parseEnumValue(
+          entry,
+          ["public", "admin"] as const,
+          `bindings[${index}].binding.selector.access_scope_in[]`,
+          contractName,
+        ),
+      );
+
+      selector.access_scope_in = values;
+    }
+
+    const assetKeyEquals = parseOptionalStringValue(
+      value.binding.selector.asset_key_equals,
+      `bindings[${index}].binding.selector.asset_key_equals`,
+      contractName,
+    );
+
+    if (assetKeyEquals) {
+      selector.asset_key_equals = assetKeyEquals;
+    }
+
+    const assetKeyPrefix = parseOptionalStringValue(
+      value.binding.selector.asset_key_prefix,
+      `bindings[${index}].binding.selector.asset_key_prefix`,
+      contractName,
+    );
+
+    if (assetKeyPrefix) {
+      selector.asset_key_prefix = assetKeyPrefix;
+    }
+
+    const connectionId = parseOptionalStringValue(
+      value.binding.selector.connection_id,
+      `bindings[${index}].binding.selector.connection_id`,
+      contractName,
+    );
+
+    if (connectionId) {
+      selector.connection_id = connectionId;
+    }
+
+    if (typeof value.binding.selector.data_kind_in !== "undefined") {
+      const values = parseStringArrayValue(
+        value.binding.selector.data_kind_in,
+        `bindings[${index}].binding.selector.data_kind_in`,
+        contractName,
+        { allowEmpty: true, unique: true },
+      ).map((entry) =>
+        parseEnumValue(
+          entry,
+          ["table", "text_document", "pdf", "spreadsheet"] as const,
+          `bindings[${index}].binding.selector.data_kind_in[]`,
+          contractName,
+        ),
+      );
+
+      selector.data_kind_in = values;
+    }
+
+    const externalObjectId = parseOptionalStringValue(
+      value.binding.selector.external_object_id,
+      `bindings[${index}].binding.selector.external_object_id`,
+      contractName,
+    );
+
+    if (externalObjectId) {
+      selector.external_object_id = externalObjectId;
+    }
+
+    if (
+      !selector.asset_key_equals &&
+      !selector.asset_key_prefix &&
+      !selector.connection_id &&
+      !selector.external_object_id &&
+      !selector.access_scope_in?.length &&
+      !selector.data_kind_in?.length
+    ) {
+      throw new WorkflowContractValidationError(
+        contractName,
+        `bindings[${index}].binding.selector must include at least one asset selector field.`,
+        "invalid_field",
+      );
+    }
+
+    return {
+      binding: {
+        kind: "asset_selector",
+        max_assets: parseIntegerValue(
+          value.binding.max_assets,
+          `bindings[${index}].binding.max_assets`,
+          contractName,
+          { min: 1 },
+        ),
+        selection: parseEnumValue(
+          value.binding.selection,
+          ["latest_updated_at", "all_matching"] as const,
+          `bindings[${index}].binding.selection`,
+          contractName,
+        ),
+        selector,
+      },
+      input_key: inputKey,
+    };
+  }
 
   if (bindingKind === "document_id") {
     const lockSha =
@@ -1849,6 +2054,7 @@ export function parseWorkflowRunInputCheckReportJson(
             "row_count_below_minimum",
             "freshness_sla_failed",
             "duplicate_unchanged_input",
+            "input_not_newer_than_last_successful_run",
             "null_ratio_exceeded",
           ] as const,
           `checks[${index}].code`,

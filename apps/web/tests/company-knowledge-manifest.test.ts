@@ -59,6 +59,17 @@ describe("company knowledge search query expansion", () => {
       true,
     );
     expect(
+      result.candidateFiles.find((candidate) => candidate.file === "admin/raw-export-01.csv"),
+    ).toEqual(
+      expect.objectContaining({
+        assetId: expect.any(String),
+        assetVersionId: expect.any(String),
+        displayName: "raw-export-01.csv",
+        materializedPath: "admin/raw-export-01.csv",
+        sourcePath: "admin/raw-export-01.csv",
+      }),
+    );
+    expect(
       result.queryDiagnostics.correctedTerms.some(
         (entry) => entry.from === "prodct" && entry.to === "product",
       ),

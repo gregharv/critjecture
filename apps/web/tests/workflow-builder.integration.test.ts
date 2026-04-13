@@ -1,14 +1,21 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getAppDatabase } from "@/lib/app-db";
 import {
   analysisResults,
   chatTurns,
+  dataAssets,
+  dataAssetVersions,
+  dataConnections,
   documents,
   toolCalls,
 } from "@/lib/app-schema";
+import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAuthenticatedUserByEmail } from "@/lib/users";
 import { buildWorkflowDraftFromChatTurn } from "@/lib/workflow-builder";
 import { createWorkflow } from "@/lib/workflows";
@@ -129,13 +136,157 @@ describe("workflow builder integration", () => {
       expect(firstInput?.csv_rules?.required_columns).toEqual(["date", "amount"]);
 
       const firstBinding = response.draft.version.inputBindings.bindings[0];
-      expect(firstBinding?.binding.kind).toBe("document_id");
+      expect(firstBinding?.binding.kind).toBe("asset_id");
 
-      if (firstBinding?.binding.kind !== "document_id") {
-        throw new Error("Expected document_id binding.");
+      if (firstBinding?.binding.kind !== "asset_id") {
+        throw new Error("Expected asset_id binding.");
       }
 
-      expect(firstBinding.binding.document_id).toBe(documentId);
+      const assetRow = await db.query.dataAssets.findFirst({
+        where: eq(dataAssets.organizationId, owner!.organizationId),
+      });
+
+      expect(assetRow?.externalObjectId).toBe(documentId);
+      expect(firstBinding.binding.asset_id).toBe(assetRow?.id);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("binds raw company_data files to assets instead of fallback selectors", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+
+      expect(owner).not.toBeNull();
+
+      const db = await getAppDatabase();
+      const now = Date.now();
+      const turnId = randomUUID();
+      const runtimeToolCallId = `rtc-${randomUUID()}`;
+      const sourcePath = "admin/contractors.csv";
+      const companyDataRoot = await resolveCompanyDataRoot(owner!.organizationSlug);
+      const absolutePath = path.join(companyDataRoot, sourcePath);
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "vendor,payout\nAcme,1250\n", "utf8");
+
+      await db.insert(chatTurns).values({
+        chatSessionId: `session-${randomUUID()}`,
+        completedAt: now,
+        conversationId: `conversation-${randomUUID()}`,
+        createdAt: now,
+        id: turnId,
+        organizationId: owner!.organizationId,
+        status: "completed",
+        userId: owner!.id,
+        userPromptText: "Summarize contractor payouts.",
+        userRole: "owner",
+      });
+
+      await db.insert(toolCalls).values({
+        accessedFilesJson: JSON.stringify([sourcePath]),
+        completedAt: now,
+        errorMessage: null,
+        id: randomUUID(),
+        resultSummary: "Summarized contractor payouts.",
+        runtimeToolCallId,
+        sandboxRunId: null,
+        startedAt: now,
+        status: "completed",
+        toolName: "run_data_analysis",
+        toolParametersJson: JSON.stringify({
+          code: "print('ok')",
+          inputFiles: [sourcePath],
+        }),
+        turnId,
+      });
+
+      const response = await buildWorkflowDraftFromChatTurn({
+        organizationId: owner!.organizationId,
+        turnId,
+        userId: owner!.id,
+      });
+
+      expect(response.draft.unresolvedInputPaths).toEqual([]);
+      expect(response.draft.version.inputBindings.bindings[0]?.binding.kind).toBe("asset_id");
+
+      const assetRows = await db.select().from(dataAssets);
+      const versionRows = await db.select().from(dataAssetVersions);
+      const connectionRows = await db.select().from(dataConnections);
+
+      expect(assetRows[0]?.assetKey).toBe(sourcePath);
+      expect(assetRows[0]?.connectionId).toBe(connectionRows[0]?.id ?? null);
+      expect(versionRows[0]?.rowCount).toBe(1);
+      expect(versionRows[0]?.schemaHash).toBeTruthy();
+      expect(connectionRows[0]?.kind).toBe("filesystem");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("falls back to asset_selector when a stable asset id cannot be created", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+
+      expect(owner).not.toBeNull();
+
+      const db = await getAppDatabase();
+      const now = Date.now();
+      const turnId = randomUUID();
+      const runtimeToolCallId = `rtc-${randomUUID()}`;
+      const sourcePath = "admin/missing.csv";
+
+      await db.insert(chatTurns).values({
+        chatSessionId: `session-${randomUUID()}`,
+        completedAt: now,
+        conversationId: `conversation-${randomUUID()}`,
+        createdAt: now,
+        id: turnId,
+        organizationId: owner!.organizationId,
+        status: "completed",
+        userId: owner!.id,
+        userPromptText: "Summarize the missing file if it appears later.",
+        userRole: "owner",
+      });
+
+      await db.insert(toolCalls).values({
+        accessedFilesJson: JSON.stringify([sourcePath]),
+        completedAt: now,
+        errorMessage: null,
+        id: randomUUID(),
+        resultSummary: "Prepared a draft that references a future file.",
+        runtimeToolCallId,
+        sandboxRunId: null,
+        startedAt: now,
+        status: "completed",
+        toolName: "run_data_analysis",
+        toolParametersJson: JSON.stringify({
+          code: "print('ok')",
+          inputFiles: [sourcePath],
+        }),
+        turnId,
+      });
+
+      const response = await buildWorkflowDraftFromChatTurn({
+        organizationId: owner!.organizationId,
+        turnId,
+        userId: owner!.id,
+      });
+
+      expect(response.draft.unresolvedInputPaths).toEqual([sourcePath]);
+      expect(response.draft.version.inputBindings.bindings[0]?.binding).toEqual({
+        kind: "asset_selector",
+        max_assets: 1,
+        selection: "latest_updated_at",
+        selector: {
+          access_scope_in: ["admin"],
+          asset_key_equals: sourcePath,
+        },
+      });
     } finally {
       await environment.cleanup();
     }
@@ -255,10 +406,7 @@ describe("workflow builder integration", () => {
           type: "workflow_input",
         },
       ]);
-      expect(saved?.currentVersion?.contracts.inputBindings.bindings[0]?.binding).toEqual({
-        document_id: documentId,
-        kind: "document_id",
-      });
+      expect(saved?.currentVersion?.contracts.inputBindings.bindings[0]?.binding.kind).toBe("asset_id");
     } finally {
       await environment.cleanup();
     }

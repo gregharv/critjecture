@@ -77,7 +77,11 @@ export function createSearchResult(role: UserRole = "owner") {
   return {
     candidateFiles: [
       {
+        assetId: "asset-1",
+        assetVersionId: "asset-version-1",
+        displayName: elevated ? "contractors_2026.csv" : "holidays.txt",
         file: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
+        materializedPath: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
         matchedTerms: ["2026", "contractors"],
         matches: [
           {
@@ -98,6 +102,7 @@ export function createSearchResult(role: UserRole = "owner") {
                 lines: ["Office closed July 4"],
               },
         score: 10,
+        sourcePath: elevated ? "admin/contractors_2026.csv" : "public/holidays.txt",
       },
     ],
     matches: [

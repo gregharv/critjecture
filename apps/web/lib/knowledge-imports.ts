@@ -27,6 +27,7 @@ import {
   users,
 } from "@/lib/app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { ensureDocumentAsset } from "@/lib/data-assets";
 import {
   buildTextChunks,
   decodeTextBuffer,
@@ -1278,6 +1279,8 @@ async function replaceDocumentChunks(documentId: string, extractedText: string) 
       .where(eq(documents.id, documentId))
       .run();
   });
+
+  return indexedAt;
 }
 
 async function loadImportedFileBuffer(file: ClaimedImportJobFile) {
@@ -1393,6 +1396,7 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
     });
     await writeBufferAtomically(absolutePromotionPath, fileBuffer);
 
+    const sourceType = file.sourceKind === "single_file" ? "uploaded" : "bulk_import";
     const documentId = await upsertDocumentRecord({
       accessScope: file.accessScope,
       byteSize: fileBuffer.length,
@@ -1405,9 +1409,25 @@ async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
       mimeType,
       organizationId: file.organizationId,
       sourcePath: managedSourcePath,
-      sourceType: file.sourceKind === "single_file" ? "uploaded" : "bulk_import",
+      sourceType,
     });
-    await replaceDocumentChunks(documentId, extractedText);
+    const indexedAt = await replaceDocumentChunks(documentId, extractedText);
+    await ensureDocumentAsset({
+      document: {
+        accessScope: file.accessScope,
+        byteSize: fileBuffer.length,
+        contentSha256,
+        displayName: file.displayName,
+        documentId,
+        lastIndexedAt: indexedAt,
+        mimeType,
+        organizationId: file.organizationId,
+        sourcePath: managedSourcePath,
+        sourceType,
+        updatedAt: indexedAt,
+        uploadedByUserId: file.createdByUserId,
+      },
+    });
 
     await db
       .update(knowledgeImportJobFiles)

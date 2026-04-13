@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import type { SessionUser } from "@/lib/auth-state";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
+import { ensureDocumentAsset } from "@/lib/data-assets";
 import { getAppDatabase } from "@/lib/app-db";
 import { documents, documentChunks, users } from "@/lib/app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
@@ -455,6 +456,23 @@ export async function uploadKnowledgeFile(input: UploadKnowledgeFileInput) {
         })
         .where(eq(documents.id, documentId))
         .run();
+    });
+
+    await ensureDocumentAsset({
+      document: {
+        accessScope: scope,
+        byteSize: fileBuffer.length,
+        contentSha256: fileContentSha256,
+        displayName: sanitizeFileName(file.name).displayName,
+        documentId,
+        lastIndexedAt: indexedAt,
+        mimeType: normalizedMimeType,
+        organizationId: user.organizationId,
+        sourcePath: uploadDestination.relativePath,
+        sourceType: "uploaded",
+        updatedAt: indexedAt,
+        uploadedByUserId: user.id,
+      },
     });
   } catch (caughtError) {
     const message =

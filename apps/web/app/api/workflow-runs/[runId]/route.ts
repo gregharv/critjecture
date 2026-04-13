@@ -216,6 +216,14 @@ function buildRunAlerts(run: WorkflowRunRecord): WorkflowRunAlert[] {
     });
   }
 
+  if (run.status === "skipped") {
+    alerts.push({
+      message: "Run was skipped because execution was not required for the resolved inputs.",
+      severity: "info",
+      source: "run_state",
+    });
+  }
+
   if (validation) {
     const failedCheckCount =
       typeof validation.failed_check_count === "number"

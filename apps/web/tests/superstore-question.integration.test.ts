@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as downloadDemoDataset } from "@/app/api/knowledge/demo-datasets/[datasetId]/route";
 import { searchCompanyKnowledge } from "@/lib/company-knowledge";
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
+import type { UserRole } from "@/lib/roles";
 import { executeSandboxedCommand, SandboxExecutionError } from "@/lib/python-sandbox";
 import { uploadKnowledgeFile } from "@/lib/knowledge-files";
 import { ensureSeedState, getAuthenticatedUserByEmail } from "@/lib/users";
@@ -48,7 +49,7 @@ async function buildTopProductsFallbackAnswer(options: {
   organizationId: string;
   organizationSlug: string;
   relativePath: string;
-  role: "owner" | "admin" | "member" | "intern";
+  role: UserRole;
 }) {
   const resolved = await resolveAuthorizedCompanyDataFile(
     options.relativePath,

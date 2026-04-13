@@ -18,7 +18,7 @@ export const KNOWLEDGE_IMPORT_FILE_STAGES = [
   "retryable_failed",
   "failed",
 ] as const;
-export const KNOWLEDGE_MANAGED_SOURCE_TYPES = ["uploaded", "bulk_import"] as const;
+export const KNOWLEDGE_MANAGED_SOURCE_TYPES = ["uploaded", "bulk_import", "google_drive"] as const;
 export const KNOWLEDGE_ARCHIVE_ACCEPT = ".zip";
 export const KNOWLEDGE_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
 export const KNOWLEDGE_IMPORT_MAX_FILE_COUNT = 500;

@@ -9,8 +9,10 @@ import {
   analysisResults,
   chatTurns,
   documents,
+  organizations,
   toolCalls,
 } from "@/lib/app-schema";
+import { ensureDocumentAsset, ensureFilesystemAssetVersion } from "@/lib/data-assets";
 import type {
   BuildWorkflowFromChatTurnResponse,
   WorkflowDraftFromChatTurn,
@@ -322,6 +324,13 @@ export async function buildWorkflowDraftFromChatTurn(
 ): Promise<BuildWorkflowFromChatTurnResponse> {
   const selectedTurn = await resolveSelectedTurn(input);
   const db = await getAppDatabase();
+  const organizationRow = await db.query.organizations.findFirst({
+    where: eq(organizations.id, input.organizationId),
+  });
+
+  if (!organizationRow) {
+    throw new WorkflowBuilderError("Organization not found.", "organization_not_found");
+  }
 
   const [toolCallRows, analysisResultRow] = await Promise.all([
     db
@@ -415,11 +424,16 @@ export async function buildWorkflowDraftFromChatTurn(
       ? await db
           .select({
             accessScope: documents.accessScope,
+            byteSize: documents.byteSize,
+            contentSha256: documents.contentSha256,
             displayName: documents.displayName,
             id: documents.id,
+            lastIndexedAt: documents.lastIndexedAt,
             mimeType: documents.mimeType,
             sourcePath: documents.sourcePath,
             sourceType: documents.sourceType,
+            updatedAt: documents.updatedAt,
+            uploadedByUserId: documents.uploadedByUserId,
           })
           .from(documents)
           .where(
@@ -431,6 +445,49 @@ export async function buildWorkflowDraftFromChatTurn(
           )
       : [];
   const documentsByPath = new Map(documentRows.map((row) => [row.sourcePath, row]));
+  const assetsByPath = new Map<
+    string,
+    {
+      assetId: string;
+      mimeType: string | null;
+    }
+  >();
+
+  for (const inputPath of inputPaths) {
+    const documentRow = documentsByPath.get(inputPath);
+
+    try {
+      const resolvedAsset = documentRow
+        ? await ensureDocumentAsset({
+            document: {
+              accessScope: documentRow.accessScope,
+              byteSize: documentRow.byteSize,
+              contentSha256: documentRow.contentSha256,
+              displayName: documentRow.displayName,
+              documentId: documentRow.id,
+              lastIndexedAt: documentRow.lastIndexedAt,
+              mimeType: documentRow.mimeType,
+              organizationId: input.organizationId,
+              sourcePath: documentRow.sourcePath,
+              sourceType: documentRow.sourceType,
+              updatedAt: documentRow.updatedAt,
+              uploadedByUserId: documentRow.uploadedByUserId,
+            },
+          })
+        : await ensureFilesystemAssetVersion({
+            organizationId: input.organizationId,
+            organizationSlug: organizationRow.slug,
+            relativePath: inputPath,
+          });
+
+      assetsByPath.set(inputPath, {
+        assetId: resolvedAsset.asset.id,
+        mimeType: resolvedAsset.version.mimeType,
+      });
+    } catch {
+      // Preserve asset-selector fallback when the path can no longer be registered.
+    }
+  }
 
   const unresolvedInputPaths: string[] = [];
   const usedInputKeys = new Set<string>();
@@ -438,16 +495,18 @@ export async function buildWorkflowDraftFromChatTurn(
 
   const inputContractInputs = inputPaths.map((inputPath, index) => {
     const documentRow = documentsByPath.get(inputPath);
+    const filesystemAsset = assetsByPath.get(inputPath);
     const fallbackDisplayName = path.posix.basename(inputPath);
     const inputKey = createInputKey(fallbackDisplayName, index, usedInputKeys);
     inputKeyByPath.set(inputPath, inputKey);
 
-    const dataKind = inferDataKind(inputPath, documentRow?.mimeType ?? null);
+    const resolvedMimeType = documentRow?.mimeType ?? filesystemAsset?.mimeType ?? null;
+    const dataKind = inferDataKind(inputPath, resolvedMimeType);
     const schemaMatch =
       csvSchemaByPath.get(inputPath) ?? csvSchemaByBaseName.get(path.posix.basename(inputPath));
 
     return {
-      allowed_mime_types: inferAllowedMimeTypes(inputPath, documentRow?.mimeType ?? null),
+      allowed_mime_types: inferAllowedMimeTypes(inputPath, resolvedMimeType),
       ...(dataKind === "table"
         ? {
             csv_rules: {
@@ -480,13 +539,13 @@ export async function buildWorkflowDraftFromChatTurn(
       );
     }
 
-    const documentRow = documentsByPath.get(inputPath);
+    const filesystemAsset = assetsByPath.get(inputPath);
 
-    if (documentRow) {
+    if (filesystemAsset) {
       return {
         binding: {
-          document_id: documentRow.id,
-          kind: "document_id" as const,
+          asset_id: filesystemAsset.assetId,
+          kind: "asset_id" as const,
         },
         input_key: inputKey,
       };
@@ -496,12 +555,12 @@ export async function buildWorkflowDraftFromChatTurn(
 
     return {
       binding: {
-        kind: "selector" as const,
-        max_documents: 1,
+        kind: "asset_selector" as const,
+        max_assets: 1,
         selection: "latest_updated_at" as const,
         selector: {
           access_scope_in: [...inferAccessScopeFromPath(inputPath)],
-          display_name_equals: path.posix.basename(inputPath),
+          asset_key_equals: inputPath,
         },
       },
       input_key: inputKey,
@@ -709,7 +768,7 @@ export async function buildWorkflowDraftFromChatTurn(
       },
       ...(unresolvedInputPaths.length > 0
         ? {
-            note: `Fallback selector bindings were generated for ${unresolvedInputPaths.length} input path(s) without a managed document row.`,
+            note: `Fallback asset_selector bindings were generated for ${unresolvedInputPaths.length} input path(s) that could not be registered as stable assets during draft creation.`,
           }
         : {}),
       schema_version: 1,

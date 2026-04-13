@@ -1,0 +1,120 @@
+import { eq } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
+
+import { getAppDatabase } from "@/lib/app-db";
+import { dataAssets, dataAssetVersions, dataConnections, documents } from "@/lib/app-schema";
+import {
+  createKnowledgeImportJobFromFiles,
+  getKnowledgeImportJob,
+} from "@/lib/knowledge-imports";
+import { getAuthenticatedUserByEmail } from "@/lib/users";
+import { createTestAppEnvironment } from "@/tests/helpers/test-environment";
+
+async function waitForImportJobCompletion(input: {
+  jobId: string;
+  user: NonNullable<Awaited<ReturnType<typeof getAuthenticatedUserByEmail>>>;
+}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 10_000) {
+    const result = await getKnowledgeImportJob(input.user, input.jobId);
+
+    if (
+      result.job.status === "completed" ||
+      result.job.status === "completed_with_errors" ||
+      result.job.status === "failed"
+    ) {
+      return result;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(`Timed out waiting for import job ${input.jobId}`);
+}
+
+describe("knowledge import asset integration", () => {
+  it("creates bulk import assets and versions for imported files", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const job = await createKnowledgeImportJobFromFiles({
+        files: [
+          {
+            file: new File([
+              "ledger_year,contractor,payout\n2026,Acme,1200\n2026,Beacon,900\n",
+            ], "imports/finance/contractors.csv", { type: "text/csv" }),
+            relativePath: "finance/contractors.csv",
+          },
+        ],
+        requestedScope: "admin",
+        sourceKind: "directory",
+        user: owner!,
+      });
+
+      const completed = await waitForImportJobCompletion({
+        jobId: job.id,
+        user: owner!,
+      });
+
+      expect(completed.job.status).toBe("completed");
+      expect(completed.files).toHaveLength(1);
+      expect(completed.files[0]?.stage).toBe("ready");
+      expect(completed.files[0]?.documentId).toEqual(expect.any(String));
+
+      const db = await getAppDatabase();
+      const document = await db.query.documents.findFirst({
+        where: eq(documents.id, completed.files[0]!.documentId!),
+      });
+      const asset = await db.query.dataAssets.findFirst({
+        where: eq(dataAssets.externalObjectId, completed.files[0]!.documentId!),
+      });
+      const version = asset?.activeVersionId
+        ? await db.query.dataAssetVersions.findFirst({
+            where: eq(dataAssetVersions.id, asset.activeVersionId),
+          })
+        : null;
+      const connection = asset?.connectionId
+        ? await db.query.dataConnections.findFirst({
+            where: eq(dataConnections.id, asset.connectionId),
+          })
+        : null;
+
+      expect(document).toEqual(
+        expect.objectContaining({
+          accessScope: "admin",
+          ingestionStatus: "ready",
+          sourceType: "bulk_import",
+        }),
+      );
+      expect(asset).toEqual(
+        expect.objectContaining({
+          accessScope: "admin",
+          assetKey: document?.sourcePath,
+          dataKind: "table",
+          displayName: document?.displayName,
+          externalObjectId: completed.files[0]!.documentId!,
+          organizationId: owner!.organizationId,
+        }),
+      );
+      expect(version).toEqual(
+        expect.objectContaining({
+          materializedPath: document?.sourcePath,
+          rowCount: 2,
+          schemaHash: expect.any(String),
+        }),
+      );
+      expect(connection).toEqual(
+        expect.objectContaining({
+          kind: "bulk_import",
+          lastSyncAt: expect.any(Number),
+        }),
+      );
+    } finally {
+      await environment.cleanup();
+    }
+  });
+});

@@ -475,6 +475,138 @@ export const documents = sqliteTable(
   ],
 );
 
+export const dataConnections = sqliteTable(
+  "data_connections",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["filesystem", "upload", "bulk_import", "google_drive", "google_sheets", "s3"],
+    }).notNull(),
+    displayName: text("display_name").notNull(),
+    status: text("status", { enum: ["active", "paused", "error"] })
+      .notNull()
+      .default("active"),
+    configJson: text("config_json").notNull().default("{}"),
+    credentialsRef: text("credentials_ref"),
+    lastSyncAt: integer("last_sync_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "data_connections_kind_check",
+      sql`${table.kind} in ('filesystem', 'upload', 'bulk_import', 'google_drive', 'google_sheets', 's3')`,
+    ),
+    check(
+      "data_connections_status_check",
+      sql`${table.status} in ('active', 'paused', 'error')`,
+    ),
+    index("data_connections_org_kind_idx").on(table.organizationId, table.kind),
+    index("data_connections_org_status_updated_at_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const dataAssets = sqliteTable(
+  "data_assets",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    connectionId: text("connection_id").references(() => dataConnections.id, {
+      onDelete: "set null",
+    }),
+    assetKey: text("asset_key").notNull(),
+    displayName: text("display_name").notNull(),
+    accessScope: text("access_scope", { enum: ["public", "admin"] })
+      .notNull()
+      .default("admin"),
+    dataKind: text("data_kind", { enum: ["table", "text_document", "pdf", "spreadsheet"] })
+      .notNull()
+      .default("text_document"),
+    externalObjectId: text("external_object_id"),
+    activeVersionId: text("active_version_id"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check("data_assets_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
+    check(
+      "data_assets_data_kind_check",
+      sql`${table.dataKind} in ('table', 'text_document', 'pdf', 'spreadsheet')`,
+    ),
+    check("data_assets_status_check", sql`${table.status} in ('active', 'archived')`),
+    uniqueIndex("data_assets_org_asset_key_idx").on(table.organizationId, table.assetKey),
+    index("data_assets_connection_external_object_idx").on(
+      table.connectionId,
+      table.externalObjectId,
+    ),
+    index("data_assets_org_scope_updated_at_idx").on(
+      table.organizationId,
+      table.accessScope,
+      table.updatedAt,
+    ),
+    index("data_assets_active_version_id_idx").on(table.activeVersionId),
+  ],
+);
+
+export const dataAssetVersions = sqliteTable(
+  "data_asset_versions",
+  {
+    id: text("id").primaryKey(),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => dataAssets.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceVersionToken: text("source_version_token"),
+    sourceModifiedAt: integer("source_modified_at"),
+    contentHash: text("content_hash").notNull(),
+    schemaHash: text("schema_hash"),
+    mimeType: text("mime_type"),
+    byteSize: integer("byte_size"),
+    rowCount: integer("row_count"),
+    materializedPath: text("materialized_path").notNull(),
+    ingestionStatus: text("ingestion_status", { enum: ["pending", "ready", "failed"] })
+      .notNull()
+      .default("pending"),
+    ingestionError: text("ingestion_error"),
+    indexedAt: integer("indexed_at"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "data_asset_versions_ingestion_status_check",
+      sql`${table.ingestionStatus} in ('pending', 'ready', 'failed')`,
+    ),
+    index("data_asset_versions_asset_created_at_idx").on(table.assetId, table.createdAt),
+    index("data_asset_versions_asset_content_hash_idx").on(table.assetId, table.contentHash),
+    index("data_asset_versions_org_ingestion_status_updated_at_idx").on(
+      table.organizationId,
+      table.ingestionStatus,
+      table.updatedAt,
+    ),
+    index("data_asset_versions_asset_materialized_path_idx").on(
+      table.assetId,
+      table.materializedPath,
+    ),
+  ],
+);
+
 export const knowledgeImportJobs = sqliteTable(
   "knowledge_import_jobs",
   {
@@ -1050,6 +1182,7 @@ export const workflowRuns = sqliteTable(
         "completed",
         "failed",
         "cancelled",
+        "skipped",
       ],
     })
       .notNull()
@@ -1073,7 +1206,7 @@ export const workflowRuns = sqliteTable(
     ),
     check(
       "workflow_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'waiting_for_input', 'blocked_validation', 'completed', 'failed', 'cancelled')`,
+      sql`${table.status} in ('queued', 'running', 'waiting_for_input', 'blocked_validation', 'completed', 'failed', 'cancelled', 'skipped')`,
     ),
     check(
       "workflow_runs_run_as_role_check",
@@ -1169,6 +1302,49 @@ export const workflowRunInputChecks = sqliteTable(
     uniqueIndex("workflow_run_input_checks_run_id_input_key_idx").on(table.runId, table.inputKey),
     index("workflow_run_input_checks_run_id_status_idx").on(table.runId, table.status),
     index("workflow_run_input_checks_org_created_at_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const workflowRunResolvedInputs = sqliteTable(
+  "workflow_run_resolved_inputs",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    inputKey: text("input_key").notNull(),
+    inputItemIndex: integer("input_item_index").notNull().default(0),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => dataAssets.id, { onDelete: "cascade" }),
+    assetVersionId: text("asset_version_id")
+      .notNull()
+      .references(() => dataAssetVersions.id, { onDelete: "cascade" }),
+    contentHash: text("content_hash").notNull(),
+    schemaHash: text("schema_hash"),
+    materializedPath: text("materialized_path").notNull(),
+    displayName: text("display_name").notNull(),
+    resolvedAt: integer("resolved_at").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_run_resolved_inputs_run_id_input_item_idx").on(
+      table.runId,
+      table.inputKey,
+      table.inputItemIndex,
+    ),
+    index("workflow_run_resolved_inputs_run_id_input_key_idx").on(table.runId, table.inputKey),
+    index("workflow_run_resolved_inputs_run_id_idx").on(table.runId),
+    index("workflow_run_resolved_inputs_asset_version_id_idx").on(table.assetVersionId),
+    index("workflow_run_resolved_inputs_org_created_at_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
   ],
 );
 
