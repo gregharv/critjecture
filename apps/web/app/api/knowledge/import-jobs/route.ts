@@ -28,6 +28,11 @@ function getStringFormValue(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function getBooleanFormValue(formData: FormData, key: string) {
+  const value = getStringFormValue(formData, key).toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
+}
+
 export async function GET() {
   const user = await getSessionUser();
 
@@ -112,6 +117,7 @@ export async function POST(request: Request) {
 
   const scope = getStringFormValue(formData, "scope") || "public";
   const mode = getStringFormValue(formData, "mode") || "directory";
+  const replaceExisting = getBooleanFormValue(formData, "replaceExisting");
   const archive = formData.get("archive");
 
   const fileEntries = archive instanceof File ? [] : formData.getAll("files");
@@ -160,6 +166,7 @@ export async function POST(request: Request) {
     if (archive instanceof File) {
       job = await createKnowledgeImportJobFromArchive({
         archive,
+        replaceExisting,
         requestedScope: scope,
         triggerRequestId: observed.requestId,
         user,
@@ -167,6 +174,7 @@ export async function POST(request: Request) {
     } else {
       job = await createKnowledgeImportJobFromFiles({
         files,
+        replaceExisting,
         requestedScope: scope,
         sourceKind: mode === "single_file" ? "single_file" : "directory",
         triggerRequestId: observed.requestId,

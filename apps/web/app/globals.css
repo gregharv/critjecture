@@ -1949,6 +1949,21 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   line-height: 1.55;
 }
 
+.knowledge-demo-toolbar,
+.knowledge-demo-content {
+  display: grid;
+  gap: 14px;
+}
+
+.knowledge-demo-toolbar {
+  justify-items: end;
+}
+
+.knowledge-demo-toolbar .knowledge-panel__copy {
+  max-width: 34rem;
+  text-align: right;
+}
+
 .knowledge-upload {
   display: grid;
   gap: 14px;
@@ -2684,6 +2699,16 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   .knowledge-panel {
     padding: 18px;
     border-radius: 20px;
+  }
+
+  .knowledge-demo-toolbar {
+    width: 100%;
+    justify-items: start;
+  }
+
+  .knowledge-demo-toolbar .knowledge-panel__copy {
+    max-width: none;
+    text-align: left;
   }
 
   .knowledge-toolbar__filters {

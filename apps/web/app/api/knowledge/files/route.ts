@@ -24,6 +24,17 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
+function getBooleanFormValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+  return normalizedValue === "true" || normalizedValue === "1" || normalizedValue === "yes";
+}
+
 export async function GET(request: Request) {
   const user = await getSessionUser();
 
@@ -124,6 +135,7 @@ export async function POST(request: Request) {
 
   const file = formData.get("file");
   const scope = formData.get("scope");
+  const replaceExisting = getBooleanFormValue(formData, "replaceExisting");
 
   if (!(file instanceof File)) {
     return finalizeObservedRequest(observed, {
@@ -158,6 +170,7 @@ export async function POST(request: Request) {
           relativePath: file.name,
         },
       ],
+      replaceExisting,
       requestedScope: typeof scope === "string" ? scope : "public",
       sourceKind: "single_file",
       triggerRequestId: observed.requestId,

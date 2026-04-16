@@ -37,6 +37,7 @@ import {
 import {
   KNOWLEDGE_ARCHIVE_MAX_BYTES,
   KNOWLEDGE_IMPORT_MAX_FILE_COUNT,
+  type KnowledgeImportConflictRecord,
   type KnowledgeImportFileStage,
   type KnowledgeImportJobFileRecord,
   type KnowledgeImportJobRecord,
@@ -107,6 +108,11 @@ type PreflightImportJobFile = {
   relativePath: string;
   stage: KnowledgeImportFileStage;
   stagingStoragePath: string;
+};
+
+type PreparedImportTarget = {
+  displayName: string;
+  relativePath: string;
 };
 
 type ExistingImportJobFileRow = {
@@ -293,67 +299,135 @@ async function removePathQuietly(targetPath: string) {
   await rm(targetPath, { force: true, recursive: true }).catch(() => undefined);
 }
 
-function createSourceRootPrefix(jobId: string) {
-  return `import-${jobId.slice(0, 8)}`;
+function getManagedUploadPeriod(now = new Date()) {
+  return {
+    month: String(now.getUTCMonth() + 1).padStart(2, "0"),
+    year: String(now.getUTCFullYear()),
+  };
 }
 
-async function findExistingUploadedDocument(input: {
+function buildManagedDocumentSourcePath(input: {
   accessScope: KnowledgeAccessScope;
-  displayName: string;
-  organizationId: string;
-}) {
-  const db = await getAppDatabase();
-
-  return db.query.documents.findFirst({
-    orderBy: [asc(documents.createdAt), asc(documents.updatedAt)],
-    where: and(
-      eq(documents.organizationId, input.organizationId),
-      eq(documents.accessScope, input.accessScope),
-      eq(documents.sourceType, "uploaded"),
-      eq(documents.displayName, input.displayName),
-    ),
-  });
-}
-
-async function buildManagedDocumentSourcePath(input: {
-  accessScope: KnowledgeAccessScope;
-  displayName: string;
-  jobId: string;
-  organizationId: string;
+  now?: Date;
   relativePath: string;
   sourceKind: KnowledgeImportSourceKind;
 }) {
-  if (input.sourceKind === "single_file") {
-    const existing = await findExistingUploadedDocument({
-      accessScope: input.accessScope,
-      displayName: input.displayName,
-      organizationId: input.organizationId,
-    });
+  const { month, year } = getManagedUploadPeriod(input.now);
+  const targetRelativePath =
+    input.sourceKind === "single_file"
+      ? path.posix.basename(input.relativePath)
+      : input.relativePath;
 
-    if (existing) {
-      return existing.sourcePath;
+  return path.posix.join(input.accessScope, "uploads", year, month, targetRelativePath);
+}
+
+function prepareImportTargets(input: {
+  requestedPaths: string[];
+  sourceKind: KnowledgeImportSourceKind;
+}) {
+  const seenPaths = new Set<string>();
+
+  return input.requestedPaths.map((requestedPath) => {
+    const trimmedPath = requestedPath.trim();
+    const rawExtension = path.posix.extname(trimmedPath).toLowerCase();
+
+    try {
+      const relativePath = allocateUniqueRelativePath(
+        normalizeImportRelativePath(trimmedPath),
+        seenPaths,
+      );
+
+      return {
+        displayName:
+          input.sourceKind === "single_file"
+            ? path.posix.basename(trimmedPath) || getDisplayNameFromRelativePath(relativePath)
+            : getDisplayNameFromRelativePath(relativePath),
+        relativePath,
+      } satisfies PreparedImportTarget;
+    } catch {
+      const fallbackName = allocateUniqueRelativePath(
+        `${sanitizePathSegment(path.posix.basename(trimmedPath, rawExtension) || "file")}${rawExtension}`,
+        seenPaths,
+      );
+
+      return {
+        displayName:
+          input.sourceKind === "single_file"
+            ? path.posix.basename(trimmedPath) || getDisplayNameFromRelativePath(fallbackName)
+            : getDisplayNameFromRelativePath(fallbackName),
+        relativePath: fallbackName,
+      } satisfies PreparedImportTarget;
     }
+  });
+}
 
-    return path.posix.join(
-      input.accessScope,
-      "uploads",
-      "current",
-      path.posix.basename(input.relativePath),
-    );
+async function findExistingDocumentsBySourcePaths(input: {
+  organizationId: string;
+  sourcePaths: string[];
+}) {
+  const uniquePaths = [...new Set(input.sourcePaths.filter(Boolean))];
+
+  if (uniquePaths.length === 0) {
+    return [] as Array<{ displayName: string; sourcePath: string }>;
   }
 
-  const now = new Date();
-  const year = String(now.getUTCFullYear());
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const db = await getAppDatabase();
 
-  return path.posix.join(
-    input.accessScope,
-    "uploads",
-    year,
-    month,
-    createSourceRootPrefix(input.jobId),
-    input.relativePath,
+  return db
+    .select({
+      displayName: documents.displayName,
+      sourcePath: documents.sourcePath,
+    })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.organizationId, input.organizationId),
+        inArray(documents.sourcePath, uniquePaths),
+      ),
+    );
+}
+
+async function listImportConflicts(input: {
+  accessScope: KnowledgeAccessScope;
+  organizationId: string;
+  requestedPaths: string[];
+  sourceKind: KnowledgeImportSourceKind;
+}) {
+  const targets = prepareImportTargets({
+    requestedPaths: input.requestedPaths,
+    sourceKind: input.sourceKind,
+  });
+  const sourcePathToTarget = new Map(
+    targets.map((target) => [
+      buildManagedDocumentSourcePath({
+        accessScope: input.accessScope,
+        relativePath: target.relativePath,
+        sourceKind: input.sourceKind,
+      }),
+      target,
+    ]),
   );
+  const existingDocuments = await findExistingDocumentsBySourcePaths({
+    organizationId: input.organizationId,
+    sourcePaths: [...sourcePathToTarget.keys()],
+  });
+
+  return existingDocuments
+    .map((document) => {
+      const target = sourcePathToTarget.get(document.sourcePath);
+
+      if (!target) {
+        return null;
+      }
+
+      return {
+        displayName: target.displayName,
+        relativePath: target.relativePath,
+        sourcePath: document.sourcePath,
+      } satisfies KnowledgeImportConflictRecord;
+    })
+    .filter((conflict): conflict is KnowledgeImportConflictRecord => conflict !== null)
+    .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
 }
 
 function mapJobRow(row: {
@@ -887,8 +961,67 @@ async function insertImportJob(input: {
   return job;
 }
 
+export async function previewKnowledgeImportConflictsFromFiles(input: {
+  files: DirectImportFileInput[];
+  requestedScope: string;
+  sourceKind: "directory" | "single_file";
+  user: SessionUser;
+}) {
+  const accessScope = normalizeRequestedScope(
+    input.user.role,
+    input.requestedScope.trim().toLowerCase(),
+  );
+
+  if (!canRoleAccessKnowledgeScope(input.user.role, accessScope)) {
+    throw new Error("You do not have access to import files to that scope.");
+  }
+
+  return listImportConflicts({
+    accessScope,
+    organizationId: input.user.organizationId,
+    requestedPaths: input.files.map((entry) => entry.relativePath.trim() || entry.file.name),
+    sourceKind: input.sourceKind,
+  });
+}
+
+export async function previewKnowledgeImportConflictsFromArchive(input: {
+  archive: File;
+  requestedScope: string;
+  user: SessionUser;
+}) {
+  const accessScope = normalizeRequestedScope(
+    input.user.role,
+    input.requestedScope.trim().toLowerCase(),
+  );
+
+  if (!canRoleAccessKnowledgeScope(input.user.role, accessScope)) {
+    throw new Error("You do not have access to import files to that scope.");
+  }
+
+  if (input.archive.size <= 0) {
+    throw new Error("Archive must not be empty.");
+  }
+
+  if (input.archive.size > KNOWLEDGE_ARCHIVE_MAX_BYTES) {
+    throw new Error("Archive exceeds the configured size limit.");
+  }
+
+  const archiveBuffer = Buffer.from(await input.archive.arrayBuffer());
+  const requestedPaths = listZipEntries(archiveBuffer)
+    .filter((entry) => !entry.fileName.endsWith("/"))
+    .map((entry) => entry.fileName);
+
+  return listImportConflicts({
+    accessScope,
+    organizationId: input.user.organizationId,
+    requestedPaths,
+    sourceKind: "zip",
+  });
+}
+
 export async function createKnowledgeImportJobFromFiles(input: {
   files: DirectImportFileInput[];
+  replaceExisting?: boolean;
   requestedScope: string;
   sourceKind: "directory" | "single_file";
   triggerRequestId?: string | null;
@@ -905,6 +1038,23 @@ export async function createKnowledgeImportJobFromFiles(input: {
 
   if (!canRoleAccessKnowledgeScope(input.user.role, accessScope)) {
     throw new Error("You do not have access to import files to that scope.");
+  }
+
+  if (!input.replaceExisting) {
+    const conflicts = await listImportConflicts({
+      accessScope,
+      organizationId: input.user.organizationId,
+      requestedPaths: input.files.map((entry) => entry.relativePath.trim() || entry.file.name),
+      sourceKind: input.sourceKind,
+    });
+
+    if (conflicts.length > 0) {
+      throw new Error(
+        conflicts.length === 1
+          ? `A file already exists at ${conflicts[0]!.sourcePath}. Confirm replacement to continue.`
+          : `${conflicts.length} files already exist in this month folder. Confirm replacement to continue.`,
+      );
+    }
   }
 
   const stagingRoot = path.join(
@@ -931,6 +1081,7 @@ export async function createKnowledgeImportJobFromFiles(input: {
 
 export async function createKnowledgeImportJobFromArchive(input: {
   archive: File;
+  replaceExisting?: boolean;
   requestedScope: string;
   triggerRequestId?: string | null;
   user: SessionUser;
@@ -942,6 +1093,22 @@ export async function createKnowledgeImportJobFromArchive(input: {
 
   if (!canRoleAccessKnowledgeScope(input.user.role, accessScope)) {
     throw new Error("You do not have access to import files to that scope.");
+  }
+
+  if (!input.replaceExisting) {
+    const conflicts = await previewKnowledgeImportConflictsFromArchive({
+      archive: input.archive,
+      requestedScope: accessScope,
+      user: input.user,
+    });
+
+    if (conflicts.length > 0) {
+      throw new Error(
+        conflicts.length === 1
+          ? `A file already exists at ${conflicts[0]!.sourcePath}. Confirm replacement to continue.`
+          : `${conflicts.length} files already exist in this month folder. Confirm replacement to continue.`,
+      );
+    }
   }
 
   const stagingJobId = randomUUID();
@@ -1383,11 +1550,8 @@ async function recordImportUsageEvent(input: {
 
 async function processClaimedImportJobFile(file: ClaimedImportJobFile) {
   const db = await getAppDatabase();
-  const managedSourcePath = await buildManagedDocumentSourcePath({
+  const managedSourcePath = buildManagedDocumentSourcePath({
     accessScope: file.accessScope,
-    displayName: file.displayName,
-    jobId: file.jobId,
-    organizationId: file.organizationId,
     relativePath: file.relativePath,
     sourceKind: file.sourceKind,
   });

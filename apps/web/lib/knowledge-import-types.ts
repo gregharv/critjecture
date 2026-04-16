@@ -70,6 +70,16 @@ export type CreateKnowledgeImportJobResponse = {
   job: KnowledgeImportJobRecord;
 };
 
+export type KnowledgeImportConflictRecord = {
+  displayName: string;
+  relativePath: string;
+  sourcePath: string;
+};
+
+export type PreviewKnowledgeImportConflictsResponse = {
+  conflicts: KnowledgeImportConflictRecord[];
+};
+
 export type GetKnowledgeImportJobResponse = {
   files: KnowledgeImportJobFileRecord[];
   job: KnowledgeImportJobRecord;

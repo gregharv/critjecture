@@ -7,9 +7,11 @@ import { DEMO_DATASETS } from "@/lib/demo-datasets";
 import type {
   CreateKnowledgeImportJobResponse,
   GetKnowledgeImportJobResponse,
+  KnowledgeImportConflictRecord,
   KnowledgeImportJobFileRecord,
   KnowledgeImportJobRecord,
   ListKnowledgeImportJobsResponse,
+  PreviewKnowledgeImportConflictsResponse,
 } from "@/lib/knowledge-import-types";
 import type {
   GetKnowledgeFilePreviewResponse,
@@ -336,12 +338,33 @@ function formatSortLabel(column: KnowledgeSortColumn, activeColumn: KnowledgeSor
   return direction === "asc" ? " ↑" : " ↓";
 }
 
+function formatImportConflictConfirmation(conflicts: KnowledgeImportConflictRecord[]) {
+  const visibleConflicts = conflicts.slice(0, 8).map((conflict) => `• ${conflict.sourcePath}`);
+  const remainingCount = conflicts.length - visibleConflicts.length;
+
+  return [
+    conflicts.length === 1
+      ? "A file already exists in this month folder:"
+      : `${conflicts.length} files already exist in this month folder:`,
+    "",
+    ...visibleConflicts,
+    remainingCount > 0 ? `• ...and ${remainingCount} more` : null,
+    "",
+    conflicts.length === 1
+      ? "Replace the existing file?"
+      : "Replace all conflicting files?",
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
 export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [sortColumn, setSortColumn] = useState<KnowledgeSortColumn>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
+  const [demoDownloadsExpanded, setDemoDownloadsExpanded] = useState(false);
   const [directoryPath, setDirectoryPath] = useState<string[]>([]);
   const [directoryExpansionByPath, setDirectoryExpansionByPath] = useState<Record<string, boolean>>({});
   const [directoryHoveredFileId, setDirectoryHoveredFileId] = useState<string | null>(null);
@@ -776,6 +799,36 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
     };
   }, [access.canViewKnowledgeLibrary, refreshAll, state.activeJobId, state.jobs]);
 
+  async function previewImportConflicts(formData: FormData) {
+    const response = await fetch("/api/knowledge/import-jobs/conflicts", {
+      body: formData,
+      method: "POST",
+    });
+    const data = (await response.json()) as PreviewKnowledgeImportConflictsResponse | { error?: string };
+
+    if (!response.ok || !("conflicts" in data)) {
+      throw new Error(getErrorMessage(data, "Failed to check for upload conflicts."));
+    }
+
+    return data.conflicts;
+  }
+
+  async function confirmImportConflicts(formData: FormData) {
+    const conflicts = await previewImportConflicts(formData);
+
+    if (conflicts.length === 0) {
+      return {
+        confirmed: true,
+        conflicts,
+      };
+    }
+
+    return {
+      confirmed: window.confirm(formatImportConflictConfirmation(conflicts)),
+      conflicts,
+    };
+  }
+
   async function handleQuickUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -791,14 +844,27 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      error: null,
-      submitting: true,
-    }));
-
     try {
+      formData.set("mode", "single_file");
+      formData.set("paths", file.name);
       formData.set("scope", importScope);
+
+      const confirmation = await confirmImportConflicts(formData);
+
+      if (!confirmation.confirmed) {
+        return;
+      }
+
+      if (confirmation.conflicts.length > 0) {
+        formData.set("replaceExisting", "true");
+      }
+
+      setState((current) => ({
+        ...current,
+        error: null,
+        submitting: true,
+      }));
+
       const response = await fetch("/api/knowledge/files", {
         body: formData,
         method: "POST",
@@ -844,13 +910,23 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
       formData.append("paths", relativePath);
     }
 
-    setState((current) => ({
-      ...current,
-      error: null,
-      submitting: true,
-    }));
-
     try {
+      const confirmation = await confirmImportConflicts(formData);
+
+      if (!confirmation.confirmed) {
+        return;
+      }
+
+      if (confirmation.conflicts.length > 0) {
+        formData.set("replaceExisting", "true");
+      }
+
+      setState((current) => ({
+        ...current,
+        error: null,
+        submitting: true,
+      }));
+
       const response = await fetch("/api/knowledge/import-jobs", {
         body: formData,
         method: "POST",
@@ -889,13 +965,23 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
     formData.set("scope", importScope);
 
-    setState((current) => ({
-      ...current,
-      error: null,
-      submitting: true,
-    }));
-
     try {
+      const confirmation = await confirmImportConflicts(formData);
+
+      if (!confirmation.confirmed) {
+        return;
+      }
+
+      if (confirmation.conflicts.length > 0) {
+        formData.set("replaceExisting", "true");
+      }
+
+      setState((current) => ({
+        ...current,
+        error: null,
+        submitting: true,
+      }));
+
       const response = await fetch("/api/knowledge/import-jobs", {
         body: formData,
         method: "POST",
@@ -1506,51 +1592,66 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
             <p className="knowledge-panel__eyebrow">Demo Downloads</p>
             <h2 className="knowledge-subtitle">Public datasets for upload and directory-import demos</h2>
           </div>
-          <p className="knowledge-panel__copy">
-            Download a single-file CSV for a quick upload demo, or grab the ZIP bundle and extract
-            it to show the directory picker.
-          </p>
-        </div>
-
-        <div className="knowledge-demo-grid">
-          {DEMO_DATASETS.map((dataset) => (
-            <article className="knowledge-demo-card" key={dataset.id}>
-              <div>
-                <p className="knowledge-panel__eyebrow">
-                  {dataset.downloadMode === "zip-bundle" ? "ZIP bundle" : "Single file"}
-                </p>
-                <h3 className="knowledge-demo-card__title">{dataset.title}</h3>
-              </div>
-              <p className="knowledge-demo-card__copy">{dataset.description}</p>
-              <p className="knowledge-demo-card__hint">{dataset.uploadHint}</p>
-              <a
-                className="knowledge-button knowledge-button--primary"
-                href={`/api/knowledge/demo-datasets/${dataset.id}`}
-              >
-                Download {dataset.downloadMode === "zip-bundle" ? "ZIP" : "CSV"}
-              </a>
-            </article>
-          ))}
-        </div>
-
-        <div className="knowledge-demo-reset">
-          <div>
-            <p className="knowledge-panel__eyebrow">Clean slate</p>
-            <h3 className="knowledge-demo-card__title">Delete managed files for a fresh demo</h3>
-            <p className="knowledge-demo-card__copy">
-              Owner-only. This uses the existing governance path to remove uploaded knowledge files
-              and import metadata so you can re-run the upload flow from scratch.
+          <div className="knowledge-demo-toolbar">
+            <p className="knowledge-panel__copy">
+              Download a single-file CSV for a quick upload demo, or grab the ZIP bundle and extract
+              it to show the directory picker.
             </p>
+            <button
+              aria-controls="knowledge-demo-downloads-content"
+              aria-expanded={demoDownloadsExpanded}
+              className="knowledge-button"
+              onClick={() => setDemoDownloadsExpanded((current) => !current)}
+              type="button"
+            >
+              {demoDownloadsExpanded ? "Hide demo downloads" : "Show demo downloads"}
+            </button>
           </div>
-          <button
-            className="knowledge-button knowledge-button--danger"
-            disabled={state.submitting || !access.canManageGovernance}
-            onClick={() => void handleDeleteManagedFiles()}
-            type="button"
-          >
-            {state.submitting ? "Working..." : "Delete managed files"}
-          </button>
         </div>
+
+        {demoDownloadsExpanded ? (
+          <div className="knowledge-demo-content" id="knowledge-demo-downloads-content">
+            <div className="knowledge-demo-grid">
+              {DEMO_DATASETS.map((dataset) => (
+                <article className="knowledge-demo-card" key={dataset.id}>
+                  <div>
+                    <p className="knowledge-panel__eyebrow">
+                      {dataset.downloadMode === "zip-bundle" ? "ZIP bundle" : "Single file"}
+                    </p>
+                    <h3 className="knowledge-demo-card__title">{dataset.title}</h3>
+                  </div>
+                  <p className="knowledge-demo-card__copy">{dataset.description}</p>
+                  <p className="knowledge-demo-card__hint">{dataset.uploadHint}</p>
+                  <a
+                    className="knowledge-button knowledge-button--primary"
+                    href={`/api/knowledge/demo-datasets/${dataset.id}`}
+                  >
+                    Download {dataset.downloadMode === "zip-bundle" ? "ZIP" : "CSV"}
+                  </a>
+                </article>
+              ))}
+            </div>
+
+            <div className="knowledge-demo-reset">
+              <div>
+                <p className="knowledge-panel__eyebrow">Clean slate</p>
+                <h3 className="knowledge-demo-card__title">Delete managed files for a fresh demo</h3>
+                <p className="knowledge-demo-card__copy">
+                  Owner-only. This uses the existing governance path to remove uploaded knowledge
+                  files and import metadata so you can re-run the upload flow from scratch.
+                </p>
+              </div>
+              <button
+                className="knowledge-button knowledge-button--danger"
+                disabled={state.submitting || !access.canManageGovernance}
+                onClick={() => void handleDeleteManagedFiles()}
+                type="button"
+              >
+                {state.submitting ? "Working..." : "Delete managed files"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="knowledge-panel">

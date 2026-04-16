@@ -71,6 +71,7 @@ describe("knowledge import asset integration", () => {
             relativePath: "superstore-sales.csv",
           },
         ],
+        replaceExisting: true,
         requestedScope: "public",
         sourceKind: "single_file",
         user: owner!,
@@ -91,9 +92,58 @@ describe("knowledge import asset integration", () => {
         ? await db.select().from(dataAssetVersions).where(eq(dataAssetVersions.assetId, assets[0].id))
         : [];
 
-      expect(document?.sourcePath).toBe("public/uploads/current/superstore-sales.csv");
+      const now = new Date();
+      const year = String(now.getUTCFullYear());
+      const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+
+      expect(document?.sourcePath).toBe(`public/uploads/${year}/${month}/superstore-sales.csv`);
       expect(assets).toHaveLength(1);
       expect(versions).toHaveLength(2);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("requires explicit replacement before reusing an existing path in the month folder", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const owner = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(owner).not.toBeNull();
+
+      const firstJob = await createKnowledgeImportJobFromFiles({
+        files: [
+          {
+            file: new File(["region,sales\nwest,10\n"], "sales.csv", {
+              type: "text/csv",
+            }),
+            relativePath: "sales.csv",
+          },
+        ],
+        requestedScope: "public",
+        sourceKind: "single_file",
+        user: owner!,
+      });
+      await waitForImportJobCompletion({
+        jobId: firstJob.id,
+        user: owner!,
+      });
+
+      await expect(
+        createKnowledgeImportJobFromFiles({
+          files: [
+            {
+              file: new File(["region,sales\nwest,11\n"], "sales.csv", {
+                type: "text/csv",
+              }),
+              relativePath: "sales.csv",
+            },
+          ],
+          requestedScope: "public",
+          sourceKind: "single_file",
+          user: owner!,
+        }),
+      ).rejects.toThrow(/Confirm replacement to continue\./);
     } finally {
       await environment.cleanup();
     }
@@ -148,10 +198,15 @@ describe("knowledge import asset integration", () => {
           })
         : null;
 
+      const now = new Date();
+      const year = String(now.getUTCFullYear());
+      const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+
       expect(document).toEqual(
         expect.objectContaining({
           accessScope: "admin",
           ingestionStatus: "ready",
+          sourcePath: `admin/uploads/${year}/${month}/finance/contractors.csv`,
           sourceType: "bulk_import",
         }),
       );
