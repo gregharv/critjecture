@@ -890,34 +890,34 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
 .chat-history-group__items {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
 .chat-history-card {
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--card) 88%, transparent 12%);
+  padding: 4px 6px 4px 8px;
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--card) 84%, transparent 16%);
 }
 
 .chat-history-card.is-active {
-  border-color: color-mix(in oklab, var(--primary) 52%, var(--border) 48%);
   background:
-    linear-gradient(180deg, rgb(96 165 250 / 0.08), transparent 65%),
-    color-mix(in oklab, var(--card) 90%, transparent 10%);
+    linear-gradient(180deg, rgb(96 165 250 / 0.12), transparent 65%),
+    color-mix(in oklab, var(--primary) 24%, var(--card) 76%);
 }
 
 .chat-history-card__body {
-  display: grid;
-  gap: 6px;
+  display: block;
   width: 100%;
   min-width: 0;
-  padding: 0;
+  padding: 8px 10px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -929,60 +929,119 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   opacity: 0.75;
 }
 
+.chat-history-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chat-history-card__title {
   display: block;
+  min-width: 0;
   max-width: 100%;
   color: var(--shell-title-ink);
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.35;
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-history-card__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .chat-history-card__badge {
-  padding: 2px 8px;
+  flex: 0 0 auto;
+  padding: 1px 6px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
   border-radius: 999px;
   color: var(--muted-foreground);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 600;
-}
-
-.chat-history-card__preview {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 0.78rem;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.chat-history-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.chat-history-card__menu {
+  position: relative;
+}
+
+.chat-history-card__menu[open] {
+  z-index: 20;
+}
+
+.chat-history-card__menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  list-style: none;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.chat-history-card__menu-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.chat-history-card:hover .chat-history-card__menu-trigger,
+.chat-history-card:focus-within .chat-history-card__menu-trigger,
+.chat-history-card__menu[open] .chat-history-card__menu-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-history-card__menu[open] .chat-history-card__menu-trigger,
+.chat-history-card__menu-trigger:hover,
+.chat-history-card__menu-trigger:focus-visible {
+  background: color-mix(in oklab, var(--card) 94%, transparent 6%);
+  color: var(--foreground);
+}
+
+.chat-history-card__menu-items {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  min-width: 132px;
+  padding: 6px;
+  border: 1px solid color-mix(in oklab, var(--border) 64%, transparent 36%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 96%, transparent 4%);
+  box-shadow: 0 18px 44px -28px rgb(2 6 23 / 0.85);
 }
 
 .chat-history-card__action {
-  padding: 6px 8px;
-  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--card) 94%, transparent 6%);
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
   font-size: 0.76rem;
   font-weight: 600;
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.chat-history-card__action:hover,
+.chat-history-card__action:focus-visible {
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
+  color: var(--foreground);
 }
 
 .chat-history-card__action:disabled {
@@ -992,6 +1051,12 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
 .chat-history-card__action.is-danger {
   color: color-mix(in oklab, #ef4444 70%, var(--foreground) 30%);
+}
+
+.chat-history-card__action.is-danger:hover,
+.chat-history-card__action.is-danger:focus-visible {
+  background: color-mix(in oklab, #ef4444 16%, var(--card) 84%);
+  color: color-mix(in oklab, #ef4444 82%, white 18%);
 }
 
 .chat-history-empty {

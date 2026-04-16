@@ -968,10 +968,10 @@ function ConversationHistoryList({
                     onClick={() => onSelect(conversation.id)}
                     type="button"
                   >
-                    <span className="chat-history-card__title">
-                      {conversation.title || "Untitled conversation"}
-                    </span>
-                    <span className="chat-history-card__meta">
+                    <span className="chat-history-card__title-row">
+                      <span className="chat-history-card__title">
+                        {conversation.title || "Untitled conversation"}
+                      </span>
                       {conversation.visibility === "organization" ? (
                         <span className="chat-history-card__badge">Shared</span>
                       ) : null}
@@ -979,48 +979,65 @@ function ConversationHistoryList({
                         <span className="chat-history-card__badge">Read-only</span>
                       ) : null}
                     </span>
-                    {conversation.preview ? (
-                      <span className="chat-history-card__preview">{conversation.preview}</span>
-                    ) : null}
                   </button>
-                  <div className="chat-history-card__actions">
-                    <button
-                      className="chat-history-card__action"
-                      disabled={disabled}
-                      onClick={() => onPinToggle(conversation)}
-                      type="button"
+                  <details className="chat-history-card__menu" data-dismiss-on-outside="true">
+                    <summary
+                      aria-label={`Conversation options for ${conversation.title || "Untitled conversation"}`}
+                      className="chat-history-card__menu-trigger"
                     >
-                      {conversation.isPinned ? "Unpin" : "Pin"}
-                    </button>
-                    {conversation.canManage ? (
-                      <>
-                        <button
-                          className="chat-history-card__action"
-                          disabled={disabled}
-                          onClick={() => onShareToggle(conversation)}
-                          type="button"
-                        >
-                          {conversation.visibility === "organization" ? "Unshare" : "Share"}
-                        </button>
-                        <button
-                          className="chat-history-card__action"
-                          disabled={disabled}
-                          onClick={() => onRename(conversation)}
-                          type="button"
-                        >
-                          Rename
-                        </button>
-                        <button
-                          className="chat-history-card__action is-danger"
-                          disabled={disabled}
-                          onClick={() => onDelete(conversation)}
-                          type="button"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
+                      <span aria-hidden="true">⋮</span>
+                    </summary>
+                    <div className="chat-history-card__menu-items">
+                      <button
+                        className="chat-history-card__action"
+                        disabled={disabled}
+                        onClick={(event) => {
+                          onPinToggle(conversation);
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                        type="button"
+                      >
+                        {conversation.isPinned ? "Unpin" : "Pin"}
+                      </button>
+                      {conversation.canManage ? (
+                        <>
+                          <button
+                            className="chat-history-card__action"
+                            disabled={disabled}
+                            onClick={(event) => {
+                              onShareToggle(conversation);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                            type="button"
+                          >
+                            {conversation.visibility === "organization" ? "Unshare" : "Share"}
+                          </button>
+                          <button
+                            className="chat-history-card__action"
+                            disabled={disabled}
+                            onClick={(event) => {
+                              onRename(conversation);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                            type="button"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            className="chat-history-card__action is-danger"
+                            disabled={disabled}
+                            onClick={(event) => {
+                              onDelete(conversation);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </details>
                 </div>
               );
             })}
