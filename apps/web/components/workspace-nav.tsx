@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useRef } from "react";
+
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -19,6 +21,7 @@ export function WorkspaceNav({
   themePreference: "light" | "dark";
 }) {
   const pathname = usePathname() || "";
+  const menuRef = useRef<HTMLDetailsElement>(null);
   const displayName = user.name || user.email;
 
   const activePage =
@@ -37,10 +40,17 @@ export function WorkspaceNav({
                 : "chat";
 
   const returnTo = pathname;
+  const closeMenu = useCallback(() => {
+    menuRef.current?.removeAttribute("open");
+  }, []);
 
   return (
     <header className="shell-header">
-      <details className="shell-menu" data-dismiss-on-outside="true">
+      <details
+        ref={menuRef}
+        className="shell-menu"
+        data-dismiss-on-outside="true"
+      >
         <summary className="shell-menu__summary">
           <div className="brand-lockup">
             <Image
@@ -66,12 +76,14 @@ export function WorkspaceNav({
             <Link
               className={`shell-nav__link ${activePage === "chat" ? "is-active" : ""}`}
               href="/chat"
+              onClick={closeMenu}
             >
               Chat
             </Link>
             <Link
               className={`shell-nav__link ${activePage === "knowledge" ? "is-active" : ""}`}
               href="/knowledge"
+              onClick={closeMenu}
             >
               Knowledge
             </Link>
@@ -79,6 +91,7 @@ export function WorkspaceNav({
               <Link
                 className={`shell-nav__link ${activePage === "workflows" ? "is-active" : ""}`}
                 href="/workflows"
+                onClick={closeMenu}
               >
                 Workflows
               </Link>
@@ -88,18 +101,21 @@ export function WorkspaceNav({
                 <Link
                   className={`shell-nav__link ${activePage === "operations" ? "is-active" : ""}`}
                   href="/admin/operations"
+                  onClick={closeMenu}
                 >
                   Operations
                 </Link>
                 <Link
                   className={`shell-nav__link ${activePage === "logs" ? "is-active" : ""}`}
                   href="/admin/logs"
+                  onClick={closeMenu}
                 >
                   Audit Logs
                 </Link>
                 <Link
                   className={`shell-nav__link ${activePage === "settings" ? "is-active" : ""}`}
                   href="/admin/settings"
+                  onClick={closeMenu}
                 >
                   Settings
                 </Link>

@@ -482,21 +482,33 @@ test("owner can load history and open owner admin pages", async ({ page }) => {
   await page.getByRole("button", { name: "Save workflow" }).click();
   await expect(page.getByText("Saved workflow")).toBeVisible();
 
+  const shellMenu = page.locator(".shell-menu");
+
   await page.locator(".shell-menu__summary").click();
+  await expect(shellMenu).toHaveAttribute("open", "");
+  await page.locator(".shell-user__name").click();
+  await expect(shellMenu).toHaveAttribute("open", "");
   await page.getByRole("link", { name: "Workflows" }).click();
+  await expect(shellMenu).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Saved workflows and execution history" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Budget review workflow" })).toBeVisible();
 
   await page.locator(".shell-menu__summary").click();
+  await expect(shellMenu).toHaveAttribute("open", "");
   await page.getByRole("link", { name: "Audit Logs" }).click();
+  await expect(shellMenu).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
 
   await page.locator(".shell-menu__summary").click();
+  await expect(shellMenu).toHaveAttribute("open", "");
   await page.getByRole("link", { name: "Operations" }).click();
+  await expect(shellMenu).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
 
   await page.locator(".shell-menu__summary").click();
+  await expect(shellMenu).toHaveAttribute("open", "");
   await page.getByRole("link", { name: "Settings" }).click();
+  await expect(shellMenu).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Settings and Governance" })).toBeVisible();
 });
 
