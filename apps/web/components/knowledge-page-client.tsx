@@ -343,6 +343,7 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
   const [directoryPath, setDirectoryPath] = useState<string[]>([]);
+  const [directoryExpansionByPath, setDirectoryExpansionByPath] = useState<Record<string, boolean>>({});
   const [directoryHoveredFileId, setDirectoryHoveredFileId] = useState<string | null>(null);
   const [directorySelectedFileId, setDirectorySelectedFileId] = useState<string | null>(null);
   const [state, setState] = useState<KnowledgePageState>({
@@ -425,6 +426,7 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const rootDirectoryFolders = useMemo(() => {
     return [...directoryTree.folders.values()].sort((left, right) => compareText(left.name, right.name));
   }, [directoryTree]);
+  const activeDirectoryPath = directoryPath.join("/");
   const currentDirectoryScope = getKnowledgeDirectoryScope(currentDirectory);
   const currentDirectoryName = directoryPath[directoryPath.length - 1] ?? "All files";
   const directoryParentPath = directoryPath.length > 0 ? directoryPath.slice(0, -1) : null;
@@ -496,10 +498,30 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   }, [directoryHoveredFileId, directorySelectedFileId, state.files]);
 
   const openDirectoryPath = useCallback((nextPath: string[]) => {
+    const nextExpandedPaths = nextPath.reduce<Record<string, boolean>>((paths, segment, index) => {
+      const path = nextPath.slice(0, index + 1).join("/");
+      paths[path] = true;
+      return paths;
+    }, {});
+
+    setDirectoryExpansionByPath((current) => ({
+      ...current,
+      ...nextExpandedPaths,
+    }));
     setDirectoryHoveredFileId(null);
     setDirectorySelectedFileId(null);
     setDirectoryPath(nextPath);
   }, []);
+
+  const isDirectoryExpanded = useCallback((path: string) => {
+    const explicitValue = directoryExpansionByPath[path];
+
+    if (typeof explicitValue === "boolean") {
+      return explicitValue;
+    }
+
+    return activeDirectoryPath === path || activeDirectoryPath.startsWith(`${path}/`);
+  }, [activeDirectoryPath, directoryExpansionByPath]);
 
   const loadFiles = useCallback(async (
     nextScopeFilter = scopeFilter,
@@ -985,31 +1007,77 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
   function renderDirectoryTreeNode(node: KnowledgeDirectoryNode, depth = 0) {
     const childFolders = [...node.folders.values()].sort((left, right) => compareText(left.name, right.name));
-    const isActive = node.path === directoryPath.join("/");
+    const isActive = node.path === activeDirectoryPath;
+    const isExpanded = childFolders.length > 0 ? isDirectoryExpanded(node.path) : false;
     const scope = getKnowledgeDirectoryScope(node);
+    const nextPath = node.path ? node.path.split("/") : [];
 
-    return (
-      <div className="knowledge-directory-tree__node" key={node.path}>
+    if (childFolders.length === 0) {
+      return (
         <button
-          className={`knowledge-directory-tree__button${isActive ? " is-active" : ""}`}
+          className={`knowledge-directory-tree__leaf${isActive ? " is-active" : ""}`}
+          key={node.path}
           onClick={() => {
-            openDirectoryPath(node.path ? node.path.split("/") : []);
+            openDirectoryPath(nextPath);
           }}
-          style={{ paddingInlineStart: `${14 + depth * 16}px` }}
+          style={{ paddingInlineStart: `${12 + depth * 12}px` }}
           type="button"
         >
+          <span aria-hidden="true" className="knowledge-directory-tree__chevron knowledge-directory-tree__chevron--placeholder">▸</span>
           <span aria-hidden="true" className="knowledge-directory-tree__icon">📁</span>
           <span className="knowledge-directory-tree__label">{node.name}</span>
           <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(scope)}`}>
-            {getKnowledgeDirectoryScopeLabel(scope)}
+            {node.totalFileCount}
           </span>
         </button>
-        {childFolders.length > 0 ? (
-          <div className="knowledge-directory-tree__children">
-            {childFolders.map((childFolder) => renderDirectoryTreeNode(childFolder, depth + 1))}
-          </div>
-        ) : null}
-      </div>
+      );
+    }
+
+    return (
+      <details
+        className={`knowledge-directory-tree__node${isActive ? " is-active" : ""}`}
+        key={node.path}
+        onToggle={(event) => {
+          const nextOpen = event.currentTarget.open;
+
+          setDirectoryExpansionByPath((current) => {
+            if (current[node.path] === nextOpen) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [node.path]: nextOpen,
+            };
+          });
+        }}
+        open={isExpanded}
+      >
+        <summary
+          className={`knowledge-directory-tree__summary${isActive ? " is-active" : ""}`}
+          style={{ paddingInlineStart: `${8 + depth * 12}px` }}
+        >
+          <span aria-hidden="true" className="knowledge-directory-tree__chevron">▸</span>
+          <button
+            className={`knowledge-directory-tree__entry${isActive ? " is-active" : ""}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openDirectoryPath(nextPath);
+            }}
+            type="button"
+          >
+            <span aria-hidden="true" className="knowledge-directory-tree__icon">📁</span>
+            <span className="knowledge-directory-tree__label">{node.name}</span>
+            <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(scope)}`}>
+              {node.totalFileCount}
+            </span>
+          </button>
+        </summary>
+        <div className="knowledge-directory-tree__children">
+          {childFolders.map((childFolder) => renderDirectoryTreeNode(childFolder, depth + 1))}
+        </div>
+      </details>
     );
   }
 
@@ -1101,25 +1169,41 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
           <div className="knowledge-directory-browser">
             <aside className="knowledge-directory-sidebar">
               <div className="knowledge-directory-sidebar__header">Folders</div>
-              <button
-                className={`knowledge-directory-tree__button${directoryPath.length === 0 ? " is-active" : ""}`}
-                onClick={() => {
-                  openDirectoryPath([]);
-                }}
-                type="button"
-              >
-                <span aria-hidden="true" className="knowledge-directory-tree__icon">🗂️</span>
-                <span className="knowledge-directory-tree__label">All files</span>
-                <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(getKnowledgeDirectoryScope(directoryTree))}`}>
-                  {directoryTree.totalFileCount} total
-                </span>
-              </button>
-              <div className="knowledge-directory-tree">
+              <div aria-label="Knowledge folders" className="knowledge-directory-tree">
+                <button
+                  className={`knowledge-directory-tree__button${directoryPath.length === 0 ? " is-active" : ""}`}
+                  onClick={() => {
+                    openDirectoryPath([]);
+                  }}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="knowledge-directory-tree__icon">🗂️</span>
+                  <span className="knowledge-directory-tree__label">All files</span>
+                  <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(getKnowledgeDirectoryScope(directoryTree))}`}>
+                    {directoryTree.totalFileCount}
+                  </span>
+                </button>
                 {rootDirectoryFolders.map((folder) => renderDirectoryTreeNode(folder))}
               </div>
             </aside>
 
             <div className="knowledge-directory-main">
+              <div className="knowledge-directory-main__header">
+                <div>
+                  <p className="knowledge-panel__eyebrow">Current folder</p>
+                  <h3 className="knowledge-directory-summary__title">{currentDirectoryName}</h3>
+                  <p className="knowledge-directory-main__meta">
+                    {directoryFolders.length} folder{directoryFolders.length === 1 ? "" : "s"} · {directoryFiles.length} file{directoryFiles.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="knowledge-directory-summary__badges">
+                  <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(currentDirectoryScope)}`}>
+                    {getKnowledgeDirectoryScopeLabel(currentDirectoryScope)}
+                  </span>
+                  <span className="knowledge-directory-summary__count">{currentDirectory.totalFileCount} total</span>
+                </div>
+              </div>
+
               <nav className="knowledge-directory-breadcrumbs" aria-label="Folder path">
                 <button
                   className={`knowledge-directory-breadcrumb${directoryPath.length === 0 ? " is-active" : ""}`}
@@ -1131,89 +1215,84 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
                   All files
                 </button>
                 {directoryBreadcrumbs.map((breadcrumb) => (
-                  <button
-                    className={`knowledge-directory-breadcrumb${breadcrumb.path.join("/") === directoryPath.join("/") ? " is-active" : ""}`}
-                    key={breadcrumb.path.join("/")}
-                    onClick={() => {
-                      openDirectoryPath(breadcrumb.path);
-                    }}
-                    type="button"
-                  >
-                    {breadcrumb.label}
-                  </button>
-                ))}
-              </nav>
-
-              <div className="knowledge-directory-summary">
-                <div>
-                  <h3 className="knowledge-directory-summary__title">{currentDirectoryName}</h3>
-                  <p className="knowledge-directory-summary__copy">
-                    {directoryFolders.length} folder{directoryFolders.length === 1 ? "" : "s"} and {directoryFiles.length} file{directoryFiles.length === 1 ? "" : "s"} in this view.
-                  </p>
-                </div>
-                <div className="knowledge-directory-summary__badges">
-                  <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(currentDirectoryScope)}`}>
-                    {getKnowledgeDirectoryScopeLabel(currentDirectoryScope)}
-                  </span>
-                  <span className="knowledge-directory-summary__count">{currentDirectory.totalFileCount} total file{currentDirectory.totalFileCount === 1 ? "" : "s"}</span>
-                </div>
-              </div>
-
-              <div className="knowledge-directory-list">
-                {directoryParentPath ? (
-                  <button
-                    className="knowledge-directory-row knowledge-directory-row--parent"
-                    onClick={() => {
-                      openDirectoryPath(directoryParentPath);
-                    }}
-                    type="button"
-                  >
-                    <span aria-hidden="true" className="knowledge-directory-row__icon">↩</span>
-                    <div>
-                      <div className="knowledge-directory-row__name">Up one level</div>
-                      <div className="knowledge-directory-row__meta">Return to the parent folder</div>
-                    </div>
-                  </button>
-                ) : null}
-
-                {directoryFolders.length > 0 ? <div className="knowledge-directory-section-label">Folders</div> : null}
-                {directoryFolders.map((folder) => {
-                  const folderScope = getKnowledgeDirectoryScope(folder);
-
-                  return (
+                  <span className="knowledge-directory-breadcrumb-item" key={breadcrumb.path.join("/")}>
+                    <span aria-hidden="true" className="knowledge-directory-breadcrumb-separator">›</span>
                     <button
-                      className="knowledge-directory-row knowledge-directory-row--folder"
-                      key={folder.path}
+                      className={`knowledge-directory-breadcrumb${breadcrumb.path.join("/") === activeDirectoryPath ? " is-active" : ""}`}
                       onClick={() => {
-                        openDirectoryPath(folder.path.split("/"));
+                        openDirectoryPath(breadcrumb.path);
                       }}
                       type="button"
                     >
-                      <div className="knowledge-directory-row__main">
-                        <span aria-hidden="true" className="knowledge-directory-row__icon">📁</span>
-                        <div>
-                          <div className="knowledge-directory-row__name">{folder.name}</div>
-                          <div className="knowledge-directory-row__meta">
-                            {folder.totalFileCount} file{folder.totalFileCount === 1 ? "" : "s"} inside this folder
-                          </div>
-                        </div>
-                      </div>
-                      <div className="knowledge-directory-row__badges">
-                        <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(folderScope)}`}>
-                          {getKnowledgeDirectoryScopeLabel(folderScope)}
-                        </span>
-                      </div>
+                      {breadcrumb.label}
                     </button>
-                  );
-                })}
+                  </span>
+                ))}
+              </nav>
 
-                {directoryFiles.length > 0 ? <div className="knowledge-directory-section-label">Files</div> : null}
+              <div className="knowledge-directory-list">
+                <div className="knowledge-directory-table__header" role="presentation">
+                  <span>Name</span>
+                  <span>Type</span>
+                  <span>Access</span>
+                  <span>Details</span>
+                </div>
                 <div
                   className="knowledge-directory-file-list"
                   onMouseLeave={() => {
                     setDirectoryHoveredFileId(null);
                   }}
                 >
+                  {directoryParentPath ? (
+                    <button
+                      className="knowledge-directory-row knowledge-directory-row--parent"
+                      onClick={() => {
+                        openDirectoryPath(directoryParentPath);
+                      }}
+                      type="button"
+                    >
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--name">
+                        <span aria-hidden="true" className="knowledge-directory-row__icon">↩</span>
+                        <span>
+                          <span className="knowledge-directory-row__name">..</span>
+                          <span className="knowledge-directory-row__meta">Up one level</span>
+                        </span>
+                      </span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--type">Parent folder</span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--access">—</span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--details">Return to the parent folder</span>
+                    </button>
+                  ) : null}
+
+                  {directoryFolders.map((folder) => {
+                    const folderScope = getKnowledgeDirectoryScope(folder);
+
+                    return (
+                      <button
+                        className="knowledge-directory-row knowledge-directory-row--folder"
+                        key={folder.path}
+                        onClick={() => {
+                          openDirectoryPath(folder.path.split("/"));
+                        }}
+                        type="button"
+                      >
+                        <span className="knowledge-directory-row__cell knowledge-directory-row__cell--name">
+                          <span aria-hidden="true" className="knowledge-directory-row__icon">📁</span>
+                          <span className="knowledge-directory-row__name">{folder.name}</span>
+                        </span>
+                        <span className="knowledge-directory-row__cell knowledge-directory-row__cell--type">Folder</span>
+                        <span className="knowledge-directory-row__cell knowledge-directory-row__cell--access">
+                          <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(folderScope)}`}>
+                            {getKnowledgeDirectoryScopeLabel(folderScope)}
+                          </span>
+                        </span>
+                        <span className="knowledge-directory-row__cell knowledge-directory-row__cell--details">
+                          {folder.totalFileCount} file{folder.totalFileCount === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    );
+                  })}
+
                   {directoryFiles.map((file) => (
                     <button
                       className={`knowledge-directory-row knowledge-directory-row--file${directorySelectedFileId === file.id ? " is-selected" : ""}`}
@@ -1229,37 +1308,40 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
                       }}
                       type="button"
                     >
-                      <div className="knowledge-directory-row__main">
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--name">
                         <span aria-hidden="true" className="knowledge-directory-row__icon">📄</span>
-                        <div>
-                          <div className="knowledge-directory-row__name">{file.displayName}</div>
-                          <div className="knowledge-directory-row__meta">
-                            {file.mimeType ?? file.sourceType} · {formatBytes(file.byteSize)} · uploaded {formatTimestamp(file.createdAt)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="knowledge-directory-row__badges">
+                        <span>
+                          <span className="knowledge-directory-row__name">{file.displayName}</span>
+                          <span className="knowledge-directory-row__meta">{file.sourcePath}</span>
+                        </span>
+                      </span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--type">{file.mimeType ?? file.sourceType}</span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--access">
                         <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(file.accessScope)}`}>
                           {getKnowledgeAccessScopeLabel(file.accessScope)}
                         </span>
+                      </span>
+                      <span className="knowledge-directory-row__cell knowledge-directory-row__cell--details">
                         <span className={`knowledge-status ${getFileStatusTone(file.ingestionStatus)}`}>
                           {file.ingestionStatus}
                         </span>
-                      </div>
+                        <span>{formatBytes(file.byteSize)}</span>
+                        <span>{formatTimestamp(file.createdAt)}</span>
+                      </span>
                     </button>
                   ))}
-                </div>
 
-                {directoryFolders.length === 0 && directoryFiles.length === 0 ? (
-                  <div className="knowledge-empty">This folder is empty for the current filters.</div>
-                ) : null}
+                  {directoryFolders.length === 0 && directoryFiles.length === 0 ? (
+                    <div className="knowledge-empty">This folder is empty for the current filters.</div>
+                  ) : null}
+                </div>
               </div>
             </div>
 
             <aside className="knowledge-directory-preview-pane">
               <div className="knowledge-directory-preview-pane__header">
                 <div>
-                  <p className="knowledge-panel__eyebrow">Hover Preview</p>
+                  <p className="knowledge-panel__eyebrow">Preview</p>
                   <h3 className="knowledge-subtitle">{directoryPreviewFile?.displayName ?? "Pick a file"}</h3>
                 </div>
                 {directoryPreviewFile ? (
