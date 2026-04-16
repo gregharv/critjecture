@@ -295,7 +295,7 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
 .chat-history-sidebar {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   gap: 12px;
   flex: 0 0 min(320px, 32vw);
   min-width: 260px;
@@ -357,6 +357,13 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 .chat-history-search:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--primary) 64%, white 36%);
   outline-offset: 1px;
+}
+
+.chat-history-status {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .chat-history-sidebar__list {
@@ -888,17 +895,13 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 }
 
 .chat-history-card {
-  display: block;
-  width: 100%;
+  display: grid;
+  gap: 10px;
   min-width: 0;
-  overflow: hidden;
   padding: 12px 14px;
   border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
   border-radius: 14px;
   background: color-mix(in oklab, var(--card) 88%, transparent 12%);
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
 }
 
 .chat-history-card.is-active {
@@ -908,7 +911,20 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
     color-mix(in oklab, var(--card) 90%, transparent 10%);
 }
 
-.chat-history-card:disabled {
+.chat-history-card__body {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-history-card__body:disabled {
   cursor: not-allowed;
   opacity: 0.75;
 }
@@ -923,6 +939,59 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-history-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-history-card__badge {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.chat-history-card__preview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-history-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-history-card__action {
+  padding: 6px 8px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 94%, transparent 6%);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.chat-history-card__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chat-history-card__action.is-danger {
+  color: color-mix(in oklab, #ef4444 70%, var(--foreground) 30%);
 }
 
 .chat-history-empty {

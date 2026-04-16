@@ -32,8 +32,10 @@ import {
 } from "@/lib/file-selection-messages";
 import type {
   ConversationMetadata,
+  DeleteConversationResponse,
   GetConversationResponse,
   ListConversationsResponse,
+  UpdateConversationResponse,
   UpsertConversationResponse,
 } from "@/lib/conversation-types";
 import type {
@@ -299,6 +301,14 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
   }
 
   return fallbackMessage;
+}
+
+async function copyToClipboard(value: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard) {
+    throw new Error("Clipboard access is unavailable in this browser.");
+  }
+
+  await navigator.clipboard.writeText(value);
 }
 
 function extractSandboxRunId(value: unknown) {
@@ -786,6 +796,16 @@ function buildConversationTitle(messages: AgentMessage[]) {
   return "Untitled conversation";
 }
 
+function sortConversationHistory(conversations: ConversationMetadata[]) {
+  return [...conversations].sort((left, right) => {
+    if (left.isPinned !== right.isPinned) {
+      return left.isPinned ? -1 : 1;
+    }
+
+    return right.lastModified.localeCompare(left.lastModified);
+  });
+}
+
 function upsertConversationMetadata(
   conversations: ConversationMetadata[],
   metadata: ConversationMetadata,
@@ -793,10 +813,44 @@ function upsertConversationMetadata(
   const next = conversations.filter((conversation) => conversation.id !== metadata.id);
   next.unshift(metadata);
 
-  return next.sort((left, right) => right.lastModified.localeCompare(left.lastModified));
+  return sortConversationHistory(next);
 }
 
-type ConversationHistoryGroupId = "today" | "yesterday" | "last7" | "older";
+function removeConversationMetadata(
+  conversations: ConversationMetadata[],
+  conversationId: string,
+) {
+  return sortConversationHistory(
+    conversations.filter((conversation) => conversation.id !== conversationId),
+  );
+}
+
+function updateConversationMetadata(
+  conversations: ConversationMetadata[],
+  metadata: ConversationMetadata,
+) {
+  return sortConversationHistory(
+    conversations.map((conversation) =>
+      conversation.id === metadata.id ? metadata : conversation,
+    ),
+  );
+}
+
+function matchesConversationHistoryQuery(
+  conversation: ConversationMetadata,
+  query: string,
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const searchableText = `${conversation.title}\n${conversation.preview}`.trim().toLowerCase();
+  return searchableText.includes(normalizedQuery);
+}
+
+type ConversationHistoryGroupId = "pinned" | "today" | "yesterday" | "last7" | "older";
 
 type ConversationHistoryGroup = {
   conversations: ConversationMetadata[];
@@ -806,6 +860,7 @@ type ConversationHistoryGroup = {
 
 function groupConversationHistory(conversations: ConversationMetadata[]) {
   const grouped: Record<ConversationHistoryGroupId, ConversationMetadata[]> = {
+    pinned: [],
     today: [],
     yesterday: [],
     last7: [],
@@ -814,7 +869,12 @@ function groupConversationHistory(conversations: ConversationMetadata[]) {
 
   const now = Date.now();
 
-  conversations.forEach((conversation) => {
+  sortConversationHistory(conversations).forEach((conversation) => {
+    if (conversation.isPinned) {
+      grouped.pinned.push(conversation);
+      return;
+    }
+
     const modifiedAt = new Date(conversation.lastModified).getTime();
 
     if (Number.isNaN(modifiedAt)) {
@@ -843,6 +903,7 @@ function groupConversationHistory(conversations: ConversationMetadata[]) {
   });
 
   const groups: ConversationHistoryGroup[] = [
+    { id: "pinned", label: "Pinned", conversations: grouped.pinned },
     { id: "today", label: "Today", conversations: grouped.today },
     { id: "yesterday", label: "Yesterday", conversations: grouped.yesterday },
     { id: "last7", label: "Last 7 days", conversations: grouped.last7 },
@@ -858,7 +919,11 @@ type ConversationHistoryListProps = {
   disabled: boolean;
   emptyMessage: string;
   loading: boolean;
+  onDelete: (conversation: ConversationMetadata) => void;
+  onPinToggle: (conversation: ConversationMetadata) => void;
+  onRename: (conversation: ConversationMetadata) => void;
   onSelect: (conversationId: string) => void;
+  onShareToggle: (conversation: ConversationMetadata) => void;
 };
 
 function ConversationHistoryList({
@@ -867,7 +932,11 @@ function ConversationHistoryList({
   disabled,
   emptyMessage,
   loading,
+  onDelete,
+  onPinToggle,
+  onRename,
   onSelect,
+  onShareToggle,
 }: ConversationHistoryListProps) {
   if (loading) {
     return <div className="chat-history-empty">Loading conversation history...</div>;
@@ -885,21 +954,76 @@ function ConversationHistoryList({
         <section className="chat-history-group" key={group.id}>
           <h3 className="chat-history-group__title">{group.label}</h3>
           <div className="chat-history-group__items">
-            {group.conversations.map((conversation) => (
-              <button
-                className={`chat-history-card ${
-                  conversation.id === activeConversationId ? "is-active" : ""
-                }`}
-                disabled={disabled}
-                key={conversation.id}
-                onClick={() => onSelect(conversation.id)}
-                type="button"
-              >
-                <span className="chat-history-card__title">
-                  {conversation.title || "Untitled conversation"}
-                </span>
-              </button>
-            ))}
+            {group.conversations.map((conversation) => {
+              const isActive = conversation.id === activeConversationId;
+
+              return (
+                <div
+                  className={`chat-history-card ${isActive ? "is-active" : ""}`}
+                  key={conversation.id}
+                >
+                  <button
+                    className="chat-history-card__body"
+                    disabled={disabled}
+                    onClick={() => onSelect(conversation.id)}
+                    type="button"
+                  >
+                    <span className="chat-history-card__title">
+                      {conversation.title || "Untitled conversation"}
+                    </span>
+                    <span className="chat-history-card__meta">
+                      {conversation.visibility === "organization" ? (
+                        <span className="chat-history-card__badge">Shared</span>
+                      ) : null}
+                      {!conversation.canManage ? (
+                        <span className="chat-history-card__badge">Read-only</span>
+                      ) : null}
+                    </span>
+                    {conversation.preview ? (
+                      <span className="chat-history-card__preview">{conversation.preview}</span>
+                    ) : null}
+                  </button>
+                  <div className="chat-history-card__actions">
+                    <button
+                      className="chat-history-card__action"
+                      disabled={disabled}
+                      onClick={() => onPinToggle(conversation)}
+                      type="button"
+                    >
+                      {conversation.isPinned ? "Unpin" : "Pin"}
+                    </button>
+                    {conversation.canManage ? (
+                      <>
+                        <button
+                          className="chat-history-card__action"
+                          disabled={disabled}
+                          onClick={() => onShareToggle(conversation)}
+                          type="button"
+                        >
+                          {conversation.visibility === "organization" ? "Unshare" : "Share"}
+                        </button>
+                        <button
+                          className="chat-history-card__action"
+                          disabled={disabled}
+                          onClick={() => onRename(conversation)}
+                          type="button"
+                        >
+                          Rename
+                        </button>
+                        <button
+                          className="chat-history-card__action is-danger"
+                          disabled={disabled}
+                          onClick={() => onDelete(conversation)}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       ))}
@@ -911,10 +1035,15 @@ type ChatHistorySidebarProps = {
   activeConversationId: string | null;
   conversations: ConversationMetadata[];
   loading: boolean;
+  onDelete: (conversation: ConversationMetadata) => void;
   onNewChat: () => void;
+  onPinToggle: (conversation: ConversationMetadata) => void;
   onQueryChange: (query: string) => void;
+  onRename: (conversation: ConversationMetadata) => void;
   onSelect: (conversationId: string) => void;
+  onShareToggle: (conversation: ConversationMetadata) => void;
   query: string;
+  statusMessage: string | null;
   streaming: boolean;
 };
 
@@ -922,10 +1051,15 @@ function ChatHistorySidebar({
   activeConversationId,
   conversations,
   loading,
+  onDelete,
   onNewChat,
+  onPinToggle,
   onQueryChange,
+  onRename,
   onSelect,
+  onShareToggle,
   query,
+  statusMessage,
   streaming,
 }: ChatHistorySidebarProps) {
   const emptyMessage = query.trim()
@@ -958,6 +1092,7 @@ function ChatHistorySidebar({
         type="search"
         value={query}
       />
+      {statusMessage ? <p className="chat-history-status">{statusMessage}</p> : null}
       <div className="chat-history-sidebar__list">
         <ConversationHistoryList
           activeConversationId={activeConversationId}
@@ -965,7 +1100,11 @@ function ChatHistorySidebar({
           disabled={streaming}
           emptyMessage={emptyMessage}
           loading={loading}
+          onDelete={onDelete}
+          onPinToggle={onPinToggle}
+          onRename={onRename}
           onSelect={onSelect}
+          onShareToggle={onShareToggle}
         />
       </div>
     </aside>
@@ -977,9 +1116,14 @@ type ChatHistoryDialogProps = {
   conversations: ConversationMetadata[];
   loading: boolean;
   onClose: () => void;
+  onDelete: (conversation: ConversationMetadata) => void;
+  onPinToggle: (conversation: ConversationMetadata) => void;
   onQueryChange: (query: string) => void;
+  onRename: (conversation: ConversationMetadata) => void;
   onSelect: (conversationId: string) => void;
+  onShareToggle: (conversation: ConversationMetadata) => void;
   query: string;
+  statusMessage: string | null;
   streaming: boolean;
 };
 
@@ -988,9 +1132,14 @@ function ChatHistoryDialog({
   conversations,
   loading,
   onClose,
+  onDelete,
+  onPinToggle,
   onQueryChange,
+  onRename,
   onSelect,
+  onShareToggle,
   query,
+  statusMessage,
   streaming,
 }: ChatHistoryDialogProps) {
   const emptyMessage = query.trim()
@@ -1025,6 +1174,7 @@ function ChatHistoryDialog({
           type="search"
           value={query}
         />
+        {statusMessage ? <p className="chat-history-status">{statusMessage}</p> : null}
         <div className="chat-history-dialog__list">
           <ConversationHistoryList
             activeConversationId={activeConversationId}
@@ -1032,7 +1182,11 @@ function ChatHistoryDialog({
             disabled={streaming}
             emptyMessage={emptyMessage}
             loading={loading}
+            onDelete={onDelete}
+            onPinToggle={onPinToggle}
+            onRename={onRename}
             onSelect={onSelect}
+            onShareToggle={onShareToggle}
           />
         </div>
       </div>
@@ -1107,6 +1261,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const browserSessionIdRef = useRef<string>("");
   const conversationCreatedAtRef = useRef("");
   const conversationIdRef = useRef<string | null>(null);
+  const conversationCanManageRef = useRef(true);
   const conversationPersistedRef = useRef(false);
   const fileMentionFilesRef = useRef<MentionableKnowledgeFile[] | null>(null);
   const fileMentionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1138,6 +1293,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyStatusMessage, setHistoryStatusMessage] = useState<string | null>(null);
   const [historyConversations, setHistoryConversations] = useState<ConversationMetadata[]>(
     [],
   );
@@ -1215,6 +1371,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         if (!cancelled) {
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
+          conversationCanManageRef.current = true;
           conversationPersistedRef.current = false;
           lastCompletedTurnIdRef.current = null;
           setWorkflowBuilderOpen(false);
@@ -1241,7 +1398,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           throw new Error(getErrorMessage(data, "Failed to load conversation."));
         }
 
-        if (!("conversation" in data)) {
+        if (!("conversation" in data) || !("metadata" in data)) {
           throw new Error("Conversation payload was missing from the response.");
         }
 
@@ -1257,6 +1414,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
         conversationCreatedAtRef.current = bootstrap.createdAt;
         conversationIdRef.current = bootstrap.id;
+        conversationCanManageRef.current = data.metadata.canManage;
         conversationPersistedRef.current = true;
         lastCompletedTurnIdRef.current = null;
         setWorkflowBuilderOpen(false);
@@ -1276,6 +1434,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           window.history.replaceState({}, "", nextUrl.toString());
           conversationCreatedAtRef.current = draft.createdAt;
           conversationIdRef.current = draft.id;
+          conversationCanManageRef.current = true;
           conversationPersistedRef.current = false;
           lastCompletedTurnIdRef.current = null;
           setWorkflowBuilderOpen(false);
@@ -1595,7 +1754,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
           return {
             id: conversationIdRef.current,
-            title: buildConversationTitle(messages),
+            title: activeConversationTitle.trim() || buildConversationTitle(messages),
             model: agent.state.model,
             thinkingLevel: agent.state.thinkingLevel,
             messages,
@@ -1605,6 +1764,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         };
 
         const saveConversationSnapshot = async (signal?: AbortSignal) => {
+          if (!conversationCanManageRef.current) {
+            const fork = createDraftConversation();
+            conversationIdRef.current = fork.id;
+            conversationCreatedAtRef.current = fork.createdAt;
+            conversationCanManageRef.current = true;
+            conversationPersistedRef.current = false;
+          }
+
           const sessionData = buildSessionData();
 
           if (!sessionData) {
@@ -1619,20 +1786,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             conversationPersistedRef.current = true;
             setActiveConversationTitle(result.metadata.title);
             setHistoryConversations((current) => {
-              const normalizedQuery = historyQueryRef.current.trim().toLowerCase();
-
-              if (!normalizedQuery) {
-                return upsertConversationMetadata(current, result.metadata);
-              }
-
-              const searchableText = `${result.metadata.title}\n${result.metadata.preview}`
-                .trim()
-                .toLowerCase();
-
-              if (!searchableText.includes(normalizedQuery)) {
-                return current.filter(
-                  (conversation) => conversation.id !== result.metadata.id,
-                );
+              if (!matchesConversationHistoryQuery(result.metadata, historyQueryRef.current)) {
+                return removeConversationMetadata(current, result.metadata.id);
               }
 
               return upsertConversationMetadata(current, result.metadata);
@@ -3028,10 +3183,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
       if (requestId === historyRequestIdRef.current) {
         setHistoryConversations(data.conversations);
+        setHistoryStatusMessage(null);
       }
     } catch (caughtError) {
       if (requestId === historyRequestIdRef.current) {
         console.error("Failed to load conversation history.", caughtError);
+        setHistoryStatusMessage("Failed to load conversation history.");
       }
     } finally {
       if (requestId === historyRequestIdRef.current) {
@@ -3049,6 +3206,169 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       window.clearTimeout(timeoutId);
     };
   }, [historyQuery, loadConversationHistory]);
+
+  function applyConversationMetadataResult(metadata: ConversationMetadata) {
+    setHistoryConversations((current) => {
+      if (!matchesConversationHistoryQuery(metadata, historyQueryRef.current)) {
+        return removeConversationMetadata(current, metadata.id);
+      }
+
+      const exists = current.some((conversation) => conversation.id === metadata.id);
+      return exists
+        ? updateConversationMetadata(current, metadata)
+        : upsertConversationMetadata(current, metadata);
+    });
+  }
+
+  async function patchConversation(conversationId: string, body: Record<string, unknown>) {
+    const response = await fetch(`/api/conversations/${conversationId}`, {
+      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+    });
+    const data = (await response.json()) as UpdateConversationResponse | { error: string };
+
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, "Failed to update conversation."));
+    }
+
+    return data as UpdateConversationResponse;
+  }
+
+  async function destroyConversation(conversationId: string) {
+    const response = await fetch(`/api/conversations/${conversationId}`, {
+      method: "DELETE",
+    });
+    const data = (await response.json()) as DeleteConversationResponse | { error: string };
+
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, "Failed to delete conversation."));
+    }
+
+    return data as DeleteConversationResponse;
+  }
+
+  async function handleTogglePinConversation(conversation: ConversationMetadata) {
+    if (isStreaming) {
+      return;
+    }
+
+    setHistoryStatusMessage(null);
+
+    try {
+      const result = await patchConversation(conversation.id, {
+        pinned: !conversation.isPinned,
+      });
+      applyConversationMetadataResult(result.metadata);
+      setHistoryStatusMessage(
+        result.metadata.isPinned ? "Conversation pinned." : "Conversation unpinned.",
+      );
+    } catch (caughtError) {
+      setHistoryStatusMessage(
+        caughtError instanceof Error ? caughtError.message : "Failed to update pin.",
+      );
+    }
+  }
+
+  async function handleRenameConversation(conversation: ConversationMetadata) {
+    if (isStreaming || !conversation.canManage) {
+      return;
+    }
+
+    const nextTitle = window.prompt("Rename conversation:", conversation.title)?.trim();
+
+    if (!nextTitle || nextTitle === conversation.title) {
+      return;
+    }
+
+    setHistoryStatusMessage(null);
+
+    try {
+      const result = await patchConversation(conversation.id, {
+        title: nextTitle,
+      });
+      applyConversationMetadataResult(result.metadata);
+
+      if (conversation.id === conversationIdRef.current) {
+        setActiveConversationTitle(result.metadata.title);
+      }
+
+      setHistoryStatusMessage("Conversation renamed.");
+    } catch (caughtError) {
+      setHistoryStatusMessage(
+        caughtError instanceof Error ? caughtError.message : "Failed to rename conversation.",
+      );
+    }
+  }
+
+  async function handleToggleShareConversation(conversation: ConversationMetadata) {
+    if (isStreaming || !conversation.canManage) {
+      return;
+    }
+
+    const nextVisibility =
+      conversation.visibility === "organization" ? "private" : "organization";
+
+    setHistoryStatusMessage(null);
+
+    try {
+      const result = await patchConversation(conversation.id, {
+        visibility: nextVisibility,
+      });
+      applyConversationMetadataResult(result.metadata);
+
+      if (nextVisibility === "organization") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("conversation", conversation.id);
+
+        try {
+          await copyToClipboard(url.toString());
+          setHistoryStatusMessage("Conversation shared. Link copied to clipboard.");
+        } catch {
+          setHistoryStatusMessage("Conversation shared.");
+        }
+      } else {
+        setHistoryStatusMessage("Conversation is now private.");
+      }
+    } catch (caughtError) {
+      setHistoryStatusMessage(
+        caughtError instanceof Error ? caughtError.message : "Failed to update sharing.",
+      );
+    }
+  }
+
+  async function handleDeleteConversation(conversation: ConversationMetadata) {
+    if (isStreaming || !conversation.canManage) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete \"${conversation.title || "Untitled conversation"}\"? This cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setHistoryStatusMessage(null);
+
+    try {
+      const result = await destroyConversation(conversation.id);
+      setHistoryConversations((current) => removeConversationMetadata(current, result.conversationId));
+
+      if (result.conversationId === conversationIdRef.current) {
+        handleNewChat();
+      }
+
+      setHistoryStatusMessage("Conversation deleted.");
+    } catch (caughtError) {
+      setHistoryStatusMessage(
+        caughtError instanceof Error ? caughtError.message : "Failed to delete conversation.",
+      );
+    }
+  }
 
   const canSaveAsWorkflow = role === "admin" || role === "owner";
 
@@ -3176,6 +3496,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       return;
     }
 
+    setHistoryStatusMessage(null);
     setHistoryOpen(true);
     void loadConversationHistory(historyQuery);
   }
@@ -3200,12 +3521,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         throw new Error(getErrorMessage(data, "Failed to load conversation."));
       }
 
-      if (!("conversation" in data)) {
+      if (!("conversation" in data) || !("metadata" in data)) {
         throw new Error("Conversation payload was missing from the response.");
       }
 
       conversationIdRef.current = data.conversation.id;
       conversationCreatedAtRef.current = data.conversation.createdAt;
+      conversationCanManageRef.current = data.metadata.canManage;
       conversationPersistedRef.current = true;
       lastCompletedTurnIdRef.current = null;
       setWorkflowBuilderOpen(false);
@@ -3238,6 +3560,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     window.history.replaceState({}, "", url.toString());
     conversationIdRef.current = draft.id;
     conversationCreatedAtRef.current = draft.createdAt;
+    conversationCanManageRef.current = true;
     conversationPersistedRef.current = false;
     lastCompletedTurnIdRef.current = null;
     setWorkflowBuilderOpen(false);
@@ -3264,12 +3587,25 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         activeConversationId={conversationIdRef.current}
         conversations={historyConversations}
         loading={historyLoading}
+        onDelete={(conversation) => {
+          void handleDeleteConversation(conversation);
+        }}
         onNewChat={handleNewChat}
+        onPinToggle={(conversation) => {
+          void handleTogglePinConversation(conversation);
+        }}
         onQueryChange={setHistoryQuery}
+        onRename={(conversation) => {
+          void handleRenameConversation(conversation);
+        }}
         onSelect={(conversationId) => {
           void handleSelectConversation(conversationId);
         }}
+        onShareToggle={(conversation) => {
+          void handleToggleShareConversation(conversation);
+        }}
         query={historyQuery}
+        statusMessage={historyStatusMessage}
         streaming={isStreaming}
       />
       <div className="chat-main">
@@ -3454,11 +3790,24 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           conversations={historyConversations}
           loading={historyLoading}
           onClose={() => setHistoryOpen(false)}
+          onDelete={(conversation) => {
+            void handleDeleteConversation(conversation);
+          }}
+          onPinToggle={(conversation) => {
+            void handleTogglePinConversation(conversation);
+          }}
           onQueryChange={setHistoryQuery}
+          onRename={(conversation) => {
+            void handleRenameConversation(conversation);
+          }}
           onSelect={(conversationId) => {
             void handleSelectConversation(conversationId);
           }}
+          onShareToggle={(conversation) => {
+            void handleToggleShareConversation(conversation);
+          }}
           query={historyQuery}
+          statusMessage={historyStatusMessage}
           streaming={isStreaming}
         />
       ) : null}

@@ -1,15 +1,17 @@
 import "server-only";
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
 import type { AgentMessage, SessionData, SessionMetadata } from "@mariozechner/pi-web-ui";
 
 import { getAppDatabase } from "@/lib/app-db";
+import { conversationPins, conversations } from "@/lib/app-schema";
 import { DEFAULT_CHAT_THINKING_LEVEL } from "@/lib/chat-models";
-import { conversations } from "@/lib/app-schema";
 import type {
   ConversationMetadata,
   ConversationSessionData,
+  ConversationVisibility,
 } from "@/lib/conversation-types";
 import {
   fromLegacyStoredUserRole,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/roles";
 
 type ConversationUsage = SessionMetadata["usage"];
+type ConversationRow = typeof conversations.$inferSelect;
 
 const EMPTY_USAGE: ConversationUsage = {
   input: 0,
@@ -33,6 +36,16 @@ const EMPTY_USAGE: ConversationUsage = {
     total: 0,
   },
 };
+
+export class ConversationError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ConversationError";
+    this.status = status;
+  }
+}
 
 function getRoleRank(role: UserRole) {
   return role === "owner" ? 1 : 0;
@@ -218,6 +231,110 @@ function parseSessionDataJson(value: string) {
   return null;
 }
 
+function normalizeConversationVisibility(value: unknown): ConversationVisibility {
+  return value === "organization" ? "organization" : "private";
+}
+
+function normalizeManualTitle(value: string | null | undefined) {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? truncateText(normalized, 120) : null;
+}
+
+function buildResolvedConversationTitle(
+  sessionData: ConversationSessionData,
+  manualTitle?: string | null,
+) {
+  const nextManualTitle = normalizeManualTitle(manualTitle);
+
+  if (nextManualTitle) {
+    return nextManualTitle;
+  }
+
+  const sessionTitle = sessionData.title.trim();
+  return sessionTitle || buildConversationTitle(sessionData.messages);
+}
+
+function buildConversationMetadataFromRow(
+  row: ConversationRow,
+  options: {
+    canManage: boolean;
+    isPinned: boolean;
+  },
+): ConversationMetadata {
+  const sessionData = parseSessionDataJson(row.sessionDataJson);
+  const normalizedSessionData = sessionData
+    ? normalizeConversationSessionData(sessionData, row.id)
+    : null;
+
+  const manualTitle = normalizeManualTitle(row.manualTitle);
+  const title = manualTitle || row.title || buildConversationTitle(normalizedSessionData?.messages ?? []);
+
+  return {
+    id: row.id,
+    title,
+    createdAt: new Date(row.createdAt).toISOString(),
+    lastModified: new Date(row.updatedAt).toISOString(),
+    messageCount: row.messageCount,
+    usage: parseUsageJson(row.usageJson),
+    thinkingLevel: normalizedSessionData?.thinkingLevel ?? DEFAULT_CHAT_THINKING_LEVEL,
+    preview: row.previewText,
+    canManage: options.canManage,
+    isPinned: options.isPinned,
+    visibility: normalizeConversationVisibility(row.visibility),
+  } satisfies ConversationMetadata;
+}
+
+async function listPinnedConversationIds(input: {
+  organizationId: string;
+  userId: string;
+  conversationIds?: string[];
+}) {
+  const db = await getAppDatabase();
+  const whereClause =
+    input.conversationIds && input.conversationIds.length > 0
+      ? and(
+          eq(conversationPins.organizationId, input.organizationId),
+          eq(conversationPins.userId, input.userId),
+          inArray(conversationPins.conversationId, input.conversationIds),
+        )
+      : and(
+          eq(conversationPins.organizationId, input.organizationId),
+          eq(conversationPins.userId, input.userId),
+        );
+
+  const pinRows = await db
+    .select({ conversationId: conversationPins.conversationId })
+    .from(conversationPins)
+    .where(whereClause);
+
+  return new Set(pinRows.map((row) => row.conversationId));
+}
+
+async function getAccessibleConversationRow(input: {
+  conversationId: string;
+  organizationId: string;
+  userId: string;
+  userRole: UserRole;
+}) {
+  const db = await getAppDatabase();
+  const row = await db.query.conversations.findFirst({
+    where: and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.organizationId, input.organizationId),
+      or(
+        eq(conversations.userId, input.userId),
+        eq(conversations.visibility, "organization"),
+      ),
+    ),
+  });
+
+  if (!row || !canAccessConversation(input.userRole, row.userRole)) {
+    return null;
+  }
+
+  return row;
+}
+
 export function normalizeConversationSessionData(
   input: SessionData,
   conversationId: string,
@@ -244,8 +361,14 @@ export function normalizeConversationSessionData(
 
 export function buildConversationMetadata(
   sessionData: ConversationSessionData,
+  options?: {
+    canManage?: boolean;
+    isPinned?: boolean;
+    manualTitle?: string | null;
+    visibility?: ConversationVisibility;
+  },
 ): ConversationMetadata {
-  const title = sessionData.title.trim() || buildConversationTitle(sessionData.messages);
+  const title = buildResolvedConversationTitle(sessionData, options?.manualTitle);
 
   return {
     id: sessionData.id,
@@ -256,6 +379,9 @@ export function buildConversationMetadata(
     usage: buildUsage(sessionData.messages),
     thinkingLevel: sessionData.thinkingLevel,
     preview: buildPreviewText(sessionData.messages),
+    canManage: options?.canManage ?? true,
+    isPinned: options?.isPinned ?? false,
+    visibility: options?.visibility ?? "private",
   };
 }
 
@@ -268,11 +394,36 @@ export async function upsertConversation(input: {
 }) {
   const db = await getAppDatabase();
   const now = Date.now();
+  const nowIso = new Date(now).toISOString();
   const normalizedSessionData = normalizeConversationSessionData(
     input.sessionData,
     input.conversationId,
   );
-  const metadata = buildConversationMetadata(normalizedSessionData);
+  const existingRow = await db.query.conversations.findFirst({
+    where: and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.organizationId, input.organizationId),
+    ),
+  });
+
+  if (existingRow && existingRow.userId !== input.userId) {
+    throw new ConversationError(403, "Cannot overwrite a shared conversation you do not own.");
+  }
+
+  const manualTitle = normalizeManualTitle(existingRow?.manualTitle);
+  const createdAt = existingRow ? new Date(existingRow.createdAt).toISOString() : normalizedSessionData.createdAt;
+  const visibility = normalizeConversationVisibility(existingRow?.visibility);
+  const persistedSessionData = {
+    ...normalizedSessionData,
+    createdAt,
+    lastModified: nowIso,
+  } satisfies ConversationSessionData;
+  const metadata = buildConversationMetadata(persistedSessionData, {
+    canManage: true,
+    isPinned: false,
+    manualTitle,
+    visibility,
+  });
 
   await db
     .insert(conversations)
@@ -281,16 +432,17 @@ export async function upsertConversation(input: {
       organizationId: input.organizationId,
       userId: input.userId,
       userRole: toLegacyStoredUserRole(input.userRole),
+      visibility,
       title: metadata.title,
+      manualTitle,
       previewText: metadata.preview,
       messageCount: metadata.messageCount,
       usageJson: JSON.stringify(metadata.usage),
       sessionDataJson: JSON.stringify({
-        ...normalizedSessionData,
+        ...persistedSessionData,
         title: metadata.title,
-        lastModified: new Date(now).toISOString(),
       }),
-      createdAt: now,
+      createdAt: existingRow?.createdAt ?? now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -299,25 +451,32 @@ export async function upsertConversation(input: {
         organizationId: input.organizationId,
         userId: input.userId,
         userRole: toLegacyStoredUserRole(input.userRole),
+        visibility,
         title: metadata.title,
+        manualTitle,
         previewText: metadata.preview,
         messageCount: metadata.messageCount,
         usageJson: JSON.stringify(metadata.usage),
         sessionDataJson: JSON.stringify({
-          ...normalizedSessionData,
+          ...persistedSessionData,
           title: metadata.title,
-          lastModified: new Date(now).toISOString(),
         }),
         updatedAt: now,
       },
     });
 
+  const pinIds = await listPinnedConversationIds({
+    conversationIds: [input.conversationId],
+    organizationId: input.organizationId,
+    userId: input.userId,
+  });
+
   return {
     conversationId: input.conversationId,
     metadata: {
       ...metadata,
-      title: metadata.title,
-      lastModified: new Date(now).toISOString(),
+      isPinned: pinIds.has(input.conversationId),
+      lastModified: nowIso,
     },
   };
 }
@@ -345,31 +504,28 @@ export async function listUserConversations(input: {
     .where(
       and(
         eq(conversations.organizationId, input.organizationId),
-        eq(conversations.userId, input.userId),
+        or(
+          eq(conversations.userId, input.userId),
+          eq(conversations.visibility, "organization"),
+        ),
         searchFilter,
       ),
     )
     .orderBy(desc(conversations.updatedAt));
 
-  return rows
-    .filter((row) => canAccessConversation(input.userRole, row.userRole))
-    .map<ConversationMetadata>((row) => {
-      const sessionData = parseSessionDataJson(row.sessionDataJson);
-      const normalizedSessionData = sessionData
-        ? normalizeConversationSessionData(sessionData, row.id)
-        : null;
+  const accessibleRows = rows.filter((row) => canAccessConversation(input.userRole, row.userRole));
+  const pinnedConversationIds = await listPinnedConversationIds({
+    conversationIds: accessibleRows.map((row) => row.id),
+    organizationId: input.organizationId,
+    userId: input.userId,
+  });
 
-      return {
-        id: row.id,
-        title: row.title,
-        createdAt: new Date(row.createdAt).toISOString(),
-        lastModified: new Date(row.updatedAt).toISOString(),
-        messageCount: row.messageCount,
-        usage: parseUsageJson(row.usageJson),
-        thinkingLevel: normalizedSessionData?.thinkingLevel ?? DEFAULT_CHAT_THINKING_LEVEL,
-        preview: row.previewText,
-      };
-    });
+  return accessibleRows.map<ConversationMetadata>((row) =>
+    buildConversationMetadataFromRow(row, {
+      canManage: row.userId === input.userId,
+      isPinned: pinnedConversationIds.has(row.id),
+    }),
+  );
 }
 
 export async function getUserConversation(input: {
@@ -378,16 +534,9 @@ export async function getUserConversation(input: {
   userId: string;
   userRole: UserRole;
 }) {
-  const db = await getAppDatabase();
-  const row = await db.query.conversations.findFirst({
-    where: and(
-      eq(conversations.id, input.conversationId),
-      eq(conversations.organizationId, input.organizationId),
-      eq(conversations.userId, input.userId),
-    ),
-  });
+  const row = await getAccessibleConversationRow(input);
 
-  if (!row || !canAccessConversation(input.userRole, row.userRole)) {
+  if (!row) {
     return null;
   }
 
@@ -397,13 +546,181 @@ export async function getUserConversation(input: {
     return null;
   }
 
+  const pinnedConversationIds = await listPinnedConversationIds({
+    conversationIds: [row.id],
+    organizationId: input.organizationId,
+    userId: input.userId,
+  });
+  const metadata = buildConversationMetadataFromRow(row, {
+    canManage: row.userId === input.userId,
+    isPinned: pinnedConversationIds.has(row.id),
+  });
   const normalizedSessionData = normalizeConversationSessionData(sessionData, row.id);
 
   return {
-    ...normalizedSessionData,
-    id: row.id,
-    title: row.title,
-    createdAt: new Date(row.createdAt).toISOString(),
-    lastModified: new Date(row.updatedAt).toISOString(),
-  } satisfies ConversationSessionData;
+    conversation: {
+      ...normalizedSessionData,
+      id: row.id,
+      title: metadata.title,
+      createdAt: new Date(row.createdAt).toISOString(),
+      lastModified: new Date(row.updatedAt).toISOString(),
+    } satisfies ConversationSessionData,
+    metadata,
+  };
+}
+
+export async function updateConversation(input: {
+  conversationId: string;
+  organizationId: string;
+  patch: {
+    pinned?: boolean;
+    title?: string;
+    visibility?: ConversationVisibility;
+  };
+  userId: string;
+  userRole: UserRole;
+}) {
+  const db = await getAppDatabase();
+  const row = await getAccessibleConversationRow({
+    conversationId: input.conversationId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    userRole: input.userRole,
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  if (
+    (typeof input.patch.title === "string" || typeof input.patch.visibility !== "undefined") &&
+    row.userId !== input.userId
+  ) {
+    throw new ConversationError(403, "Only the conversation owner can rename or share it.");
+  }
+
+  if (typeof input.patch.pinned === "boolean") {
+    const existingPin = await db.query.conversationPins.findFirst({
+      where: and(
+        eq(conversationPins.conversationId, row.id),
+        eq(conversationPins.organizationId, input.organizationId),
+        eq(conversationPins.userId, input.userId),
+      ),
+    });
+
+    if (input.patch.pinned) {
+      const now = Date.now();
+
+      if (existingPin) {
+        await db
+          .update(conversationPins)
+          .set({ updatedAt: now })
+          .where(eq(conversationPins.id, existingPin.id));
+      } else {
+        await db.insert(conversationPins).values({
+          id: randomUUID(),
+          conversationId: row.id,
+          organizationId: input.organizationId,
+          userId: input.userId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (existingPin) {
+      await db.delete(conversationPins).where(eq(conversationPins.id, existingPin.id));
+    }
+  }
+
+  if (typeof input.patch.title === "string" || typeof input.patch.visibility !== "undefined") {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const sessionData = parseSessionDataJson(row.sessionDataJson);
+
+    if (!sessionData) {
+      throw new ConversationError(500, "Conversation data is corrupted and could not be updated.");
+    }
+
+    const normalizedSessionData = normalizeConversationSessionData(sessionData, row.id);
+    const manualTitle =
+      typeof input.patch.title === "string"
+        ? normalizeManualTitle(input.patch.title)
+        : normalizeManualTitle(row.manualTitle);
+    const visibility =
+      typeof input.patch.visibility !== "undefined"
+        ? normalizeConversationVisibility(input.patch.visibility)
+        : normalizeConversationVisibility(row.visibility);
+    const persistedSessionData = {
+      ...normalizedSessionData,
+      title: buildResolvedConversationTitle(normalizedSessionData, manualTitle),
+      lastModified: nowIso,
+    } satisfies ConversationSessionData;
+    const metadata = buildConversationMetadata(persistedSessionData, {
+      canManage: true,
+      isPinned: false,
+      manualTitle,
+      visibility,
+    });
+
+    await db
+      .update(conversations)
+      .set({
+        visibility,
+        title: metadata.title,
+        manualTitle,
+        previewText: metadata.preview,
+        messageCount: metadata.messageCount,
+        usageJson: JSON.stringify(metadata.usage),
+        sessionDataJson: JSON.stringify(persistedSessionData),
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, row.id));
+  }
+
+  const refreshedRow = await getAccessibleConversationRow({
+    conversationId: input.conversationId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    userRole: input.userRole,
+  });
+
+  if (!refreshedRow) {
+    throw new ConversationError(404, "Conversation not found.");
+  }
+
+  const pinnedConversationIds = await listPinnedConversationIds({
+    conversationIds: [refreshedRow.id],
+    organizationId: input.organizationId,
+    userId: input.userId,
+  });
+
+  return {
+    metadata: buildConversationMetadataFromRow(refreshedRow, {
+      canManage: refreshedRow.userId === input.userId,
+      isPinned: pinnedConversationIds.has(refreshedRow.id),
+    }),
+  };
+}
+
+export async function deleteConversation(input: {
+  conversationId: string;
+  organizationId: string;
+  userId: string;
+  userRole: UserRole;
+}) {
+  const db = await getAppDatabase();
+  const row = await getAccessibleConversationRow(input);
+
+  if (!row) {
+    return null;
+  }
+
+  if (row.userId !== input.userId) {
+    throw new ConversationError(403, "Only the conversation owner can delete it.");
+  }
+
+  await db.delete(conversations).where(eq(conversations.id, row.id));
+
+  return {
+    conversationId: row.id,
+  };
 }

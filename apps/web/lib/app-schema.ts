@@ -166,7 +166,11 @@ export const conversations = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     userRole: text("user_role", { enum: ["intern", "owner"] }).notNull(),
+    visibility: text("visibility", { enum: ["private", "organization"] })
+      .notNull()
+      .default("private"),
     title: text("title").notNull(),
+    manualTitle: text("manual_title"),
     previewText: text("preview_text").notNull(),
     messageCount: integer("message_count").notNull(),
     usageJson: text("usage_json").notNull(),
@@ -179,12 +183,51 @@ export const conversations = sqliteTable(
       "conversations_user_role_check",
       sql`${table.userRole} in ('intern', 'owner')`,
     ),
+    check(
+      "conversations_visibility_check",
+      sql`${table.visibility} in ('private', 'organization')`,
+    ),
     index("conversations_organization_id_updated_at_idx").on(
       table.organizationId,
       table.updatedAt,
     ),
+    index("conversations_org_visibility_updated_at_idx").on(
+      table.organizationId,
+      table.visibility,
+      table.updatedAt,
+    ),
     index("conversations_user_id_updated_at_idx").on(table.userId, table.updatedAt),
     index("conversations_user_role_idx").on(table.userRole),
+  ],
+);
+
+export const conversationPins = sqliteTable(
+  "conversation_pins",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("conversation_pins_conversation_user_idx").on(
+      table.conversationId,
+      table.userId,
+    ),
+    index("conversation_pins_org_user_updated_at_idx").on(
+      table.organizationId,
+      table.userId,
+      table.updatedAt,
+    ),
+    index("conversation_pins_conversation_id_idx").on(table.conversationId),
   ],
 );
 
