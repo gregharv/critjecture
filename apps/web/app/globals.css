@@ -202,7 +202,7 @@ a {
   gap: 10px;
   width: min(360px, calc(100vw - 48px));
   max-width: calc(100vw - 48px);
-  padding: 12px;
+  padding: 6px;
   border: 1px solid color-mix(in oklab, var(--border) 64%, transparent 36%);
   border-radius: 12px;
   background: color-mix(in oklab, var(--card) 96%, transparent 4%);
@@ -241,25 +241,26 @@ a {
 
 .shell-nav__link {
   display: block;
-  padding: 9px 10px;
+  padding: 7px 9px;
   border-radius: 8px;
   color: var(--muted-foreground);
   font-size: 0.92rem;
   font-weight: 600;
   text-decoration: none;
   transition:
-    background-color 140ms ease,
-    color 140ms ease;
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
-.shell-nav__link:hover {
-  color: var(--shell-title-ink);
-  background: color-mix(in oklab, var(--card) 80%, transparent 20%);
+.shell-nav__link:hover,
+.shell-nav__link:focus-visible {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
 }
 
 .shell-nav__link.is-active {
   color: var(--shell-title-ink);
-  background: color-mix(in oklab, var(--primary) 14%, transparent 86%);
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
 }
 
 .shell-body {
@@ -1623,8 +1624,8 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 }
 
 .shell-theme__button {
-  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent 28%);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--foreground);
   cursor: pointer;
@@ -1632,16 +1633,20 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1;
-  padding: 7px 11px;
+  padding: 7px 9px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
-.shell-theme__button:hover {
-  background: color-mix(in oklab, var(--card) 82%, transparent 18%);
+.shell-theme__button:hover,
+.shell-theme__button:focus-visible {
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
+  color: var(--foreground);
 }
 
 .shell-theme__button.is-active {
-  border-color: color-mix(in oklab, var(--primary) 58%, var(--border) 42%);
-  background: color-mix(in oklab, var(--primary) 16%, transparent 84%);
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
 }
 
 .shell-theme__button:disabled {
@@ -1678,12 +1683,17 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
   font: inherit;
   font-size: 0.9rem;
   font-weight: 600;
-  padding: 9px 10px;
+  padding: 7px 9px;
   text-align: left;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
-.shell-signout:hover {
-  background: color-mix(in oklab, var(--card) 80%, transparent 20%);
+.shell-signout:hover,
+.shell-signout:focus-visible {
+  background: color-mix(in oklab, var(--primary) 18%, var(--card) 82%);
+  color: var(--foreground);
 }
 
 .shell-signout:focus-visible {
