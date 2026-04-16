@@ -34,6 +34,18 @@ type KnowledgePageClientProps = {
   role: UserRole;
 };
 
+type KnowledgeDirectoryScope = KnowledgeAccessScope | "mixed" | "empty";
+
+type KnowledgeDirectoryNode = {
+  adminFileCount: number;
+  files: KnowledgeFileRecord[];
+  folders: Map<string, KnowledgeDirectoryNode>;
+  name: string;
+  path: string;
+  publicFileCount: number;
+  totalFileCount: number;
+};
+
 type KnowledgePageState = {
   activeJobDetail: GetKnowledgeImportJobResponse | null;
   activeJobId: string | null;
@@ -43,7 +55,7 @@ type KnowledgePageState = {
   files: KnowledgeFileRecord[];
   jobs: KnowledgeImportJobRecord[];
   loading: boolean;
-  previewLoading: boolean;
+  previewRequestByFileId: Record<string, boolean>;
   submitting: boolean;
 };
 
@@ -64,6 +76,11 @@ type SortDirection = "asc" | "desc";
 
 type UploadLikeFile = File & {
   webkitRelativePath?: string;
+};
+
+type KnowledgeBreadcrumb = {
+  label: string;
+  path: string[];
 };
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -99,6 +116,133 @@ function formatBytes(bytes: number | null) {
   }
 
   return `${(kilobytes / 1024).toFixed(1)} MB`;
+}
+
+function createKnowledgeDirectoryNode(name: string, path: string): KnowledgeDirectoryNode {
+  return {
+    adminFileCount: 0,
+    files: [],
+    folders: new Map<string, KnowledgeDirectoryNode>(),
+    name,
+    path,
+    publicFileCount: 0,
+    totalFileCount: 0,
+  };
+}
+
+function getKnowledgePathSegments(sourcePath: string) {
+  return sourcePath
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function incrementDirectoryScopeCount(node: KnowledgeDirectoryNode, scope: KnowledgeAccessScope) {
+  node.totalFileCount += 1;
+
+  if (scope === "admin") {
+    node.adminFileCount += 1;
+    return;
+  }
+
+  node.publicFileCount += 1;
+}
+
+function buildKnowledgeDirectoryTree(files: KnowledgeFileRecord[]) {
+  const root = createKnowledgeDirectoryNode("All files", "");
+
+  for (const file of files) {
+    const segments = getKnowledgePathSegments(file.sourcePath);
+    const folderSegments = segments.length > 1 ? segments.slice(0, -1) : [];
+    let currentNode = root;
+
+    incrementDirectoryScopeCount(currentNode, file.accessScope);
+
+    for (const folderSegment of folderSegments) {
+      const nextPath = currentNode.path ? `${currentNode.path}/${folderSegment}` : folderSegment;
+      let nextNode = currentNode.folders.get(folderSegment);
+
+      if (!nextNode) {
+        nextNode = createKnowledgeDirectoryNode(folderSegment, nextPath);
+        currentNode.folders.set(folderSegment, nextNode);
+      }
+
+      incrementDirectoryScopeCount(nextNode, file.accessScope);
+      currentNode = nextNode;
+    }
+
+    currentNode.files.push(file);
+  }
+
+  return root;
+}
+
+function getKnowledgeDirectoryNode(root: KnowledgeDirectoryNode, path: string[]) {
+  let currentNode: KnowledgeDirectoryNode | null = root;
+
+  for (const segment of path) {
+    currentNode = currentNode.folders.get(segment) ?? null;
+
+    if (!currentNode) {
+      return null;
+    }
+  }
+
+  return currentNode;
+}
+
+function getKnowledgeDirectoryScope(node: Pick<KnowledgeDirectoryNode, "publicFileCount" | "adminFileCount" | "totalFileCount">): KnowledgeDirectoryScope {
+  if (node.totalFileCount === 0) {
+    return "empty";
+  }
+
+  if (node.publicFileCount > 0 && node.adminFileCount > 0) {
+    return "mixed";
+  }
+
+  return node.adminFileCount > 0 ? "admin" : "public";
+}
+
+function getKnowledgeDirectoryScopeLabel(scope: KnowledgeDirectoryScope) {
+  if (scope === "mixed") {
+    return "Mixed access";
+  }
+
+  if (scope === "admin") {
+    return "Admin only";
+  }
+
+  if (scope === "public") {
+    return "Public";
+  }
+
+  return "No files";
+}
+
+function getKnowledgeScopeTone(scope: KnowledgeDirectoryScope) {
+  if (scope === "mixed") {
+    return "mixed";
+  }
+
+  if (scope === "admin") {
+    return "admin";
+  }
+
+  if (scope === "public") {
+    return "public";
+  }
+
+  return "empty";
+}
+
+function getKnowledgeAccessScopeLabel(scope: KnowledgeAccessScope) {
+  return scope === "admin" ? "Admin only" : "Public";
+}
+
+function omitRecordKey(record: Record<string, boolean>, key: string) {
+  const nextRecord = { ...record };
+  delete nextRecord[key];
+  return nextRecord;
 }
 
 function getUploaderLabel(file: KnowledgeFileRecord) {
@@ -198,6 +342,9 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const [sortColumn, setSortColumn] = useState<KnowledgeSortColumn>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [importScope, setImportScope] = useState<ImportScopeValue>("public");
+  const [directoryPath, setDirectoryPath] = useState<string[]>([]);
+  const [directoryHoveredFileId, setDirectoryHoveredFileId] = useState<string | null>(null);
+  const [directorySelectedFileId, setDirectorySelectedFileId] = useState<string | null>(null);
   const [state, setState] = useState<KnowledgePageState>({
     activeJobDetail: null,
     activeJobId: null,
@@ -207,7 +354,7 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
     files: [],
     jobs: [],
     loading: true,
-    previewLoading: false,
+    previewRequestByFileId: {},
     submitting: false,
   });
 
@@ -230,6 +377,57 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
   const activePreview = state.activePreviewFileId
     ? state.filePreviewById[state.activePreviewFileId] ?? null
     : null;
+  const activePreviewLoading = state.activePreviewFileId
+    ? Boolean(state.previewRequestByFileId[state.activePreviewFileId])
+    : false;
+
+  const directoryTree = useMemo(() => buildKnowledgeDirectoryTree(state.files), [state.files]);
+
+  const currentDirectory = useMemo(
+    () => getKnowledgeDirectoryNode(directoryTree, directoryPath) ?? directoryTree,
+    [directoryPath, directoryTree],
+  );
+
+  const directoryBreadcrumbs = useMemo<KnowledgeBreadcrumb[]>(() => {
+    return directoryPath.map((segment, index) => ({
+      label: segment,
+      path: directoryPath.slice(0, index + 1),
+    }));
+  }, [directoryPath]);
+
+  const directoryFolders = useMemo(() => {
+    return [...currentDirectory.folders.values()].sort((left, right) => compareText(left.name, right.name));
+  }, [currentDirectory]);
+
+  const directoryFiles = useMemo(() => {
+    return [...currentDirectory.files].sort((left, right) => {
+      const comparison = compareText(left.displayName, right.displayName);
+      return comparison === 0 ? compareText(left.sourcePath, right.sourcePath) : comparison;
+    });
+  }, [currentDirectory]);
+
+  const directoryPreviewFileId = directoryHoveredFileId ?? directorySelectedFileId;
+
+  const directoryPreviewFile = useMemo(() => {
+    if (!directoryPreviewFileId) {
+      return null;
+    }
+
+    return state.files.find((file) => file.id === directoryPreviewFileId) ?? null;
+  }, [directoryPreviewFileId, state.files]);
+
+  const directoryPreview = directoryPreviewFileId
+    ? state.filePreviewById[directoryPreviewFileId] ?? null
+    : null;
+  const directoryPreviewLoading = directoryPreviewFileId
+    ? Boolean(state.previewRequestByFileId[directoryPreviewFileId])
+    : false;
+  const rootDirectoryFolders = useMemo(() => {
+    return [...directoryTree.folders.values()].sort((left, right) => compareText(left.name, right.name));
+  }, [directoryTree]);
+  const currentDirectoryScope = getKnowledgeDirectoryScope(currentDirectory);
+  const currentDirectoryName = directoryPath[directoryPath.length - 1] ?? "All files";
+  const directoryParentPath = directoryPath.length > 0 ? directoryPath.slice(0, -1) : null;
 
   const sortedFiles = useMemo(() => {
     const files = [...state.files];
@@ -276,6 +474,32 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
     return files;
   }, [sortColumn, sortDirection, state.files]);
+
+  useEffect(() => {
+    if (getKnowledgeDirectoryNode(directoryTree, directoryPath)) {
+      return;
+    }
+
+    setDirectoryPath([]);
+  }, [directoryPath, directoryTree]);
+
+  useEffect(() => {
+    const availableFileIds = new Set(state.files.map((file) => file.id));
+
+    if (directoryHoveredFileId && !availableFileIds.has(directoryHoveredFileId)) {
+      setDirectoryHoveredFileId(null);
+    }
+
+    if (directorySelectedFileId && !availableFileIds.has(directorySelectedFileId)) {
+      setDirectorySelectedFileId(null);
+    }
+  }, [directoryHoveredFileId, directorySelectedFileId, state.files]);
+
+  const openDirectoryPath = useCallback((nextPath: string[]) => {
+    setDirectoryHoveredFileId(null);
+    setDirectorySelectedFileId(null);
+    setDirectoryPath(nextPath);
+  }, []);
 
   const loadFiles = useCallback(async (
     nextScopeFilter = scopeFilter,
@@ -329,17 +553,23 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
     return data;
   }, []);
 
-  const loadFilePreview = useCallback(async (fileId: string) => {
+  const ensureFilePreviewLoaded = useCallback(async (fileId: string) => {
     let shouldFetch = true;
 
     setState((current) => {
-      shouldFetch = !(fileId in current.filePreviewById);
+      shouldFetch = !(fileId in current.filePreviewById) && !current.previewRequestByFileId[fileId];
+
+      if (!shouldFetch) {
+        return current;
+      }
 
       return {
         ...current,
-        activePreviewFileId: fileId,
         error: null,
-        previewLoading: shouldFetch,
+        previewRequestByFileId: {
+          ...current.previewRequestByFileId,
+          [fileId]: true,
+        },
       };
     });
 
@@ -359,22 +589,31 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
       setState((current) => ({
         ...current,
-        activePreviewFileId: fileId,
         error: null,
         filePreviewById: {
           ...current.filePreviewById,
           [fileId]: data.preview,
         },
-        previewLoading: false,
+        previewRequestByFileId: omitRecordKey(current.previewRequestByFileId, fileId),
       }));
     } catch (caughtError) {
       setState((current) => ({
         ...current,
         error: caughtError instanceof Error ? caughtError.message : "Failed to load file preview.",
-        previewLoading: false,
+        previewRequestByFileId: omitRecordKey(current.previewRequestByFileId, fileId),
       }));
     }
   }, []);
+
+  const loadFilePreview = useCallback(async (fileId: string) => {
+    setState((current) => ({
+      ...current,
+      activePreviewFileId: fileId,
+      error: null,
+    }));
+
+    await ensureFilePreviewLoaded(fileId);
+  }, [ensureFilePreviewLoaded]);
 
   const toggleSort = useCallback((column: KnowledgeSortColumn) => {
     setSortColumn((currentColumn) => {
@@ -477,6 +716,7 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
         filePreviewById: Object.fromEntries(
           Object.entries(current.filePreviewById).filter(([fileId]) => fileId !== file.id),
         ),
+        previewRequestByFileId: omitRecordKey(current.previewRequestByFileId, file.id),
         submitting: false,
       }));
     } catch (caughtError) {
@@ -721,6 +961,107 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
     }
   }
 
+  const handleDirectoryFileHover = useCallback((file: KnowledgeFileRecord) => {
+    setDirectoryHoveredFileId(file.id);
+
+    if (file.ingestionStatus === "ready") {
+      void ensureFilePreviewLoaded(file.id);
+    }
+  }, [ensureFilePreviewLoaded]);
+
+  const handleDirectoryFileSelect = useCallback((file: KnowledgeFileRecord) => {
+    setDirectorySelectedFileId(file.id);
+
+    if (file.ingestionStatus === "ready") {
+      void loadFilePreview(file.id);
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      activePreviewFileId: null,
+    }));
+  }, [loadFilePreview]);
+
+  function renderDirectoryTreeNode(node: KnowledgeDirectoryNode, depth = 0) {
+    const childFolders = [...node.folders.values()].sort((left, right) => compareText(left.name, right.name));
+    const isActive = node.path === directoryPath.join("/");
+    const scope = getKnowledgeDirectoryScope(node);
+
+    return (
+      <div className="knowledge-directory-tree__node" key={node.path}>
+        <button
+          className={`knowledge-directory-tree__button${isActive ? " is-active" : ""}`}
+          onClick={() => {
+            openDirectoryPath(node.path ? node.path.split("/") : []);
+          }}
+          style={{ paddingInlineStart: `${14 + depth * 16}px` }}
+          type="button"
+        >
+          <span aria-hidden="true" className="knowledge-directory-tree__icon">📁</span>
+          <span className="knowledge-directory-tree__label">{node.name}</span>
+          <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(scope)}`}>
+            {getKnowledgeDirectoryScopeLabel(scope)}
+          </span>
+        </button>
+        {childFolders.length > 0 ? (
+          <div className="knowledge-directory-tree__children">
+            {childFolders.map((childFolder) => renderDirectoryTreeNode(childFolder, depth + 1))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderFilePreviewBody(preview: KnowledgeFilePreview) {
+    if (preview.kind === "csv") {
+      return (
+        <>
+          <div className="knowledge-table-wrap">
+            <table className="knowledge-table knowledge-table--compact">
+              <thead>
+                <tr>
+                  {preview.columns.map((column, index) => (
+                    <th key={`${column}-${index}`}>{column || `Column ${index + 1}`}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((row, rowIndex) => (
+                  <tr key={`preview-row-${rowIndex}`}>
+                    {preview.columns.map((_, columnIndex) => (
+                      <td key={`preview-cell-${rowIndex}-${columnIndex}`}>{row[columnIndex] ?? ""}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview.truncated ? (
+            <p className="knowledge-upload__hint">Showing the first 3 rows.</p>
+          ) : null}
+        </>
+      );
+    }
+
+    if (preview.kind === "text") {
+      return (
+        <>
+          <pre className="knowledge-preview__text">{preview.lines.join("\n")}</pre>
+          {preview.truncated ? (
+            <p className="knowledge-upload__hint">Showing the first 3 non-empty lines.</p>
+          ) : null}
+        </>
+      );
+    }
+
+    if (preview.kind === "unsupported") {
+      return <div className="knowledge-empty">{preview.message}</div>;
+    }
+
+    return <div className="knowledge-empty">Preview unavailable.</div>;
+  }
+
   if (!access.canViewKnowledgeLibrary) {
     return (
       <section className="knowledge-page">
@@ -741,6 +1082,227 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
 
   return (
     <section className="knowledge-page">
+      <div className="knowledge-panel">
+        <div className="knowledge-toolbar">
+          <div>
+            <p className="knowledge-panel__eyebrow">Directory Browser</p>
+            <h2 className="knowledge-subtitle">Browse folders and files like a standard business file directory</h2>
+          </div>
+          <p className="knowledge-panel__copy">
+            Open folders, review access at a glance, and hover over ready files to preview them before opening the full detail view.
+          </p>
+        </div>
+
+        {state.loading ? (
+          <div className="knowledge-empty">Loading directory…</div>
+        ) : state.files.length === 0 ? (
+          <div className="knowledge-empty">No managed knowledge files yet.</div>
+        ) : (
+          <div className="knowledge-directory-browser">
+            <aside className="knowledge-directory-sidebar">
+              <div className="knowledge-directory-sidebar__header">Folders</div>
+              <button
+                className={`knowledge-directory-tree__button${directoryPath.length === 0 ? " is-active" : ""}`}
+                onClick={() => {
+                  openDirectoryPath([]);
+                }}
+                type="button"
+              >
+                <span aria-hidden="true" className="knowledge-directory-tree__icon">🗂️</span>
+                <span className="knowledge-directory-tree__label">All files</span>
+                <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(getKnowledgeDirectoryScope(directoryTree))}`}>
+                  {directoryTree.totalFileCount} total
+                </span>
+              </button>
+              <div className="knowledge-directory-tree">
+                {rootDirectoryFolders.map((folder) => renderDirectoryTreeNode(folder))}
+              </div>
+            </aside>
+
+            <div className="knowledge-directory-main">
+              <nav className="knowledge-directory-breadcrumbs" aria-label="Folder path">
+                <button
+                  className={`knowledge-directory-breadcrumb${directoryPath.length === 0 ? " is-active" : ""}`}
+                  onClick={() => {
+                    openDirectoryPath([]);
+                  }}
+                  type="button"
+                >
+                  All files
+                </button>
+                {directoryBreadcrumbs.map((breadcrumb) => (
+                  <button
+                    className={`knowledge-directory-breadcrumb${breadcrumb.path.join("/") === directoryPath.join("/") ? " is-active" : ""}`}
+                    key={breadcrumb.path.join("/")}
+                    onClick={() => {
+                      openDirectoryPath(breadcrumb.path);
+                    }}
+                    type="button"
+                  >
+                    {breadcrumb.label}
+                  </button>
+                ))}
+              </nav>
+
+              <div className="knowledge-directory-summary">
+                <div>
+                  <h3 className="knowledge-directory-summary__title">{currentDirectoryName}</h3>
+                  <p className="knowledge-directory-summary__copy">
+                    {directoryFolders.length} folder{directoryFolders.length === 1 ? "" : "s"} and {directoryFiles.length} file{directoryFiles.length === 1 ? "" : "s"} in this view.
+                  </p>
+                </div>
+                <div className="knowledge-directory-summary__badges">
+                  <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(currentDirectoryScope)}`}>
+                    {getKnowledgeDirectoryScopeLabel(currentDirectoryScope)}
+                  </span>
+                  <span className="knowledge-directory-summary__count">{currentDirectory.totalFileCount} total file{currentDirectory.totalFileCount === 1 ? "" : "s"}</span>
+                </div>
+              </div>
+
+              <div className="knowledge-directory-list">
+                {directoryParentPath ? (
+                  <button
+                    className="knowledge-directory-row knowledge-directory-row--parent"
+                    onClick={() => {
+                      openDirectoryPath(directoryParentPath);
+                    }}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="knowledge-directory-row__icon">↩</span>
+                    <div>
+                      <div className="knowledge-directory-row__name">Up one level</div>
+                      <div className="knowledge-directory-row__meta">Return to the parent folder</div>
+                    </div>
+                  </button>
+                ) : null}
+
+                {directoryFolders.length > 0 ? <div className="knowledge-directory-section-label">Folders</div> : null}
+                {directoryFolders.map((folder) => {
+                  const folderScope = getKnowledgeDirectoryScope(folder);
+
+                  return (
+                    <button
+                      className="knowledge-directory-row knowledge-directory-row--folder"
+                      key={folder.path}
+                      onClick={() => {
+                        openDirectoryPath(folder.path.split("/"));
+                      }}
+                      type="button"
+                    >
+                      <div className="knowledge-directory-row__main">
+                        <span aria-hidden="true" className="knowledge-directory-row__icon">📁</span>
+                        <div>
+                          <div className="knowledge-directory-row__name">{folder.name}</div>
+                          <div className="knowledge-directory-row__meta">
+                            {folder.totalFileCount} file{folder.totalFileCount === 1 ? "" : "s"} inside this folder
+                          </div>
+                        </div>
+                      </div>
+                      <div className="knowledge-directory-row__badges">
+                        <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(folderScope)}`}>
+                          {getKnowledgeDirectoryScopeLabel(folderScope)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {directoryFiles.length > 0 ? <div className="knowledge-directory-section-label">Files</div> : null}
+                <div
+                  className="knowledge-directory-file-list"
+                  onMouseLeave={() => {
+                    setDirectoryHoveredFileId(null);
+                  }}
+                >
+                  {directoryFiles.map((file) => (
+                    <button
+                      className={`knowledge-directory-row knowledge-directory-row--file${directorySelectedFileId === file.id ? " is-selected" : ""}`}
+                      key={file.id}
+                      onClick={() => {
+                        handleDirectoryFileSelect(file);
+                      }}
+                      onFocus={() => {
+                        handleDirectoryFileHover(file);
+                      }}
+                      onMouseEnter={() => {
+                        handleDirectoryFileHover(file);
+                      }}
+                      type="button"
+                    >
+                      <div className="knowledge-directory-row__main">
+                        <span aria-hidden="true" className="knowledge-directory-row__icon">📄</span>
+                        <div>
+                          <div className="knowledge-directory-row__name">{file.displayName}</div>
+                          <div className="knowledge-directory-row__meta">
+                            {file.mimeType ?? file.sourceType} · {formatBytes(file.byteSize)} · uploaded {formatTimestamp(file.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="knowledge-directory-row__badges">
+                        <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(file.accessScope)}`}>
+                          {getKnowledgeAccessScopeLabel(file.accessScope)}
+                        </span>
+                        <span className={`knowledge-status ${getFileStatusTone(file.ingestionStatus)}`}>
+                          {file.ingestionStatus}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {directoryFolders.length === 0 && directoryFiles.length === 0 ? (
+                  <div className="knowledge-empty">This folder is empty for the current filters.</div>
+                ) : null}
+              </div>
+            </div>
+
+            <aside className="knowledge-directory-preview-pane">
+              <div className="knowledge-directory-preview-pane__header">
+                <div>
+                  <p className="knowledge-panel__eyebrow">Hover Preview</p>
+                  <h3 className="knowledge-subtitle">{directoryPreviewFile?.displayName ?? "Pick a file"}</h3>
+                </div>
+                {directoryPreviewFile ? (
+                  <span className={`knowledge-scope-badge knowledge-scope-badge--${getKnowledgeScopeTone(directoryPreviewFile.accessScope)}`}>
+                    {getKnowledgeAccessScopeLabel(directoryPreviewFile.accessScope)}
+                  </span>
+                ) : null}
+              </div>
+
+              {directoryPreviewFile ? (
+                <>
+                  <div className="knowledge-directory-preview-pane__meta">
+                    <code className="knowledge-code">{directoryPreviewFile.sourcePath}</code>
+                  </div>
+                  <div className="knowledge-directory-preview-pane__meta">
+                    {formatBytes(directoryPreviewFile.byteSize)} · {directoryPreviewFile.mimeType ?? directoryPreviewFile.sourceType} · {directoryPreviewFile.ingestionStatus.replaceAll("_", " ")}
+                  </div>
+                  {directoryPreviewFile.ingestionStatus === "ready" ? (
+                    directoryPreviewLoading ? (
+                      <div className="knowledge-empty">Loading preview…</div>
+                    ) : directoryPreview ? (
+                      renderFilePreviewBody(directoryPreview)
+                    ) : (
+                      <div className="knowledge-empty">Hover over a ready file to preview it.</div>
+                    )
+                  ) : directoryPreviewFile.ingestionStatus === "failed" ? (
+                    <div className="knowledge-empty">
+                      {directoryPreviewFile.ingestionError ?? "Preview is unavailable because ingestion failed for this file."}
+                    </div>
+                  ) : (
+                    <div className="knowledge-empty">Preview will appear here after indexing finishes.</div>
+                  )}
+                </>
+              ) : (
+                <div className="knowledge-empty">
+                  Hover over a ready file to preview it here. Click a file to keep it pinned and open the full preview lower on the page.
+                </div>
+              )}
+            </aside>
+          </div>
+        )}
+      </div>
+
       <div className="knowledge-panel knowledge-panel--hero">
         <div className="knowledge-panel__header">
           <div>
@@ -1194,7 +1756,6 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
                                 setState((current) => ({
                                   ...current,
                                   activePreviewFileId: null,
-                                  previewLoading: false,
                                 }));
                                 return;
                               }
@@ -1240,45 +1801,10 @@ export function KnowledgePageClient({ access }: KnowledgePageClientProps) {
                 </div>
               </div>
 
-              {state.previewLoading ? (
+              {activePreviewLoading ? (
                 <div className="knowledge-empty">Loading preview…</div>
-              ) : activePreview?.kind === "csv" ? (
-                <>
-                  <div className="knowledge-table-wrap">
-                    <table className="knowledge-table knowledge-table--compact">
-                      <thead>
-                        <tr>
-                          {activePreview.columns.map((column, index) => (
-                            <th key={`${column}-${index}`}>{column || `Column ${index + 1}`}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activePreview.rows.map((row, rowIndex) => (
-                          <tr key={`preview-row-${rowIndex}`}>
-                            {activePreview.columns.map((_, columnIndex) => (
-                              <td key={`preview-cell-${rowIndex}-${columnIndex}`}>
-                                {row[columnIndex] ?? ""}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {activePreview.truncated ? (
-                    <p className="knowledge-upload__hint">Showing the first 20 rows.</p>
-                  ) : null}
-                </>
-              ) : activePreview?.kind === "text" ? (
-                <>
-                  <pre className="knowledge-preview__text">{activePreview.lines.join("\n")}</pre>
-                  {activePreview.truncated ? (
-                    <p className="knowledge-upload__hint">Showing the first 20 non-empty lines.</p>
-                  ) : null}
-                </>
-              ) : activePreview?.kind === "unsupported" ? (
-                <div className="knowledge-empty">{activePreview.message}</div>
+              ) : activePreview ? (
+                renderFilePreviewBody(activePreview)
               ) : (
                 <div className="knowledge-empty">Preview unavailable.</div>
               )}

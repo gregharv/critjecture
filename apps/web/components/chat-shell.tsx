@@ -58,13 +58,50 @@ import {
   DEFAULT_CHAT_THINKING_LEVEL,
   getSessionModelId,
 } from "@/lib/chat-models";
+import {
+  getFileMentionMatch,
+  replaceFileMention,
+} from "@/lib/chat-file-mentions";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
+import type {
+  GetKnowledgeFilePreviewResponse,
+  KnowledgeFilePreview,
+  KnowledgeFileRecord,
+  ListKnowledgeFilesResponse,
+} from "@/lib/knowledge-types";
 import type { UserRole } from "@/lib/roles";
 
 type ChatShellState = {
   error: string | null;
   ready: boolean;
 };
+
+type MentionableKnowledgeFile = Pick<
+  KnowledgeFileRecord,
+  "accessScope" | "displayName" | "id" | "sourcePath"
+>;
+
+type FileMentionMenuState = {
+  files: MentionableKnowledgeFile[];
+  highlightedIndex: number;
+  left: number;
+  loading: boolean;
+  query: string;
+  top: number;
+  width: number;
+};
+
+type FileMentionPreviewState = {
+  error: string | null;
+  file: MentionableKnowledgeFile;
+  left: number;
+  loading: boolean;
+  preview: KnowledgeFilePreview | null;
+  top: number;
+  width: number;
+};
+
+const FILE_MENTION_PREVIEW_HIDE_DELAY_MS = 300;
 
 type SearchToolResponse = {
   candidateFiles: CompanyKnowledgeCandidateFile[];
@@ -1003,6 +1040,61 @@ function ChatHistoryDialog({
   );
 }
 
+function renderFileMentionPreviewBody(preview: KnowledgeFilePreview) {
+  if (preview.kind === "csv") {
+    return (
+      <>
+        <div className="chat-file-preview__eyebrow">
+          CSV preview · {preview.rows.length} sample row{preview.rows.length === 1 ? "" : "s"}
+          {preview.truncated ? " · truncated" : ""} · use the horizontal scrollbar or shift-scroll to view more columns
+        </div>
+        <div className="chat-file-preview__table-wrap">
+          <table className="chat-file-preview__table">
+            <thead>
+              <tr>
+                {preview.columns.map((column, columnIndex) => (
+                  <th key={`${column}-${columnIndex}`}>{column || `Column ${columnIndex + 1}`}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {preview.rows.map((row, rowIndex) => (
+                <tr key={`${rowIndex}-${row.join("|")}`}>
+                  {preview.columns.map((_, columnIndex) => (
+                    <td key={`${rowIndex}-${columnIndex}`}>{row[columnIndex] ?? "—"}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  }
+
+  if (preview.kind === "text") {
+    return (
+      <>
+        <div className="chat-file-preview__eyebrow">
+          Text preview{preview.truncated ? " · truncated" : ""}
+        </div>
+        <div className="chat-file-preview__text">
+          {preview.lines.slice(0, 8).map((line, index) => (
+            <div key={`${index}-${line}`}>{line || " "}</div>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="chat-file-preview__eyebrow">Preview unavailable</div>
+      <div className="chat-file-preview__empty">{preview.message}</div>
+    </>
+  );
+}
+
 type ChatShellProps = {
   organizationSlug: string;
   role: UserRole;
@@ -1016,6 +1108,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const conversationCreatedAtRef = useRef("");
   const conversationIdRef = useRef<string | null>(null);
   const conversationPersistedRef = useRef(false);
+  const fileMentionFilesRef = useRef<MentionableKnowledgeFile[] | null>(null);
+  const fileMentionMenuRef = useRef<HTMLDivElement | null>(null);
+  const fileMentionPreviewRef = useRef<HTMLDivElement | null>(null);
+  const fileMentionPreviewCacheRef = useRef(new Map<string, KnowledgeFilePreview>());
+  const fileMentionPreviewHideTimeoutRef = useRef<number | null>(null);
+  const fileMentionPreviewRequestIdRef = useRef(0);
+  const fileMentionStateRef = useRef<FileMentionMenuState | null>(null);
+  const fileMentionRequestRef = useRef<Promise<MentionableKnowledgeFile[]> | null>(null);
   const historyQueryRef = useRef("");
   const historyRequestIdRef = useRef(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -1029,6 +1129,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const syntheticContinuationRef = useRef(false);
   const toolbarMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState("");
+  const [fileMentionMenu, setFileMentionMenu] = useState<FileMentionMenuState | null>(null);
+  const [fileMentionPreview, setFileMentionPreview] = useState<FileMentionPreviewState | null>(
+    null,
+  );
   const [conversationBootstrap, setConversationBootstrap] =
     useState<ConversationBootstrapState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1052,9 +1156,51 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     ready: false,
   });
 
+  const cancelScheduledFileMentionPreviewHide = useCallback(() => {
+    if (fileMentionPreviewHideTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(fileMentionPreviewHideTimeoutRef.current);
+    fileMentionPreviewHideTimeoutRef.current = null;
+  }, []);
+
+  const hideFileMentionPreview = useCallback(() => {
+    cancelScheduledFileMentionPreviewHide();
+    fileMentionPreviewRequestIdRef.current += 1;
+    setFileMentionPreview(null);
+  }, [cancelScheduledFileMentionPreviewHide]);
+
+  const scheduleFileMentionPreviewHide = useCallback(() => {
+    cancelScheduledFileMentionPreviewHide();
+    fileMentionPreviewHideTimeoutRef.current = window.setTimeout(() => {
+      fileMentionPreviewHideTimeoutRef.current = null;
+      fileMentionPreviewRequestIdRef.current += 1;
+      setFileMentionPreview(null);
+    }, FILE_MENTION_PREVIEW_HIDE_DELAY_MS);
+  }, [cancelScheduledFileMentionPreviewHide]);
+
+  useEffect(() => {
+    return () => {
+      if (fileMentionPreviewHideTimeoutRef.current !== null) {
+        window.clearTimeout(fileMentionPreviewHideTimeoutRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     historyQueryRef.current = historyQuery;
   }, [historyQuery]);
+
+  useEffect(() => {
+    fileMentionStateRef.current = fileMentionMenu;
+  }, [fileMentionMenu]);
+
+  useEffect(() => {
+    if (!fileMentionMenu) {
+      hideFileMentionPreview();
+    }
+  }, [fileMentionMenu, hideFileMentionPreview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1149,6 +1295,177 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       cancelled = true;
     };
   }, []);
+
+  const getComposerTextarea = useCallback(() => {
+    const textarea = hostRef.current?.querySelector("textarea");
+    return textarea instanceof HTMLTextAreaElement ? textarea : null;
+  }, []);
+
+  const loadMentionableKnowledgeFiles = useCallback(async () => {
+    if (fileMentionFilesRef.current) {
+      return fileMentionFilesRef.current;
+    }
+
+    if (fileMentionRequestRef.current) {
+      return fileMentionRequestRef.current;
+    }
+
+    const request = fetch("/api/knowledge/files?status=ready", {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as
+          | ListKnowledgeFilesResponse
+          | {
+              error: string;
+            };
+
+        if (!response.ok) {
+          throw new Error(getErrorMessage(data, "Failed to load knowledge files."));
+        }
+
+        const files = ("files" in data ? data.files : [])
+          .map((file) => ({
+            accessScope: file.accessScope,
+            displayName: file.displayName,
+            id: file.id,
+            sourcePath: file.sourcePath,
+          }))
+          .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
+
+        fileMentionFilesRef.current = files;
+        return files;
+      })
+      .finally(() => {
+        fileMentionRequestRef.current = null;
+      });
+
+    fileMentionRequestRef.current = request;
+    return request;
+  }, []);
+
+  const applyFileMention = useCallback((file: MentionableKnowledgeFile) => {
+    const textarea = getComposerTextarea();
+
+    if (!textarea) {
+      setFileMentionMenu(null);
+      hideFileMentionPreview();
+      return;
+    }
+
+    const match = getFileMentionMatch(textarea.value, textarea.selectionStart);
+
+    if (!match) {
+      setFileMentionMenu(null);
+      hideFileMentionPreview();
+      return;
+    }
+
+    const nextValue = replaceFileMention(textarea.value, match, file.sourcePath);
+    const suffix = textarea.value.slice(match.replaceTo);
+    const nextCaret =
+      match.replaceFrom +
+      file.sourcePath.trim().length +
+      1 +
+      (suffix.length === 0 || !/^\s/.test(suffix) ? 1 : 0);
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+
+    if (valueSetter) {
+      valueSetter.call(textarea, nextValue);
+    } else {
+      textarea.value = nextValue;
+    }
+
+    textarea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    textarea.focus();
+    textarea.setSelectionRange(nextCaret, nextCaret);
+    setFileMentionMenu(null);
+    hideFileMentionPreview();
+  }, [getComposerTextarea, hideFileMentionPreview]);
+
+  const showFileMentionPreview = useCallback(
+    async (file: MentionableKnowledgeFile, target: HTMLElement) => {
+      cancelScheduledFileMentionPreviewHide();
+      const rect = target.getBoundingClientRect();
+      const width = Math.min(420, Math.max(320, Math.round(window.innerWidth * 0.28)));
+      const preferRight = rect.right + 12 + width <= window.innerWidth - 12;
+      const left = preferRight
+        ? rect.right + 12
+        : Math.max(12, rect.left - width - 12);
+      const top = Math.max(12, Math.min(rect.top, window.innerHeight - 280));
+      const cachedPreview = fileMentionPreviewCacheRef.current.get(file.id) ?? null;
+      const nextRequestId = fileMentionPreviewRequestIdRef.current + 1;
+
+      fileMentionPreviewRequestIdRef.current = nextRequestId;
+      setFileMentionPreview({
+        error: null,
+        file,
+        left,
+        loading: !cachedPreview,
+        preview: cachedPreview,
+        top,
+        width,
+      });
+
+      if (cachedPreview) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/knowledge/files/${file.id}/preview`, {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as
+          | GetKnowledgeFilePreviewResponse
+          | {
+              error: string;
+            };
+
+        if (!response.ok) {
+          throw new Error(getErrorMessage(data, "Failed to load file preview."));
+        }
+
+        if (!("preview" in data)) {
+          throw new Error("Preview payload was missing from the response.");
+        }
+
+        fileMentionPreviewCacheRef.current.set(file.id, data.preview);
+
+        if (fileMentionPreviewRequestIdRef.current !== nextRequestId) {
+          return;
+        }
+
+        setFileMentionPreview({
+          error: null,
+          file,
+          left,
+          loading: false,
+          preview: data.preview,
+          top,
+          width,
+        });
+      } catch (caughtError) {
+        if (fileMentionPreviewRequestIdRef.current !== nextRequestId) {
+          return;
+        }
+
+        setFileMentionPreview({
+          error:
+            caughtError instanceof Error ? caughtError.message : "Failed to load file preview.",
+          file,
+          left,
+          loading: false,
+          preview: null,
+          top,
+          width,
+        });
+      }
+    },
+    [cancelScheduledFileMentionPreviewHide],
+  );
 
   useEffect(() => {
     if (!conversationBootstrap) {
@@ -2249,6 +2566,222 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           return;
         }
 
+        const filterMentionableKnowledgeFiles = (query: string) => {
+          const files = fileMentionFilesRef.current ?? [];
+          const normalizedQuery = query.trim().toLowerCase();
+
+          if (!normalizedQuery) {
+            return files.slice(0, 8);
+          }
+
+          return files
+            .filter((file) => {
+              const pathLabel = file.sourcePath.toLowerCase();
+              const displayLabel = file.displayName.toLowerCase();
+              return (
+                pathLabel.includes(normalizedQuery) || displayLabel.includes(normalizedQuery)
+              );
+            })
+            .slice(0, 8);
+        };
+
+        const buildFileMentionMenuState = (
+          textarea: HTMLTextAreaElement,
+          query: string,
+          loading: boolean,
+        ) => {
+          const rect = textarea.getBoundingClientRect();
+          const width = Math.min(Math.max(rect.width, 320), 560);
+          const left = Math.min(
+            Math.max(12, rect.left),
+            Math.max(12, window.innerWidth - width - 12),
+          );
+
+          return {
+            files: filterMentionableKnowledgeFiles(query),
+            highlightedIndex: 0,
+            left,
+            loading,
+            query,
+            top: Math.max(16, rect.top - 8),
+            width,
+          } satisfies FileMentionMenuState;
+        };
+
+        const refreshFileMentionMenu = async (textarea: HTMLTextAreaElement) => {
+          const mentionMatch = getFileMentionMatch(textarea.value, textarea.selectionStart);
+
+          if (!mentionMatch) {
+            setFileMentionMenu(null);
+            hideFileMentionPreview();
+            return;
+          }
+
+          if (fileMentionFilesRef.current) {
+            setFileMentionMenu(
+              buildFileMentionMenuState(textarea, mentionMatch.query, false),
+            );
+            return;
+          }
+
+          setFileMentionMenu(buildFileMentionMenuState(textarea, mentionMatch.query, true));
+
+          try {
+            await loadMentionableKnowledgeFiles();
+            const activeTextarea = getComposerTextarea();
+
+            if (!activeTextarea) {
+              setFileMentionMenu(null);
+              hideFileMentionPreview();
+              return;
+            }
+
+            const activeMentionMatch = getFileMentionMatch(
+              activeTextarea.value,
+              activeTextarea.selectionStart,
+            );
+
+            if (!activeMentionMatch) {
+              setFileMentionMenu(null);
+              hideFileMentionPreview();
+              return;
+            }
+
+            setFileMentionMenu(
+              buildFileMentionMenuState(activeTextarea, activeMentionMatch.query, false),
+            );
+          } catch (caughtError) {
+            console.error("Failed to load knowledge files for @mentions.", caughtError);
+            setFileMentionMenu(null);
+            hideFileMentionPreview();
+          }
+        };
+
+        const handleComposerInput = (event: Event) => {
+          if (!(event.target instanceof HTMLTextAreaElement)) {
+            return;
+          }
+
+          hideFileMentionPreview();
+          void refreshFileMentionMenu(event.target);
+        };
+
+        const handleComposerKeyDown = (event: Event) => {
+          if (!(event.target instanceof HTMLTextAreaElement)) {
+            return;
+          }
+
+          const keyboardEvent = event as KeyboardEvent;
+          const activeMenu = fileMentionStateRef.current;
+
+          if (!activeMenu) {
+            return;
+          }
+
+          if (keyboardEvent.key === "ArrowDown") {
+            keyboardEvent.preventDefault();
+            setFileMentionMenu((current) => {
+              if (!current || current.files.length === 0) {
+                return current;
+              }
+
+              return {
+                ...current,
+                highlightedIndex: Math.min(
+                  current.highlightedIndex + 1,
+                  current.files.length - 1,
+                ),
+              };
+            });
+            return;
+          }
+
+          if (keyboardEvent.key === "ArrowUp") {
+            keyboardEvent.preventDefault();
+            setFileMentionMenu((current) => {
+              if (!current || current.files.length === 0) {
+                return current;
+              }
+
+              return {
+                ...current,
+                highlightedIndex: Math.max(current.highlightedIndex - 1, 0),
+              };
+            });
+            return;
+          }
+
+          if (
+            (keyboardEvent.key === "Enter" || keyboardEvent.key === "Tab") &&
+            activeMenu.files.length > 0
+          ) {
+            keyboardEvent.preventDefault();
+            const selectedFile =
+              activeMenu.files[
+                Math.min(activeMenu.highlightedIndex, activeMenu.files.length - 1)
+              ];
+
+            if (selectedFile) {
+              applyFileMention(selectedFile);
+            }
+            return;
+          }
+
+          if (keyboardEvent.key === "Escape") {
+            keyboardEvent.preventDefault();
+            setFileMentionMenu(null);
+            hideFileMentionPreview();
+          }
+        };
+
+        const handleComposerSelection = (event: Event) => {
+          if (!(event.target instanceof HTMLTextAreaElement)) {
+            return;
+          }
+
+          hideFileMentionPreview();
+          void refreshFileMentionMenu(event.target);
+        };
+
+        const handleWindowResize = () => {
+          const textarea = getComposerTextarea();
+
+          if (!textarea) {
+            setFileMentionMenu(null);
+            hideFileMentionPreview();
+            return;
+          }
+
+          void refreshFileMentionMenu(textarea);
+        };
+
+        const handleDocumentPointerDown = (event: Event) => {
+          const target = event.target;
+
+          if (!(target instanceof Node)) {
+            return;
+          }
+
+          if (fileMentionMenuRef.current?.contains(target) || fileMentionPreviewRef.current?.contains(target)) {
+            return;
+          }
+
+          if (target instanceof HTMLTextAreaElement) {
+            return;
+          }
+
+          setFileMentionMenu(null);
+          hideFileMentionPreview();
+        };
+
+        const composerHost = hostRef.current;
+        composerHost.addEventListener("input", handleComposerInput);
+        composerHost.addEventListener("keydown", handleComposerKeyDown);
+        composerHost.addEventListener("click", handleComposerSelection);
+        composerHost.addEventListener("keyup", handleComposerSelection);
+        window.addEventListener("resize", handleWindowResize);
+        document.addEventListener("pointerdown", handleDocumentPointerDown);
+
         const unsubscribe = agent.subscribe((event) => {
           if (event.type === "agent_start") {
             setIsStreaming(true);
@@ -2400,10 +2933,18 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             handleFileSelection as EventListener,
           );
           window.removeEventListener(ASK_USER_EVENT, handleAskUserSelection as EventListener);
+          composerHost.removeEventListener("input", handleComposerInput);
+          composerHost.removeEventListener("keydown", handleComposerKeyDown);
+          composerHost.removeEventListener("click", handleComposerSelection);
+          composerHost.removeEventListener("keyup", handleComposerSelection);
+          window.removeEventListener("resize", handleWindowResize);
+          document.removeEventListener("pointerdown", handleDocumentPointerDown);
           if (saveTimerRef.current) {
             window.clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
           }
+          setFileMentionMenu(null);
+          hideFileMentionPreview();
           finalizeAskUserSelection({ answer: null, wasCustom: false });
           unsubscribe();
           agent?.abort();
@@ -2439,10 +2980,21 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       plannerSearchesRef.current = [];
       pendingSelectionRef.current = null;
       syntheticContinuationRef.current = false;
+      setFileMentionMenu(null);
+      hideFileMentionPreview();
       setIsStreaming(false);
       cleanup?.();
     };
-  }, [conversationBootstrap, organizationSlug, role, userId]);
+  }, [
+    applyFileMention,
+    conversationBootstrap,
+    getComposerTextarea,
+    hideFileMentionPreview,
+    loadMentionableKnowledgeFiles,
+    organizationSlug,
+    role,
+    userId,
+  ]);
 
   const loadConversationHistory = useCallback(async (query: string) => {
     const requestId = historyRequestIdRef.current + 1;
@@ -2787,6 +3339,97 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           <p className="chat-toolbar__status chat-toolbar__status--success">{workflowSaveSuccess}</p>
         ) : null}
         <div className="chat-host" ref={hostRef} />
+        {fileMentionMenu ? (
+          <div
+            className="chat-file-mentions"
+            onMouseEnter={() => {
+              cancelScheduledFileMentionPreviewHide();
+            }}
+            onMouseLeave={() => {
+              scheduleFileMentionPreviewHide();
+            }}
+            ref={fileMentionMenuRef}
+            style={{
+              left: `${fileMentionMenu.left}px`,
+              top: `${fileMentionMenu.top}px`,
+              transform: "translateY(-100%)",
+              width: `${fileMentionMenu.width}px`,
+            }}
+          >
+            <div className="chat-file-mentions__header">
+              <span>@ files</span>
+              <span className="chat-file-mentions__query">
+                {fileMentionMenu.query ? `“${fileMentionMenu.query}”` : "All files"}
+              </span>
+            </div>
+            <div className="chat-file-mentions__list">
+              {fileMentionMenu.loading ? (
+                <div className="chat-file-mentions__empty">Loading files…</div>
+              ) : fileMentionMenu.files.length > 0 ? (
+                fileMentionMenu.files.map((file, index) => (
+                  <button
+                    className={`chat-file-mentions__item ${
+                      index === fileMentionMenu.highlightedIndex
+                        ? "chat-file-mentions__item--active"
+                        : ""
+                    }`}
+                    key={file.id}
+                    onFocus={(event) => {
+                      void showFileMentionPreview(file, event.currentTarget);
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      applyFileMention(file);
+                    }}
+                    onMouseEnter={(event) => {
+                      void showFileMentionPreview(file, event.currentTarget);
+                    }}
+                    type="button"
+                  >
+                    <span className="chat-file-mentions__path">@{file.sourcePath}</span>
+                    <span className="chat-file-mentions__meta">
+                      <span>{file.displayName}</span>
+                      <span className="chat-file-mentions__scope">{file.accessScope}</span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="chat-file-mentions__empty">No matching files.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+        {fileMentionPreview ? (
+          <div
+            className="chat-file-preview"
+            onMouseEnter={() => {
+              cancelScheduledFileMentionPreviewHide();
+            }}
+            onMouseLeave={() => {
+              scheduleFileMentionPreviewHide();
+            }}
+            ref={fileMentionPreviewRef}
+            style={{
+              left: `${fileMentionPreview.left}px`,
+              top: `${fileMentionPreview.top}px`,
+              width: `${fileMentionPreview.width}px`,
+            }}
+          >
+            <div className="chat-file-preview__header">
+              <div className="chat-file-preview__title">@{fileMentionPreview.file.sourcePath}</div>
+              <div className="chat-file-preview__scope">{fileMentionPreview.file.accessScope}</div>
+            </div>
+            {fileMentionPreview.loading ? (
+              <div className="chat-file-preview__empty">Loading preview…</div>
+            ) : fileMentionPreview.error ? (
+              <div className="chat-file-preview__empty">{fileMentionPreview.error}</div>
+            ) : fileMentionPreview.preview ? (
+              renderFileMentionPreviewBody(fileMentionPreview.preview)
+            ) : (
+              <div className="chat-file-preview__empty">Preview unavailable.</div>
+            )}
+          </div>
+        ) : null}
         {!ready ? (
           <div className="chat-fallback chat-fallback-overlay">
             Loading chat shell...

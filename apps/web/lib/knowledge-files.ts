@@ -390,6 +390,8 @@ function chooseCsvDelimiter(headerLine: string) {
   return selectedDelimiter;
 }
 
+const KNOWLEDGE_FILE_PREVIEW_ROW_LIMIT = 3;
+
 function truncatePreviewCell(cell: string) {
   const trimmed = cell.trim();
   return trimmed.length > 120 ? `${trimmed.slice(0, 120).trimEnd()}…` : trimmed;
@@ -404,13 +406,15 @@ function buildCsvPreview(text: string): Extract<KnowledgeFilePreview, { kind: "c
   const [headerLine = "", ...dataLines] = lines;
   const delimiter = chooseCsvDelimiter(headerLine);
   const columns = headerLine ? splitCsvRecord(headerLine, delimiter).map(truncatePreviewCell) : [];
-  const rows = dataLines.slice(0, 20).map((line) => splitCsvRecord(line, delimiter).map(truncatePreviewCell));
+  const rows = dataLines
+    .slice(0, KNOWLEDGE_FILE_PREVIEW_ROW_LIMIT)
+    .map((line) => splitCsvRecord(line, delimiter).map(truncatePreviewCell));
 
   return {
     columns,
     kind: "csv",
     rows,
-    truncated: dataLines.length > 20,
+    truncated: dataLines.length > KNOWLEDGE_FILE_PREVIEW_ROW_LIMIT,
   };
 }
 
@@ -424,8 +428,10 @@ function buildTextPreview(text: string): Extract<KnowledgeFilePreview, { kind: "
 
   return {
     kind: "text",
-    lines: lines.slice(0, 20).map((line) => (line.length > 240 ? `${line.slice(0, 240).trimEnd()}…` : line)),
-    truncated: lines.length > 20,
+    lines: lines
+      .slice(0, KNOWLEDGE_FILE_PREVIEW_ROW_LIMIT)
+      .map((line) => (line.length > 240 ? `${line.slice(0, 240).trimEnd()}…` : line)),
+    truncated: lines.length > KNOWLEDGE_FILE_PREVIEW_ROW_LIMIT,
   };
 }
 

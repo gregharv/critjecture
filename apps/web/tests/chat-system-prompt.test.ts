@@ -55,4 +55,12 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("If the user adds a new year, date range, metric, group, comparison, or file");
     expect(prompt).toContain("search_company_knowledge again");
   });
+
+  it("treats @file mentions as explicit company file selections", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("@admin/quarterly_report_2026.csv");
+    expect(prompt).toContain("treat those as explicit file selections");
+    expect(prompt).toContain("Prefer those exact paths in inputFiles");
+  });
 });

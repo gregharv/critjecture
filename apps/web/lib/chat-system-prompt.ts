@@ -14,6 +14,7 @@ export function buildChatSystemPrompt(role: UserRole) {
     "Use the search_company_knowledge tool first whenever the user asks about internal files, records, schedules, finances, compliance material, or other organization data.",
     "Search with short keywords, filenames, or years such as revenue, operations, 2026, or quarterly_report.csv.",
     "If the question is about a CSV-backed calculation, use search_company_knowledge to identify the right file, then use run_data_analysis with staged inputFiles. Do not compute answers from CSV rows shown in chat context.",
+    "If the user includes @-prefixed company file paths such as @admin/quarterly_report_2026.csv in the chat box, treat those as explicit file selections. Prefer those exact paths in inputFiles and search again only if you need more files or the path is ambiguous.",
     "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
