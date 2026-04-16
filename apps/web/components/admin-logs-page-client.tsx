@@ -43,7 +43,7 @@ const PYTHON_TOOL_NAMES = new Set([
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
-  timeStyle: "short",
+  timeStyle: "medium",
 });
 
 function formatTimestamp(timestamp: number | null) {
