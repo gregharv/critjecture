@@ -575,6 +575,15 @@ export async function buildWorkflowDraftFromChatTurn(
 
   for (const toolCall of relevantToolCalls) {
     if (toolCall.toolName === "run_data_analysis") {
+      const analysisCode =
+        typeof toolCall.parameters.code === "string" && toolCall.parameters.code.trim()
+          ? toolCall.parameters.code.trim()
+          : null;
+
+      if (!analysisCode) {
+        continue;
+      }
+
       analysisToolCallCount += 1;
       const stepKey = `analysis_${analysisToolCallCount}`;
       const outputKey = `analysis_result_${analysisToolCallCount}`;
@@ -585,10 +594,6 @@ export async function buildWorkflowDraftFromChatTurn(
               .map((inputFile) => inputKeyByPath.get(inputFile) ?? null)
               .filter((inputKey): inputKey is string => Boolean(inputKey))
           : inputContractInputs.map((entry) => entry.input_key);
-      const analysisCode =
-        typeof toolCall.parameters.code === "string" && toolCall.parameters.code.trim()
-          ? toolCall.parameters.code.trim()
-          : undefined;
 
       recipeSteps.push({
         config: {
@@ -597,7 +602,7 @@ export async function buildWorkflowDraftFromChatTurn(
             toolCall.resultSummary?.trim() ||
             "Run the workflow analysis objective.",
           ...(inputFiles.length > 0 ? { input_files: [...new Set(inputFiles)] } : {}),
-          ...(analysisCode ? { python_code: analysisCode } : {}),
+          python_code: analysisCode,
           result_key: outputKey,
         },
         input_refs: [...new Set(selectedInputKeys)].map((inputKey) => ({
@@ -630,9 +635,9 @@ export async function buildWorkflowDraftFromChatTurn(
       const chartCode =
         typeof toolCall.parameters.code === "string" && toolCall.parameters.code.trim()
           ? toolCall.parameters.code.trim()
-          : undefined;
+          : null;
 
-      if (!lastAnalysisStepRef && !chartCode) {
+      if (!chartCode) {
         continue;
       }
 
@@ -652,7 +657,7 @@ export async function buildWorkflowDraftFromChatTurn(
           ...(chartInputFiles.length > 0
             ? { input_files: [...new Set(chartInputFiles)] }
             : {}),
-          ...(chartCode ? { python_code: chartCode } : {}),
+          python_code: chartCode,
           title: titleValue,
         },
         input_refs: lastAnalysisStepRef
@@ -679,12 +684,16 @@ export async function buildWorkflowDraftFromChatTurn(
         continue;
       }
 
-      documentToolCallCount += 1;
-
       const documentCode =
         typeof toolCall.parameters.code === "string" && toolCall.parameters.code.trim()
           ? toolCall.parameters.code.trim()
-          : undefined;
+          : null;
+
+      if (!documentCode) {
+        continue;
+      }
+
+      documentToolCallCount += 1;
       const documentInputFiles = extractInputFilesFromParameters(toolCall.parameters);
 
       recipeSteps.push({
@@ -692,7 +701,7 @@ export async function buildWorkflowDraftFromChatTurn(
           ...(documentInputFiles.length > 0
             ? { input_files: [...new Set(documentInputFiles)] }
             : {}),
-          ...(documentCode ? { python_code: documentCode } : {}),
+          python_code: documentCode,
           template: "summary_v1",
           title: `${deriveSuggestedWorkflowName(selectedTurn.userPromptText, selectedTurn.createdAt)} brief`,
         },

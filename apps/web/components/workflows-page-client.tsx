@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AccessSnapshot } from "@/lib/access-control";
+import {
+  collectWorkflowStepInputPathHints,
+  formatWorkflowStepInputRef,
+  getWorkflowStepCodeFileName,
+  getWorkflowStepExpectedOutputDescription,
+} from "@/lib/workflow-code";
+import type { WorkflowVersionContractsV1 } from "@/lib/workflow-types";
 
 type WorkflowsPageClientProps = {
   access: AccessSnapshot;
@@ -28,21 +35,9 @@ type WorkflowVersionSummary = {
   versionNumber: number;
 };
 
-type WorkflowContractsSummary = {
-  delivery: {
-    channels: unknown[];
-  };
-  inputContract: {
-    inputs: unknown[];
-  };
-  recipe: {
-    steps: unknown[];
-  };
-};
-
 type WorkflowDetailRecord = {
   currentVersion: {
-    contracts: WorkflowContractsSummary;
+    contracts: WorkflowVersionContractsV1;
     createdAt: number;
     id: string;
     versionNumber: number;
@@ -67,7 +62,8 @@ type WorkflowRunRecord = {
     | "blocked_validation"
     | "completed"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "skipped";
   triggerKind: "manual" | "scheduled" | "resume";
   workflowVersionId: string;
   workflowVersionNumber: number | null;
@@ -232,6 +228,26 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   return json as T;
+}
+
+async function copyToClipboard(value: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard) {
+    throw new Error("Clipboard access is unavailable in this browser.");
+  }
+
+  await navigator.clipboard.writeText(value);
+}
+
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 0);
 }
 
 function formatTimestamp(timestamp: number | null) {
@@ -659,6 +675,7 @@ export function WorkflowsPageClient({ access }: WorkflowsPageClientProps) {
     () => (state.runDetail ? toMetadataResolvedInputs(state.runDetail.run.metadata) : []),
     [state.runDetail],
   );
+  const currentVersion = state.workflowDetail?.currentVersion ?? null;
 
   return (
     <section className="workflows-page">
@@ -763,6 +780,14 @@ export function WorkflowsPageClient({ access }: WorkflowsPageClientProps) {
                     >
                       {state.loadingWorkflowData ? "Refreshing..." : "Refresh runs"}
                     </button>
+                    {access.canManageWorkflows && state.selectedWorkflowId ? (
+                      <a
+                        className="workflows-button"
+                        href={`/api/workflows/${encodeURIComponent(state.selectedWorkflowId)}/export`}
+                      >
+                        Download ZIP
+                      </a>
+                    ) : null}
                     {access.canManageWorkflows ? (
                       <button
                         className="workflows-button workflows-button--primary"
@@ -811,6 +836,97 @@ export function WorkflowsPageClient({ access }: WorkflowsPageClientProps) {
                     <span>Versions: {state.workflowDetail.versions.length}</span>
                   </div>
                 ) : null}
+              </section>
+
+              <section className="workflows-panel">
+                <div className="workflows-panel__header">
+                  <div>
+                    <p className="workflows-panel__eyebrow">Workflow code</p>
+                    <h2>Current version source</h2>
+                  </div>
+                </div>
+
+                {state.loadingWorkflowData && !currentVersion ? (
+                  <div className="workflows-empty">Loading workflow code...</div>
+                ) : currentVersion ? (
+                  <div className="workflows-code-viewer">
+                    <div className="workflows-inline-cards">
+                      {currentVersion.contracts.recipe.steps.map((step, index) => {
+                        const stepFileName = getWorkflowStepCodeFileName(step, index);
+                        const stepInputRefs = step.input_refs.map((inputRef) =>
+                          formatWorkflowStepInputRef(inputRef),
+                        );
+                        const stepInputFiles = collectWorkflowStepInputPathHints(step);
+
+                        return (
+                          <article className="workflows-inline-card workflows-code-card" key={step.step_key}>
+                            <header>
+                              <div>
+                                <strong>{step.step_key}</strong>
+                                <p className="workflows-code-card__meta">
+                                  {step.kind} · {step.tool} · {stepFileName}
+                                </p>
+                              </div>
+                              <div className="workflows-panel__actions">
+                                <button
+                                  className="workflows-button"
+                                  onClick={() => {
+                                    void copyToClipboard(step.config.python_code).catch((caughtError) => {
+                                      setState((current) => ({
+                                        ...current,
+                                        error:
+                                          caughtError instanceof Error
+                                            ? caughtError.message
+                                            : "Failed to copy workflow code.",
+                                      }));
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Copy code
+                                </button>
+                                <button
+                                  className="workflows-button"
+                                  onClick={() => {
+                                    downloadTextFile(stepFileName, step.config.python_code);
+                                  }}
+                                  type="button"
+                                >
+                                  Download .py
+                                </button>
+                              </div>
+                            </header>
+
+                            <ul className="workflows-code-list">
+                              <li>
+                                <strong>Input refs:</strong> {stepInputRefs.join(", ") || "None"}
+                              </li>
+                              <li>
+                                <strong>Input files:</strong> {stepInputFiles.join(", ") || "None recorded"}
+                              </li>
+                              <li>
+                                <strong>Expected output:</strong> {getWorkflowStepExpectedOutputDescription(step)}
+                              </li>
+                            </ul>
+
+                            <pre className="workflows-code-block">
+                              <code>{step.config.python_code}</code>
+                            </pre>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    <details className="workflows-code-raw">
+                      <summary>View raw workflow contracts JSON</summary>
+                      <pre className="workflows-code-block">
+                        <code>{JSON.stringify(currentVersion.contracts, null, 2)}</code>
+                      </pre>
+                    </details>
+                  </div>
+                ) : (
+                  <div className="workflows-empty">No current workflow version available.</div>
+                )}
               </section>
 
               <section className="workflows-panel">

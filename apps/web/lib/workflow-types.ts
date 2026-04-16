@@ -164,7 +164,7 @@ export type WorkflowStepV1 =
       config: {
         analysis_goal: string;
         input_files?: string[];
-        python_code?: string;
+        python_code: string;
         result_key: string;
       };
       input_refs: Array<{ input_key: string; type: "workflow_input" }>;
@@ -176,7 +176,7 @@ export type WorkflowStepV1 =
       config: {
         chart_type: "line" | "bar" | "scatter" | "area";
         input_files?: string[];
-        python_code?: string;
+        python_code: string;
         title: string;
       };
       input_refs: WorkflowStepInputRefV1[];
@@ -187,7 +187,7 @@ export type WorkflowStepV1 =
   | {
       config: {
         input_files?: string[];
-        python_code?: string;
+        python_code: string;
         template: "summary_v1" | "brief_v1";
         title: string;
       };
@@ -1317,7 +1317,7 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
       return ref;
     });
 
-    const pythonCode = parseOptionalStringValue(
+    const pythonCode = parseStringValue(
       value.config.python_code,
       `steps[${index}].config.python_code`,
       contractName,
@@ -1343,7 +1343,7 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
           contractName,
         ),
         ...(typeof inputFiles === "undefined" ? {} : { input_files: inputFiles }),
-        ...(typeof pythonCode === "undefined" ? {} : { python_code: pythonCode }),
+        python_code: pythonCode,
         result_key: parseStringValue(
           value.config.result_key,
           `steps[${index}].config.result_key`,
@@ -1365,31 +1365,13 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
       contractName,
     );
 
-    const pythonCode = parseOptionalStringValue(
+    const pythonCode = parseStringValue(
       value.config.python_code,
       `steps[${index}].config.python_code`,
       contractName,
     );
 
-    const chartRefs = refs.map((ref) => {
-      if (!pythonCode && ref.type !== "step_output") {
-        throw new WorkflowContractValidationError(
-          contractName,
-          `steps[${index}] chart refs must use step_output when python_code is omitted.`,
-          "invalid_field",
-        );
-      }
-
-      return ref;
-    });
-
-    if (!pythonCode && !chartRefs.some((ref) => ref.type === "step_output")) {
-      throw new WorkflowContractValidationError(
-        contractName,
-        `steps[${index}] chart steps without python_code must reference a prior step output.`,
-        "invalid_field",
-      );
-    }
+    const chartRefs = refs;
 
     const inputFiles =
       typeof value.config.input_files === "undefined"
@@ -1413,7 +1395,7 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
           contractName,
         ),
         ...(typeof inputFiles === "undefined" ? {} : { input_files: inputFiles }),
-        ...(typeof pythonCode === "undefined" ? {} : { python_code: pythonCode }),
+        python_code: pythonCode,
         title: parseStringValue(value.config.title, `steps[${index}].config.title`, contractName),
       },
       input_refs: chartRefs,
@@ -1442,7 +1424,7 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
     return ref;
   });
 
-  const pythonCode = parseOptionalStringValue(
+  const pythonCode = parseStringValue(
     value.config.python_code,
     `steps[${index}].config.python_code`,
     contractName,
@@ -1463,7 +1445,7 @@ function parseWorkflowStep(value: unknown, index: number, contractName: string):
   return {
     config: {
       ...(typeof inputFiles === "undefined" ? {} : { input_files: inputFiles }),
-      ...(typeof pythonCode === "undefined" ? {} : { python_code: pythonCode }),
+      python_code: pythonCode,
       template: parseEnumValue(
         value.config.template,
         ["summary_v1", "brief_v1"] as const,

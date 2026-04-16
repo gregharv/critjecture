@@ -3432,6 +3432,9 @@ html:not(.crit-show-error-chats) assistant-message:has(.crit-tool--error-collaps
 }
 
 .workflows-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid color-mix(in oklab, var(--border) 66%, transparent 34%);
   border-radius: 10px;
   background: color-mix(in oklab, var(--card) 88%, transparent 12%);
@@ -3441,6 +3444,7 @@ html:not(.crit-show-error-chats) assistant-message:has(.crit-tool--error-collaps
   font-size: 0.86rem;
   font-weight: 650;
   padding: 8px 12px;
+  text-decoration: none;
 }
 
 .workflows-button:hover:not(:disabled) {
@@ -3739,6 +3743,53 @@ html:not(.crit-show-error-chats) assistant-message:has(.crit-tool--error-collaps
   margin: 0;
   font-size: 0.82rem;
   color: var(--shell-copy);
+}
+
+.workflows-code-viewer {
+  display: grid;
+  gap: 12px;
+}
+
+.workflows-code-card {
+  gap: 10px;
+}
+
+.workflows-code-card__meta {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+
+.workflows-code-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--shell-copy);
+  font-size: 0.82rem;
+}
+
+.workflows-code-block {
+  margin: 0;
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 52%, transparent 48%);
+  background: color-mix(in oklab, var(--background) 92%, black 8%);
+  color: var(--foreground);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.workflows-code-raw {
+  display: grid;
+  gap: 10px;
+}
+
+.workflows-code-raw summary {
+  cursor: pointer;
+  color: var(--shell-title-ink);
+  font-weight: 700;
 }
 
 @media (max-width: 1120px) {

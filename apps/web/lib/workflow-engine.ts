@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
-import { parseChartAnalysisStdout, type ChartAnalysisPayload } from "@/lib/analysis-results";
 import { getAppDatabase } from "@/lib/app-db";
 import {
   organizationMemberships,
@@ -81,11 +80,8 @@ type WorkflowRunExecutionContext = {
 type ResolvedWorkflowDocument = WorkflowValidatorResolvedDocument & ResolvedWorkflowAssetInput;
 
 type StepExecutionState = {
-  chartPayload: ChartAnalysisPayload | null;
-  generatedAssets: GeneratedSandboxAsset[];
   inputFiles: string[];
   sandboxRunId: string;
-  toolName: string;
 };
 
 export type ExecuteWorkflowRunResult = {
@@ -138,108 +134,6 @@ function buildVisualGraphCode(code: string) {
   return ["import matplotlib", 'matplotlib.use("Agg")', code].join("\n\n");
 }
 
-function buildStoredChartPayload(
-  chart: ChartAnalysisPayload,
-  overrides: {
-    chartType: "area" | "bar" | "line" | "scatter";
-    title: string;
-  },
-): ChartAnalysisPayload {
-  const normalizedChartType =
-    overrides.chartType === "area" ? "line" : overrides.chartType;
-
-  return {
-    chartType: normalizedChartType,
-    title: overrides.title || chart.title,
-    xLabel: chart.xLabel,
-    yLabel: chart.yLabel,
-    ...("series" in chart
-      ? {
-          series: chart.series,
-        }
-      : {
-          x: chart.x,
-          y: chart.y,
-        }),
-  };
-}
-
-function buildStoredChartRenderCode() {
-  return buildVisualGraphCode(`
-import json
-from pathlib import Path
-import matplotlib.pyplot as plt
-
-payload = json.loads(Path("chart_payload.json").read_text(encoding="utf-8"))
-plt.figure(figsize=(10, 6))
-plotted_value_count = 0
-
-if "series" in payload:
-    axis_labels = []
-    axis_positions = {}
-
-    for series in payload["series"]:
-        for value in series["x"]:
-            label = str(value)
-            if label not in axis_positions:
-                axis_positions[label] = len(axis_labels)
-                axis_labels.append(label)
-
-    positions = list(range(len(axis_labels)))
-    series_count = max(len(payload["series"]), 1)
-
-    if payload["chartType"] == "bar":
-        width = min(0.8 / series_count, 0.35)
-        offset_origin = ((series_count - 1) / 2) * width
-
-        for index, series in enumerate(payload["series"]):
-            series_positions = [axis_positions[str(value)] - offset_origin + index * width for value in series["x"]]
-            label = series.get("name") or f"Series {index + 1}"
-            plt.bar(series_positions, series["y"], width=width, label=label)
-            plotted_value_count += len(series["x"])
-    else:
-        for index, series in enumerate(payload["series"]):
-            series_positions = [axis_positions[str(value)] for value in series["x"]]
-            label = series.get("name") or f"Series {index + 1}"
-            plotted_value_count += len(series["x"])
-
-            if payload["chartType"] == "scatter":
-                plt.scatter(series_positions, series["y"], label=label)
-            else:
-                plt.plot(series_positions, series["y"], marker="o", label=label)
-
-    plt.xticks(positions, axis_labels, rotation=45, ha="right")
-    if len(payload["series"]) > 1:
-        plt.legend()
-else:
-    x_values = payload["x"]
-    y_values = payload["y"]
-    positions = list(range(len(x_values)))
-    plotted_value_count = len(x_values)
-
-    if payload["chartType"] == "line":
-        plt.plot(positions, y_values, marker="o", color="#4C78A8")
-    elif payload["chartType"] == "scatter":
-        plt.scatter(positions, y_values, color="#4C78A8")
-    else:
-        plt.bar(positions, y_values, color="#4C78A8")
-
-    plt.xticks(positions, [str(value) for value in x_values], rotation=45, ha="right")
-
-if payload.get("title"):
-    plt.title(payload["title"])
-
-if payload.get("xLabel"):
-    plt.xlabel(payload["xLabel"])
-
-if payload.get("yLabel"):
-    plt.ylabel(payload["yLabel"])
-
-plt.tight_layout()
-plt.savefig("outputs/chart.png", dpi=200)
-print(f"Created chart.png with {plotted_value_count} plotted values.")
-`);
-}
 
 function expectSingleAsset(
   generatedAssets: GeneratedSandboxAsset[],
@@ -597,17 +491,8 @@ async function executeWorkflowStep(input: {
   });
 
   if (input.step.tool === "run_data_analysis") {
-    const pythonCode = input.step.config.python_code?.trim();
-
-    if (!pythonCode) {
-      throw new WorkflowEngineError(
-        `Analysis step ${input.step.step_key} is missing python_code.`,
-        "analysis_code_missing",
-      );
-    }
-
     const result = await executeSandboxedCommand({
-      code: pythonCode,
+      code: input.step.config.python_code.trim(),
       inputFiles,
       organizationId: input.organizationId,
       organizationSlug: input.organizationSlug,
@@ -618,74 +503,16 @@ async function executeWorkflowStep(input: {
     });
 
     return {
-      chartPayload: parseChartAnalysisStdout(result.stdout),
       generatedAssets: result.generatedAssets,
       inputFiles,
       sandboxResult: result,
-      toolName: input.step.tool,
     };
   }
 
   if (input.step.tool === "generate_visual_graph") {
-    const pythonCode = input.step.config.python_code?.trim();
-
-    if (pythonCode) {
-      const result = await executeSandboxedCommand({
-        code: buildVisualGraphCode(pythonCode),
-        inputFiles,
-        organizationId: input.organizationId,
-        organizationSlug: input.organizationSlug,
-        role: input.executionRole,
-        runtimeToolCallId: buildStepRuntimeToolCallId(input.runId, input.step.step_key),
-        toolName: "generate_visual_graph",
-        userId: input.runAsUserId,
-      });
-      expectSingleAsset(result.generatedAssets, {
-        label: "generate_visual_graph",
-        mimeType: "image/png",
-      });
-
-      return {
-        chartPayload: null,
-        generatedAssets: result.generatedAssets,
-        inputFiles,
-        sandboxResult: result,
-        toolName: input.step.tool,
-      };
-    }
-
-    const chartSourceRef = input.step.input_refs.find((inputRef) => inputRef.type === "step_output");
-
-    if (!chartSourceRef) {
-      throw new WorkflowEngineError(
-        `Chart step ${input.step.step_key} has no step_output reference for chart data.`,
-        "chart_payload_missing",
-      );
-    }
-
-    const chartSource = input.stepOutputs.get(chartSourceRef.step_key);
-
-    if (!chartSource || !chartSource.chartPayload) {
-      throw new WorkflowEngineError(
-        `Chart step ${input.step.step_key} could not find chart payload from ${chartSourceRef.step_key}.`,
-        "chart_payload_missing",
-      );
-    }
-
-    const chartPayload = buildStoredChartPayload(chartSource.chartPayload, {
-      chartType: input.step.config.chart_type,
-      title: input.step.config.title,
-    });
-
     const result = await executeSandboxedCommand({
-      code: buildStoredChartRenderCode(),
-      inlineWorkspaceFiles: [
-        {
-          content: JSON.stringify(chartPayload),
-          relativePath: "chart_payload.json",
-        },
-      ],
-      inputFiles: [],
+      code: buildVisualGraphCode(input.step.config.python_code.trim()),
+      inputFiles,
       organizationId: input.organizationId,
       organizationSlug: input.organizationSlug,
       role: input.executionRole,
@@ -699,25 +526,14 @@ async function executeWorkflowStep(input: {
     });
 
     return {
-      chartPayload: null,
       generatedAssets: result.generatedAssets,
       inputFiles,
       sandboxResult: result,
-      toolName: input.step.tool,
     };
   }
 
-  const pythonCode = input.step.config.python_code?.trim();
-
-  if (!pythonCode) {
-    throw new WorkflowEngineError(
-      `Document step ${input.step.step_key} is missing python_code.`,
-      "document_code_missing",
-    );
-  }
-
   const result = await executeSandboxedCommand({
-    code: pythonCode,
+    code: input.step.config.python_code.trim(),
     inputFiles,
     organizationId: input.organizationId,
     organizationSlug: input.organizationSlug,
@@ -732,11 +548,9 @@ async function executeWorkflowStep(input: {
   });
 
   return {
-    chartPayload: null,
     generatedAssets: result.generatedAssets,
     inputFiles,
     sandboxResult: result,
-    toolName: input.step.tool,
   };
 }
 
@@ -1262,11 +1076,8 @@ export async function executeWorkflowRun(input: {
         });
 
         stepOutputs.set(step.step_key, {
-          chartPayload: execution.chartPayload,
-          generatedAssets: execution.generatedAssets,
           inputFiles: execution.inputFiles,
           sandboxRunId: execution.sandboxResult.sandboxRunId,
-          toolName: execution.toolName,
         });
         sandboxRunIds.push(execution.sandboxResult.sandboxRunId);
         generatedArtifacts.push(

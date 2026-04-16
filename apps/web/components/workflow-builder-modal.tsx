@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 
+import {
+  collectWorkflowStepInputPathHints,
+  formatWorkflowStepInputRef,
+  getWorkflowStepCodeFileName,
+  getWorkflowStepExpectedOutputDescription,
+} from "@/lib/workflow-code";
 import type { WorkflowDraftFromChatTurn } from "@/lib/workflow-builder-types";
 import type { WorkflowStatus, WorkflowVisibility } from "@/lib/workflow-types";
 
@@ -137,6 +143,45 @@ export function WorkflowBuilderModal({
               </ul>
             </section>
           ) : null}
+
+          <section className="workflow-builder-modal__summary">
+            <h3>Review step code</h3>
+            {draft.version.recipe.steps.length === 0 ? (
+              <p>No executable workflow steps were compiled from this turn.</p>
+            ) : (
+              <div className="workflows-code-viewer">
+                {draft.version.recipe.steps.map((step, index) => (
+                  <article className="workflows-inline-card workflows-code-card" key={step.step_key}>
+                    <header>
+                      <div>
+                        <strong>{step.step_key}</strong>
+                        <p className="workflows-code-card__meta">
+                          {step.kind} · {getWorkflowStepCodeFileName(step, index)}
+                        </p>
+                      </div>
+                    </header>
+                    <ul className="workflows-code-list">
+                      <li>
+                        <strong>Input refs:</strong>{" "}
+                        {step.input_refs.map((inputRef) => formatWorkflowStepInputRef(inputRef)).join(", ") ||
+                          "None"}
+                      </li>
+                      <li>
+                        <strong>Input files:</strong>{" "}
+                        {collectWorkflowStepInputPathHints(step).join(", ") || "None recorded"}
+                      </li>
+                      <li>
+                        <strong>Expected output:</strong> {getWorkflowStepExpectedOutputDescription(step)}
+                      </li>
+                    </ul>
+                    <pre className="workflows-code-block">
+                      <code>{step.config.python_code}</code>
+                    </pre>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
           {error ? <p className="workflow-builder-modal__error">{error}</p> : null}
         </div>
