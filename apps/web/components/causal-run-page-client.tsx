@@ -94,6 +94,20 @@ type ParsedAnswerPackage = {
     approvalText?: string;
     createdAt?: number;
   };
+  estimates: Array<{
+    confidenceIntervalHigh?: number | null;
+    confidenceIntervalLow?: number | null;
+    effectName?: string;
+    estimateValue?: number | null;
+    estimatorName?: string;
+    pValue?: number | null;
+    stdError?: number | null;
+  }>;
+  estimands: Array<{
+    estimandExpression?: string;
+    estimandKind?: string;
+    estimandLabel?: string;
+  }>;
   identification: null | {
     adjustmentSet?: string[];
     blockingReasons?: string[];
@@ -167,6 +181,8 @@ function parseAnswerPackage(packageJson: string | null | undefined): ParsedAnswe
     return {
       assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
       approval: parsed.approval ?? null,
+      estimates: Array.isArray(parsed.estimates) ? parsed.estimates : [],
+      estimands: Array.isArray(parsed.estimands) ? parsed.estimands : [],
       identification: parsed.identification ?? null,
       limitations: Array.isArray(parsed.limitations) ? parsed.limitations : [],
       nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps : [],
@@ -234,6 +250,15 @@ function describeEstimateDirection(value: number | null) {
   return "Estimated effect is approximately zero.";
 }
 
+function formatPreviewList(values: string[], emptyLabel: string, limit = 3) {
+  if (!values.length) {
+    return emptyLabel;
+  }
+
+  const preview = values.slice(0, limit).join(", ");
+  return values.length > limit ? `${preview} +${values.length - limit} more` : preview;
+}
+
 export function CausalRunPageClient({
   initialRunDetail,
   study,
@@ -265,6 +290,22 @@ export function CausalRunPageClient({
   const identificationStatusLabel =
     parsedPackage?.identification?.statusLabel ??
     (identified === true ? "identified" : identified === false ? "not identified" : "not recorded");
+  const packagePrimaryEstimate = parsedPackage?.estimates[0] ?? null;
+  const packagePrimaryEstimand = parsedPackage?.estimands[0] ?? null;
+  const summaryEstimateValue =
+    typeof packagePrimaryEstimate?.estimateValue === "number"
+      ? packagePrimaryEstimate.estimateValue
+      : primaryEstimate?.estimateValue ?? null;
+  const summaryEstimateInterval =
+    typeof packagePrimaryEstimate?.confidenceIntervalLow === "number" &&
+    typeof packagePrimaryEstimate?.confidenceIntervalHigh === "number"
+      ? `${formatNumber(packagePrimaryEstimate.confidenceIntervalLow)} to ${formatNumber(packagePrimaryEstimate.confidenceIntervalHigh)}`
+      : typeof primaryEstimate?.confidenceIntervalLow === "number" &&
+          typeof primaryEstimate?.confidenceIntervalHigh === "number"
+        ? `${formatNumber(primaryEstimate.confidenceIntervalLow)} to ${formatNumber(primaryEstimate.confidenceIntervalHigh)}`
+        : null;
+  const assumptionHighlights = (parsedPackage?.assumptions ?? []).slice(0, 3);
+  const limitationHighlights = (parsedPackage?.limitations ?? []).slice(0, 3);
   const latestComputeRun = runDetail.computeRuns[0] ?? null;
 
   async function refreshRun() {
@@ -406,9 +447,6 @@ export function CausalRunPageClient({
 
           {latestAnswer ? (
             <>
-              <p className="causal-card__copy">
-                <strong>Topline:</strong> {describeEstimateDirection(primaryEstimate?.estimateValue ?? null)}
-              </p>
               <ul className="causal-list">
                 <li>Latest answer model: {latestAnswer.modelName}</li>
                 <li>Prompt version: {latestAnswer.promptVersion}</li>
@@ -417,6 +455,94 @@ export function CausalRunPageClient({
                   <li>Answer package saved: {formatTimestamp(runDetail.answerPackage.createdAt)}</li>
                 ) : null}
               </ul>
+
+              <div className="causal-grid" style={{ marginTop: 16 }}>
+                <section className="causal-card">
+                  <p className="causal-card__meta">Topline claim</p>
+                  <div
+                    style={{
+                      ...getStatusTone(identificationStatusLabel),
+                      borderRadius: 12,
+                      display: "inline-flex",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      marginTop: 8,
+                      padding: "6px 10px",
+                    }}
+                  >
+                    {formatLabel(identificationStatusLabel)}
+                  </div>
+                  <p className="causal-card__copy" style={{ marginTop: 12 }}>
+                    {identified === false
+                      ? `The stored package does not support identification of ${runDetail.run.treatmentNodeKey} → ${runDetail.run.outcomeNodeKey}.`
+                      : describeEstimateDirection(summaryEstimateValue)}
+                  </p>
+                  <p className="causal-card__meta">
+                    {packagePrimaryEstimand?.estimandLabel ?? runDetail.estimands[0]?.estimandLabel ?? "No estimand label stored"}
+                  </p>
+                </section>
+
+                <section className="causal-card">
+                  <p className="causal-card__meta">Evidence snapshot</p>
+                  <ul className="causal-list">
+                    <li>Method: {identificationMethod ? formatLabel(identificationMethod) : "not recorded"}</li>
+                    <li>
+                      Estimate: {formatNumber(summaryEstimateValue)}
+                      {summaryEstimateInterval ? ` · interval ${summaryEstimateInterval}` : ""}
+                    </li>
+                    <li>
+                      Estimator: {packagePrimaryEstimate?.estimatorName ?? primaryEstimate?.estimatorName ?? "not recorded"}
+                    </li>
+                    <li>Adjustment set: {formatPreviewList(identificationAdjustmentSet, "not recorded")}</li>
+                    <li>
+                      Refutations: {runDetail.refutations.length || parsedPackage?.refutations.length || 0} stored · {formatPreviewList(
+                        runDetail.refutations.map((refutation) => refutation.refuterName),
+                        formatPreviewList(
+                          (parsedPackage?.refutations ?? [])
+                            .map((refutation) => refutation.refuterName)
+                            .filter((value): value is string => typeof value === "string" && value.length > 0),
+                          "none recorded",
+                        ),
+                      )}
+                    </li>
+                  </ul>
+                </section>
+
+                <section className="causal-card">
+                  <p className="causal-card__meta">Key assumptions</p>
+                  {assumptionHighlights.length ? (
+                    <ul className="causal-list">
+                      {assumptionHighlights.map((assumption, index) => (
+                        <li key={`${assumption.description ?? assumption.assumptionType ?? "assumption"}-${index}`}>
+                          {assumption.description ?? assumption.assumptionType ?? "Unnamed assumption"}
+                          {assumption.status ? ` · ${assumption.status}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="causal-card__empty">No explicit assumptions were stored.</p>
+                  )}
+                </section>
+
+                <section className="causal-card">
+                  <p className="causal-card__meta">Main caveats</p>
+                  {identificationBlockingReasons.length || limitationHighlights.length ? (
+                    <ul className="causal-list">
+                      {(identificationBlockingReasons.length
+                        ? identificationBlockingReasons
+                        : limitationHighlights
+                      )
+                        .slice(0, 3)
+                        .map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p className="causal-card__empty">No blocking reasons or package limitations were stored.</p>
+                  )}
+                </section>
+              </div>
+
               <details open>
                 <summary className="causal-card__meta">Latest grounded answer markdown</summary>
                 <div className="causal-answer-markdown">

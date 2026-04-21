@@ -559,6 +559,19 @@ async function ensureRunArtifact(input: {
   return storagePath;
 }
 
+function parseJsonStringArray(value: string | null | undefined) {
+  if (!value) {
+    return [] as string[];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 async function getOrganizationExecutionPolicy(organizationId: string) {
   const db = await getAppDatabase();
   const rows = await db
@@ -1362,12 +1375,16 @@ export async function listCausalRunsForStudy(input: {
 
   const runIds = runs.map((run) => run.id);
 
-  const [identifications, estimates, refutations, answers, artifacts] = runIds.length
+  const [identifications, estimands, estimates, refutations, answers, artifacts] = runIds.length
     ? await Promise.all([
         db
           .select()
           .from(causalIdentifications)
           .where(inArray(causalIdentifications.runId, runIds)),
+        db
+          .select()
+          .from(causalEstimands)
+          .where(inArray(causalEstimands.runId, runIds)),
         db
           .select()
           .from(causalEstimates)
@@ -1386,7 +1403,7 @@ export async function listCausalRunsForStudy(input: {
           .from(runArtifacts)
           .where(inArray(runArtifacts.runId, runIds)),
       ])
-    : [[], [], [], [], []];
+    : [[], [], [], [], [], []];
 
   const identificationByRunId = new Map(identifications.map((entry) => [entry.runId, entry]));
   const estimateByRunId = new Map<string, (typeof estimates)[number]>();
@@ -1396,9 +1413,22 @@ export async function listCausalRunsForStudy(input: {
     }
   }
 
+  const estimandLabelsByRunId = new Map<string, string[]>();
+  for (const estimand of estimands) {
+    estimandLabelsByRunId.set(estimand.runId, [
+      ...(estimandLabelsByRunId.get(estimand.runId) ?? []),
+      estimand.estimandLabel,
+    ]);
+  }
+
   const refutationCountByRunId = new Map<string, number>();
+  const refuterNamesByRunId = new Map<string, string[]>();
   for (const refutation of refutations) {
     refutationCountByRunId.set(refutation.runId, (refutationCountByRunId.get(refutation.runId) ?? 0) + 1);
+    refuterNamesByRunId.set(refutation.runId, [
+      ...(refuterNamesByRunId.get(refutation.runId) ?? []),
+      refutation.refuterName,
+    ]);
   }
 
   const answerCountByRunId = new Map<string, number>();
@@ -1419,17 +1449,23 @@ export async function listCausalRunsForStudy(input: {
     const estimate = estimateByRunId.get(run.id) ?? null;
 
     return {
+      adjustmentSet: parseJsonStringArray(identification?.adjustmentSetJson),
       artifactCount: artifactCountByRunId.get(run.id) ?? 0,
       answerCount: answerCountByRunId.get(run.id) ?? 0,
+      blockingReasons: parseJsonStringArray(identification?.blockingReasonsJson),
       completedAt: run.completedAt,
       createdAt: run.createdAt,
+      estimandLabels: [...new Set(estimandLabelsByRunId.get(run.id) ?? [])].sort((left, right) => left.localeCompare(right)),
       estimatorName: estimate?.estimatorName ?? null,
       id: run.id,
       identificationMethod: identification?.method ?? null,
       identified: identification?.identified ?? null,
       outcomeNodeKey: run.outcomeNodeKey,
+      primaryEstimateIntervalHigh: estimate?.confidenceIntervalHigh ?? null,
+      primaryEstimateIntervalLow: estimate?.confidenceIntervalLow ?? null,
       primaryEstimateValue: estimate?.estimateValue ?? null,
       refutationCount: refutationCountByRunId.get(run.id) ?? 0,
+      refuterNames: [...new Set(refuterNamesByRunId.get(run.id) ?? [])].sort((left, right) => left.localeCompare(right)),
       status: run.status,
       treatmentNodeKey: run.treatmentNodeKey,
     };

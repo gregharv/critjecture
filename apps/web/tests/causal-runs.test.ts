@@ -603,6 +603,12 @@ describe("causal runs", () => {
       expect(summaries[0]?.identified).toBe(true);
       expect(summaries[0]?.identificationMethod).toBeTruthy();
       expect(summaries[0]?.primaryEstimateValue).not.toBeNull();
+      expect(summaries[0]?.primaryEstimateIntervalLow).not.toBeNull();
+      expect(summaries[0]?.primaryEstimateIntervalHigh).not.toBeNull();
+      expect(summaries[0]?.adjustmentSet).toContain("seasonality");
+      expect(summaries[0]?.estimandLabels[0]).toContain("Discount rate");
+      expect(summaries[0]?.refuterNames.length).toBeGreaterThanOrEqual(3);
+      expect(summaries[0]?.blockingReasons).toHaveLength(0);
       expect(summaries[0]?.refutationCount).toBeGreaterThanOrEqual(3);
       expect(summaries[0]?.answerCount).toBeGreaterThanOrEqual(1);
       expect(summaries[0]?.artifactCount).toBeGreaterThanOrEqual(3);

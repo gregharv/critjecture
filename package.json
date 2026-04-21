@@ -13,6 +13,7 @@
     "test": "pnpm --filter web test",
     "test:e2e": "pnpm --filter web test:e2e",
     "test:all": "pnpm --filter web test:all",
+    "smoke:ui:local": "node ./scripts/playwright-local-ui-smoke.mjs",
     "db:migrate": "pnpm --filter web db:migrate",
     "archive:legacy": "pnpm --filter web archive:legacy",
     "import:v1-foundations": "pnpm --filter web import:v1-foundations",
@@ -24,5 +25,8 @@
     "restore:drill:single-org": "pnpm --filter web restore:drill:single-org",
     "release:proof:hosted": "pnpm --filter web release:proof:hosted",
     "release:proof:single-org": "pnpm --filter web release:proof:single-org"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
   }
 }

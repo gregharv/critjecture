@@ -6,7 +6,7 @@ import { createGroundedCausalAnswer } from "@/lib/causal-answers";
 import { runCausalIntake } from "@/lib/causal-intake";
 import { approveCausalDagVersion, createCausalDagVersion, ensureStudyDag } from "@/lib/causal-dags";
 import { createAndExecuteCausalRun } from "@/lib/causal-runs";
-import { exportCausalRunZip } from "@/lib/causal-export";
+import { exportCausalRunComparisonZip, exportCausalRunZip } from "@/lib/causal-export";
 import { getAppDatabase } from "@/lib/app-db";
 import {
   causalAnswerPackages,
@@ -230,6 +230,68 @@ async function prepareApprovedStudy(input: {
 describe("causal export bundle", () => {
   afterEach(async () => {
     await resetTestAppState();
+  });
+
+  it("exports a workflow-style comparison zip bundle for two causal runs", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const studyId = await prepareApprovedStudy({
+        datasetPath: path.join(environment.rootDir, "datasets", "compare-export.csv"),
+        organizationId: user!.organizationId,
+        user: user!,
+        userId: user!.id,
+      });
+
+      const baseCreated = await createAndExecuteCausalRun({
+        runUser: {
+          id: user!.id,
+          organizationId: user!.organizationId,
+          organizationSlug: user!.organizationSlug,
+        },
+        studyId,
+      });
+      const targetCreated = await createAndExecuteCausalRun({
+        runUser: {
+          id: user!.id,
+          organizationId: user!.organizationId,
+          organizationSlug: user!.organizationSlug,
+        },
+        studyId,
+      });
+
+      await createGroundedCausalAnswer({
+        organizationId: user!.organizationId,
+        runId: targetCreated.run.id,
+      });
+
+      const archive = await exportCausalRunComparisonZip({
+        baseRunId: baseCreated.run.id,
+        organizationId: user!.organizationId,
+        studyId,
+        targetRunId: targetCreated.run.id,
+      });
+
+      expect(archive.archiveFileName).toContain(".zip");
+      expect(archive.archiveFileName).toContain("vs");
+
+      const zipText = archive.buffer.toString("utf8");
+      expect(zipText).toContain("Causal run comparison export");
+      expect(zipText).toContain("compare/summary.json");
+      expect(zipText).toContain("runs/base/run.json");
+      expect(zipText).toContain("runs/target/run.json");
+      expect(zipText).toContain("runs/base/answers.json");
+      expect(zipText).toContain("runs/target/answers.json");
+      expect(zipText).toContain("artifacts/base/");
+      expect(zipText).toContain("artifacts/target/");
+      expect(zipText).toContain(baseCreated.run.id);
+      expect(zipText).toContain(targetCreated.run.id);
+    } finally {
+      await environment.cleanup();
+    }
   });
 
   it("exports a workflow-style zip bundle for causal runs", async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CausalDagCanvas, getNodeAccent } from "@/components/causal-dag-canvas";
@@ -126,17 +127,23 @@ type CausalDagWorkspaceDetail = {
 };
 
 type CausalRunSummary = {
+  adjustmentSet: string[];
   answerCount: number;
   artifactCount: number;
+  blockingReasons: string[];
   completedAt: number | null;
   createdAt: number;
+  estimandLabels: string[];
   estimatorName: string | null;
   id: string;
   identificationMethod: string | null;
   identified: boolean | null;
   outcomeNodeKey: string;
+  primaryEstimateIntervalHigh: number | null;
+  primaryEstimateIntervalLow: number | null;
   primaryEstimateValue: number | null;
   refutationCount: number;
+  refuterNames: string[];
   status: string;
   treatmentNodeKey: string;
 };
@@ -159,6 +166,10 @@ type CurrentQuestionSummary = {
 
 type CausalStudyPageClientProps = {
   initialAnswers: CausalAnswerSummary[];
+  initialComparison: {
+    baseRunId: string | null;
+    targetRunId: string | null;
+  };
   initialCurrentQuestion: CurrentQuestionSummary;
   initialDagWorkspace: CausalDagWorkspaceDetail;
   initialDatasetBinding: StudyDatasetBindingDetail;
@@ -248,6 +259,54 @@ function formatNumber(value: number | null, digits = 4) {
   }).format(value);
 }
 
+function areStringSetsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const leftSorted = [...left].sort((a, b) => a.localeCompare(b));
+  const rightSorted = [...right].sort((a, b) => a.localeCompare(b));
+
+  return leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
+function compareRunSupport(left: CausalRunSummary, right: CausalRunSummary) {
+  return (
+    right.refutationCount - left.refutationCount ||
+    right.answerCount - left.answerCount ||
+    right.artifactCount - left.artifactCount ||
+    (right.completedAt ?? 0) - (left.completedAt ?? 0) ||
+    right.createdAt - left.createdAt
+  );
+}
+
+function formatPreviewList(values: string[], emptyLabel: string, limit = 3) {
+  if (!values.length) {
+    return emptyLabel;
+  }
+
+  const preview = values.slice(0, limit).join(", ");
+  return values.length > limit ? `${preview} +${values.length - limit} more` : preview;
+}
+
+function diffStringSets(base: string[], target: string[]) {
+  const baseSet = new Set(base);
+  const targetSet = new Set(target);
+
+  return {
+    added: target.filter((value) => !baseSet.has(value)).sort((left, right) => left.localeCompare(right)),
+    removed: base.filter((value) => !targetSet.has(value)).sort((left, right) => left.localeCompare(right)),
+  };
+}
+
+function appendUniqueLabel(values: string[], value: string | null) {
+  if (!value || values.includes(value)) {
+    return values;
+  }
+
+  return [...values, value];
+}
+
 function getErrorMessage(value: unknown, fallbackMessage: string) {
   if (
     typeof value === "object" &&
@@ -299,6 +358,31 @@ function inferSuggestedNodeType(input: {
     : input.semanticType === "outcome_candidate"
       ? "outcome"
       : "observed_feature";
+}
+
+function resolveInitialComparison(input: {
+  requestedBaseRunId?: string | null;
+  requestedTargetRunId?: string | null;
+  runs: CausalRunSummary[];
+}) {
+  const requestedBaseExists =
+    !!input.requestedBaseRunId && input.runs.some((run) => run.id === input.requestedBaseRunId);
+  const requestedTargetExists =
+    !!input.requestedTargetRunId && input.runs.some((run) => run.id === input.requestedTargetRunId);
+
+  const baseRunId =
+    (requestedBaseExists ? input.requestedBaseRunId : null) ?? input.runs[0]?.id ?? "";
+  let targetRunId =
+    (requestedTargetExists ? input.requestedTargetRunId : null) ?? input.runs[1]?.id ?? input.runs[0]?.id ?? "";
+
+  if (baseRunId && targetRunId === baseRunId) {
+    targetRunId = input.runs.find((run) => run.id !== baseRunId)?.id ?? baseRunId;
+  }
+
+  return {
+    baseRunId,
+    targetRunId,
+  };
 }
 
 function getDraftAutosaveKey(studyId: string) {
@@ -480,12 +564,16 @@ function parseGraphJsonDraft(
 
 export function CausalStudyPageClient({
   initialAnswers,
+  initialComparison,
   initialCurrentQuestion,
   initialDagWorkspace,
   initialDatasetBinding,
   initialRuns,
   study,
 }: CausalStudyPageClientProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [currentQuestion, setCurrentQuestion] = useState(initialCurrentQuestion);
   const [datasetBinding, setDatasetBinding] = useState(initialDatasetBinding);
   const [dagWorkspace, setDagWorkspace] = useState(initialDagWorkspace);
@@ -508,8 +596,21 @@ export function CausalStudyPageClient({
   const [approvalText, setApprovalText] = useState(DEFAULT_APPROVAL_TEXT);
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
-  const [comparisonBaseRunId, setComparisonBaseRunId] = useState<string>(initialRuns[0]?.id ?? "");
-  const [comparisonTargetRunId, setComparisonTargetRunId] = useState<string>(initialRuns[1]?.id ?? initialRuns[0]?.id ?? "");
+  const [comparisonBaseRunId, setComparisonBaseRunId] = useState<string>(
+    () => resolveInitialComparison({
+      requestedBaseRunId: initialComparison.baseRunId,
+      requestedTargetRunId: initialComparison.targetRunId,
+      runs: initialRuns,
+    }).baseRunId,
+  );
+  const [comparisonTargetRunId, setComparisonTargetRunId] = useState<string>(
+    () => resolveInitialComparison({
+      requestedBaseRunId: initialComparison.baseRunId,
+      requestedTargetRunId: initialComparison.targetRunId,
+      runs: initialRuns,
+    }).targetRunId,
+  );
+  const [comparisonLinkStatus, setComparisonLinkStatus] = useState<null | "copied" | "failed">(null);
   const dagCanvasSectionRef = useRef<HTMLDivElement | null>(null);
   const [newCustomNode, setNewCustomNode] = useState({
     label: "",
@@ -656,6 +757,126 @@ export function CausalStudyPageClient({
     () => runs.find((run) => run.id === comparisonTargetRunId) ?? null,
     [comparisonTargetRunId, runs],
   );
+  const latestRun = useMemo(() => runs[0] ?? null, [runs]);
+  const latestCompletedRun = useMemo(
+    () => runs.find((run) => run.completedAt != null) ?? null,
+    [runs],
+  );
+  const bestSupportedIdentifiedRun = useMemo(
+    () =>
+      [...runs]
+        .filter((run) => run.identified === true)
+        .sort(compareRunSupport)[0] ?? null,
+    [runs],
+  );
+  const latestAnswerBearingRun = useMemo(
+    () => runs.find((run) => run.answerCount > 0) ?? null,
+    [runs],
+  );
+  const runHighlights = useMemo(
+    () => [
+      {
+        description: "Most recently created run, even if packaging or answer generation is still in progress.",
+        label: "Latest run",
+        run: latestRun,
+      },
+      {
+        description: "Newest run that finished execution and can usually be inspected immediately.",
+        label: "Latest completed",
+        run: latestCompletedRun,
+      },
+      {
+        description: "Best supported identified run based on stored refutations, answers, and artifacts.",
+        label: "Best identified",
+        run: bestSupportedIdentifiedRun,
+      },
+      {
+        description: "Newest run that already has at least one grounded final answer.",
+        label: "Latest answer-bearing",
+        run: latestAnswerBearingRun,
+      },
+    ],
+    [bestSupportedIdentifiedRun, latestAnswerBearingRun, latestCompletedRun, latestRun],
+  );
+  const runBadgesByRunId = useMemo(() => {
+    const badges = new Map<string, string[]>();
+
+    for (const highlight of runHighlights) {
+      if (!highlight.run) {
+        continue;
+      }
+
+      badges.set(
+        highlight.run.id,
+        appendUniqueLabel(badges.get(highlight.run.id) ?? [], highlight.label),
+      );
+    }
+
+    if (comparisonBaseRunId) {
+      badges.set(
+        comparisonBaseRunId,
+        appendUniqueLabel(badges.get(comparisonBaseRunId) ?? [], "Current baseline"),
+      );
+    }
+
+    if (comparisonTargetRunId) {
+      badges.set(
+        comparisonTargetRunId,
+        appendUniqueLabel(badges.get(comparisonTargetRunId) ?? [], "Current comparison"),
+      );
+    }
+
+    return badges;
+  }, [comparisonBaseRunId, comparisonTargetRunId, runHighlights]);
+  const comparisonAdjustmentDiff = useMemo(
+    () =>
+      comparisonBaseRun && comparisonTargetRun
+        ? diffStringSets(comparisonBaseRun.adjustmentSet, comparisonTargetRun.adjustmentSet)
+        : { added: [], removed: [] },
+    [comparisonBaseRun, comparisonTargetRun],
+  );
+  const comparisonEstimandDiff = useMemo(
+    () =>
+      comparisonBaseRun && comparisonTargetRun
+        ? diffStringSets(comparisonBaseRun.estimandLabels, comparisonTargetRun.estimandLabels)
+        : { added: [], removed: [] },
+    [comparisonBaseRun, comparisonTargetRun],
+  );
+  const comparisonBlockingReasonDiff = useMemo(
+    () =>
+      comparisonBaseRun && comparisonTargetRun
+        ? diffStringSets(comparisonBaseRun.blockingReasons, comparisonTargetRun.blockingReasons)
+        : { added: [], removed: [] },
+    [comparisonBaseRun, comparisonTargetRun],
+  );
+  const comparisonRefuterDiff = useMemo(
+    () =>
+      comparisonBaseRun && comparisonTargetRun
+        ? diffStringSets(comparisonBaseRun.refuterNames, comparisonTargetRun.refuterNames)
+        : { added: [], removed: [] },
+    [comparisonBaseRun, comparisonTargetRun],
+  );
+  const comparisonQueryString = useMemo(() => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    if (comparisonBaseRunId) {
+      nextParams.set("baseRunId", comparisonBaseRunId);
+    } else {
+      nextParams.delete("baseRunId");
+    }
+
+    if (comparisonTargetRunId) {
+      nextParams.set("targetRunId", comparisonTargetRunId);
+    } else {
+      nextParams.delete("targetRunId");
+    }
+
+    return nextParams.toString();
+  }, [comparisonBaseRunId, comparisonTargetRunId, searchParams]);
+  const comparisonSharePath = useMemo(
+    () => (comparisonQueryString ? `${pathname}?${comparisonQueryString}` : pathname),
+    [comparisonQueryString, pathname],
+  );
   const nodeSuggestedEdgeActions = useMemo(() => {
     const byNodeKey: Record<
       string,
@@ -707,20 +928,42 @@ export function CausalStudyPageClient({
   }, [dagDraft?.edges, dagDraft?.nodes, selectedEdgeKey, selectedNodeKey]);
 
   useEffect(() => {
-    if (runs.length === 0) {
-      setComparisonBaseRunId("");
-      setComparisonTargetRunId("");
+    const nextSelection = resolveInitialComparison({
+      requestedBaseRunId: comparisonBaseRunId,
+      requestedTargetRunId: comparisonTargetRunId,
+      runs,
+    });
+
+    if (comparisonBaseRunId !== nextSelection.baseRunId) {
+      setComparisonBaseRunId(nextSelection.baseRunId);
+    }
+
+    if (comparisonTargetRunId !== nextSelection.targetRunId) {
+      setComparisonTargetRunId(nextSelection.targetRunId);
+    }
+  }, [comparisonBaseRunId, comparisonTargetRunId, runs]);
+
+  useEffect(() => {
+    const currentQuery = searchParams.toString();
+
+    if (currentQuery === comparisonQueryString) {
       return;
     }
 
-    if (!runs.some((run) => run.id === comparisonBaseRunId)) {
-      setComparisonBaseRunId(runs[0]?.id ?? "");
+    router.replace(comparisonSharePath, { scroll: false });
+  }, [comparisonQueryString, comparisonSharePath, router, searchParams]);
+
+  useEffect(() => {
+    if (!comparisonLinkStatus) {
+      return;
     }
 
-    if (!runs.some((run) => run.id === comparisonTargetRunId)) {
-      setComparisonTargetRunId(runs[1]?.id ?? runs[0]?.id ?? "");
-    }
-  }, [comparisonBaseRunId, comparisonTargetRunId, runs]);
+    const timeout = window.setTimeout(() => {
+      setComparisonLinkStatus(null);
+    }, 2000);
+
+    return () => window.clearTimeout(timeout);
+  }, [comparisonLinkStatus]);
 
   function focusCanvasInspector() {
     dagCanvasSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1370,6 +1613,94 @@ export function CausalStudyPageClient({
       setError(submitError instanceof Error ? submitError.message : "Failed to create the causal run.");
     } finally {
       setPending(false);
+    }
+  }
+
+  function setComparisonBaseline(runId: string) {
+    setComparisonBaseRunId(runId);
+    if (comparisonTargetRunId === runId) {
+      setComparisonTargetRunId(runs.find((run) => run.id !== runId)?.id ?? runId);
+    }
+  }
+
+  function setComparisonTarget(runId: string) {
+    setComparisonTargetRunId(runId);
+    if (comparisonBaseRunId === runId) {
+      setComparisonBaseRunId(runs.find((run) => run.id !== runId)?.id ?? runId);
+    }
+  }
+
+  function compareAgainstHighlight(runId: string) {
+    setComparisonTarget(runId);
+    if (!comparisonBaseRunId || comparisonBaseRunId === runId) {
+      setComparisonBaseRunId(runs.find((run) => run.id !== runId)?.id ?? runId);
+    }
+  }
+
+  function compareAgainstCurrentBaseline(runId: string) {
+    if (!comparisonBaseRunId) {
+      setComparisonBaseRunId(runs.find((run) => run.id !== runId)?.id ?? runId);
+      setComparisonTargetRunId(runId);
+      return;
+    }
+
+    if (comparisonBaseRunId === runId) {
+      setComparisonTargetRunId(runs.find((run) => run.id !== runId)?.id ?? runId);
+      return;
+    }
+
+    setComparisonTarget(runId);
+  }
+
+  async function handleCopyComparisonLink() {
+    if (!comparisonBaseRunId || !comparisonTargetRunId || typeof window === "undefined") {
+      setComparisonLinkStatus("failed");
+      return;
+    }
+
+    const absoluteUrl = `${window.location.origin}${comparisonSharePath}`;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable.");
+      }
+
+      await navigator.clipboard.writeText(absoluteUrl);
+      setComparisonLinkStatus("copied");
+    } catch {
+      setComparisonLinkStatus("failed");
+    }
+  }
+
+  function handleSwapComparisonRuns() {
+    if (!comparisonBaseRunId || !comparisonTargetRunId) {
+      return;
+    }
+
+    setComparisonBaseRunId(comparisonTargetRunId);
+    setComparisonTargetRunId(comparisonBaseRunId);
+  }
+
+  function handleResetComparisonSelection() {
+    const nextSelection = resolveInitialComparison({
+      requestedBaseRunId: null,
+      requestedTargetRunId: null,
+      runs,
+    });
+
+    setComparisonBaseRunId(nextSelection.baseRunId);
+    setComparisonTargetRunId(nextSelection.targetRunId);
+    setComparisonLinkStatus(null);
+  }
+
+  function handleOpenComparisonRuns() {
+    if (!comparisonBaseRunId || !comparisonTargetRunId || typeof window === "undefined") {
+      return;
+    }
+
+    window.open(`/causal/studies/${study.id}/runs/${comparisonBaseRunId}`, "_blank", "noopener,noreferrer");
+    if (comparisonTargetRunId !== comparisonBaseRunId) {
+      window.open(`/causal/studies/${study.id}/runs/${comparisonTargetRunId}`, "_blank", "noopener,noreferrer");
     }
   }
 
@@ -2664,6 +2995,89 @@ export function CausalStudyPageClient({
             Runs are pinned to the approved DAG version and primary dataset version. If identification
             fails, the result remains honestly not identifiable.
           </p>
+          {runs.length ? (
+            <div className="causal-grid" style={{ marginTop: 16 }}>
+              {runHighlights.map((highlight) => (
+                <section key={highlight.label} className="causal-card">
+                  <div className="causal-card__header-row">
+                    <div>
+                      <p className="causal-card__meta">{highlight.label}</p>
+                      {highlight.run ? (
+                        <strong>
+                          <Link className="causal-study-list__link" href={`/causal/studies/${study.id}/runs/${highlight.run.id}`}>
+                            {highlight.run.id}
+                          </Link>
+                        </strong>
+                      ) : (
+                        <strong>No matching run</strong>
+                      )}
+                    </div>
+                    {highlight.run ? (
+                      <span className="causal-study-list__status">{formatLabel(highlight.run.status)}</span>
+                    ) : null}
+                  </div>
+                  <p className="causal-card__copy">{highlight.description}</p>
+                  {highlight.run ? (
+                    <>
+                      <p className="causal-card__meta">
+                        Started {formatTimestamp(highlight.run.createdAt)}
+                        {highlight.run.completedAt
+                          ? ` · completed ${formatTimestamp(highlight.run.completedAt)}`
+                          : " · still running or packaging"}
+                      </p>
+                      <p className="causal-card__meta">
+                        {highlight.run.identified == null
+                          ? "Identification pending"
+                          : highlight.run.identified
+                            ? "Identified"
+                            : "Not identified"}
+                        {highlight.run.identificationMethod
+                          ? ` · ${formatLabel(highlight.run.identificationMethod)}`
+                          : ""}
+                        {highlight.run.primaryEstimateValue != null
+                          ? ` · estimate ${formatNumber(highlight.run.primaryEstimateValue)}`
+                          : ""}
+                      </p>
+                      <p className="causal-card__meta">
+                        {highlight.run.refutationCount} refutations · {highlight.run.answerCount} answers · {highlight.run.artifactCount} artifacts
+                      </p>
+                      <p className="causal-card__meta">
+                        Adjustment set: {formatPreviewList(highlight.run.adjustmentSet, "not recorded")}
+                      </p>
+                      <div className="causal-inline-actions" style={{ marginTop: 8, rowGap: 8 }}>
+                        <Link className="causal-study-list__link" href={`/causal/studies/${study.id}/runs/${highlight.run.id}`}>
+                          Open run
+                        </Link>
+                        <a className="causal-study-list__link" href={`/api/causal/runs/${highlight.run.id}/export`}>
+                          Export
+                        </a>
+                        {runs.length >= 2 ? (
+                          <>
+                            <button
+                              className="causal-inline-button"
+                              onClick={() => setComparisonBaseline(highlight.run!.id)}
+                              type="button"
+                            >
+                              {comparisonBaseRunId === highlight.run.id ? "Baseline selected" : "Use as baseline"}
+                            </button>
+                            <button
+                              className="causal-inline-button"
+                              onClick={() => compareAgainstHighlight(highlight.run!.id)}
+                              type="button"
+                            >
+                              {comparisonTargetRunId === highlight.run.id ? "Comparison selected" : "Use as comparison"}
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="causal-card__empty">No run in this study matches that highlight yet.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+          ) : null}
           {runs.length >= 2 ? (
             <div
               style={{
@@ -2678,12 +3092,35 @@ export function CausalStudyPageClient({
             >
               <div className="causal-card__header-row">
                 <h3 className="causal-card__title" style={{ fontSize: 16 }}>Run comparison</h3>
-                <span className="causal-card__meta">Compare identification and estimate changes across runs</span>
+                <div className="causal-inline-actions">
+                  <span className="causal-card__meta">Compare identification and estimate changes across runs. The current pair stays encoded in the URL.</span>
+                  {comparisonBaseRunId && comparisonTargetRunId ? (
+                    <>
+                      <button
+                        className="causal-inline-button"
+                        onClick={() => void handleCopyComparisonLink()}
+                        type="button"
+                      >
+                        {comparisonLinkStatus === "copied"
+                          ? "Link copied"
+                          : comparisonLinkStatus === "failed"
+                            ? "Copy failed"
+                            : "Copy comparison link"}
+                      </button>
+                      <a
+                        className="causal-study-list__link"
+                        href={`/api/causal/studies/${study.id}/compare-export?baseRunId=${encodeURIComponent(comparisonBaseRunId)}&targetRunId=${encodeURIComponent(comparisonTargetRunId)}`}
+                      >
+                        Export comparison bundle
+                      </a>
+                    </>
+                  ) : null}
+                </div>
               </div>
               <div className="causal-inline-form">
                 <select
                   className="causal-select"
-                  onChange={(event) => setComparisonBaseRunId(event.target.value)}
+                  onChange={(event) => setComparisonBaseline(event.target.value)}
                   value={comparisonBaseRunId}
                 >
                   {runs.map((run) => (
@@ -2694,7 +3131,7 @@ export function CausalStudyPageClient({
                 </select>
                 <select
                   className="causal-select"
-                  onChange={(event) => setComparisonTargetRunId(event.target.value)}
+                  onChange={(event) => setComparisonTarget(event.target.value)}
                   value={comparisonTargetRunId}
                 >
                   {runs.map((run) => (
@@ -2703,6 +3140,76 @@ export function CausalStudyPageClient({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="causal-inline-actions">
+                <button
+                  className="causal-inline-button"
+                  disabled={!comparisonBaseRunId || !comparisonTargetRunId}
+                  onClick={handleSwapComparisonRuns}
+                  type="button"
+                >
+                  Swap baseline/comparison
+                </button>
+                <button
+                  className="causal-inline-button"
+                  disabled={!comparisonBaseRunId || !comparisonTargetRunId}
+                  onClick={handleResetComparisonSelection}
+                  type="button"
+                >
+                  Reset comparison
+                </button>
+                <button
+                  className="causal-inline-button"
+                  disabled={!comparisonBaseRunId || !comparisonTargetRunId}
+                  onClick={handleOpenComparisonRuns}
+                  type="button"
+                >
+                  Open both runs
+                </button>
+              </div>
+              <div className="causal-inline-actions">
+                {bestSupportedIdentifiedRun ? (
+                  <button
+                    className="causal-inline-button"
+                    onClick={() => setComparisonBaseline(bestSupportedIdentifiedRun.id)}
+                    type="button"
+                  >
+                    Baseline ← best identified
+                  </button>
+                ) : null}
+                {latestCompletedRun ? (
+                  <button
+                    className="causal-inline-button"
+                    onClick={() => setComparisonTarget(latestCompletedRun.id)}
+                    type="button"
+                  >
+                    Comparison ← latest completed
+                  </button>
+                ) : null}
+                {bestSupportedIdentifiedRun && latestCompletedRun && bestSupportedIdentifiedRun.id !== latestCompletedRun.id ? (
+                  <button
+                    className="causal-inline-button"
+                    onClick={() => {
+                      setComparisonBaseRunId(bestSupportedIdentifiedRun.id);
+                      setComparisonTargetRunId(latestCompletedRun.id);
+                    }}
+                    type="button"
+                  >
+                    Compare best identified vs latest completed
+                  </button>
+                ) : null}
+                {latestRun && latestAnswerBearingRun && latestRun.id !== latestAnswerBearingRun.id ? (
+                  <button
+                    className="causal-inline-button"
+                    onClick={() => {
+                      setComparisonBaseRunId(latestRun.id);
+                      setComparisonTargetRunId(latestAnswerBearingRun.id);
+                    }}
+                    type="button"
+                  >
+                    Compare latest run vs latest answer-bearing
+                  </button>
+                ) : null}
               </div>
               {comparisonBaseRun && comparisonTargetRun ? (
                 <div className="causal-grid" style={{ marginTop: 0 }}>
@@ -2722,39 +3229,147 @@ export function CausalStudyPageClient({
                         <li>Method: {run.identificationMethod ? formatLabel(run.identificationMethod) : "not recorded"}</li>
                         <li>Estimator: {run.estimatorName ? formatLabel(run.estimatorName) : "not recorded"}</li>
                         <li>Primary estimate: {formatNumber(run.primaryEstimateValue)}</li>
+                        <li>
+                          Interval: {typeof run.primaryEstimateIntervalLow === "number" && typeof run.primaryEstimateIntervalHigh === "number"
+                            ? `${formatNumber(run.primaryEstimateIntervalLow)} to ${formatNumber(run.primaryEstimateIntervalHigh)}`
+                            : "not reported"}
+                        </li>
                         <li>Refutations: {run.refutationCount}</li>
                         <li>Answers: {run.answerCount}</li>
                         <li>Artifacts: {run.artifactCount}</li>
                       </ul>
+                      <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                        <div>
+                          <strong className="causal-card__meta">Adjustment set</strong>
+                          {run.adjustmentSet.length ? (
+                            <ul className="causal-list">
+                              {run.adjustmentSet.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="causal-card__meta">No stored adjustment set.</p>
+                          )}
+                        </div>
+                        <div>
+                          <strong className="causal-card__meta">Estimands</strong>
+                          {run.estimandLabels.length ? (
+                            <ul className="causal-list">
+                              {run.estimandLabels.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="causal-card__meta">No stored estimands.</p>
+                          )}
+                        </div>
+                        <div>
+                          <strong className="causal-card__meta">Blocking reasons</strong>
+                          {run.blockingReasons.length ? (
+                            <ul className="causal-list">
+                              {run.blockingReasons.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="causal-card__meta">No stored blocking reasons.</p>
+                          )}
+                        </div>
+                        <div>
+                          <strong className="causal-card__meta">Refuters</strong>
+                          {run.refuterNames.length ? (
+                            <ul className="causal-list">
+                              {run.refuterNames.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="causal-card__meta">No stored refuters.</p>
+                          )}
+                        </div>
+                      </div>
                     </section>
                   ))}
                   <section className="causal-card">
                     <h3 className="causal-card__title">Delta summary</h3>
-                    <ul className="causal-list">
-                      <li>
-                        Identification changed: {String(comparisonBaseRun.identified !== comparisonTargetRun.identified)}
-                      </li>
-                      <li>
-                        Estimate delta: {typeof comparisonBaseRun.primaryEstimateValue === "number" && typeof comparisonTargetRun.primaryEstimateValue === "number"
-                          ? formatNumber(comparisonTargetRun.primaryEstimateValue - comparisonBaseRun.primaryEstimateValue)
-                          : "not computable"}
-                      </li>
-                      <li>
-                        Refutation delta: {comparisonTargetRun.refutationCount - comparisonBaseRun.refutationCount}
-                      </li>
-                      <li>
-                        Answer delta: {comparisonTargetRun.answerCount - comparisonBaseRun.answerCount}
-                      </li>
-                      <li>
-                        Artifact delta: {comparisonTargetRun.artifactCount - comparisonBaseRun.artifactCount}
-                      </li>
-                      <li>
-                        Treatment/outcome changed: {String(
-                          comparisonBaseRun.treatmentNodeKey !== comparisonTargetRun.treatmentNodeKey ||
-                            comparisonBaseRun.outcomeNodeKey !== comparisonTargetRun.outcomeNodeKey,
-                        )}
-                      </li>
-                    </ul>
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div>
+                        <strong className="causal-card__meta">Headline changes</strong>
+                        <ul className="causal-list">
+                          <li>
+                            Identification changed: {String(comparisonBaseRun.identified !== comparisonTargetRun.identified)}
+                          </li>
+                          <li>
+                            Method changed: {String(comparisonBaseRun.identificationMethod !== comparisonTargetRun.identificationMethod)}
+                          </li>
+                          <li>
+                            Estimator changed: {String(comparisonBaseRun.estimatorName !== comparisonTargetRun.estimatorName)}
+                          </li>
+                          <li>
+                            Estimate delta: {typeof comparisonBaseRun.primaryEstimateValue === "number" && typeof comparisonTargetRun.primaryEstimateValue === "number"
+                              ? formatNumber(comparisonTargetRun.primaryEstimateValue - comparisonBaseRun.primaryEstimateValue)
+                              : "not computable"}
+                          </li>
+                          <li>
+                            Interval changed: {String(
+                              comparisonBaseRun.primaryEstimateIntervalLow !== comparisonTargetRun.primaryEstimateIntervalLow ||
+                                comparisonBaseRun.primaryEstimateIntervalHigh !== comparisonTargetRun.primaryEstimateIntervalHigh,
+                            )}
+                          </li>
+                          <li>
+                            Treatment/outcome changed: {String(
+                              comparisonBaseRun.treatmentNodeKey !== comparisonTargetRun.treatmentNodeKey ||
+                                comparisonBaseRun.outcomeNodeKey !== comparisonTargetRun.outcomeNodeKey,
+                            )}
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <strong className="causal-card__meta">Support deltas</strong>
+                        <ul className="causal-list">
+                          <li>Refutation delta: {comparisonTargetRun.refutationCount - comparisonBaseRun.refutationCount}</li>
+                          <li>Answer delta: {comparisonTargetRun.answerCount - comparisonBaseRun.answerCount}</li>
+                          <li>Artifact delta: {comparisonTargetRun.artifactCount - comparisonBaseRun.artifactCount}</li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <strong className="causal-card__meta">Adjustment set diff</strong>
+                        <ul className="causal-list">
+                          <li>Changed: {String(!areStringSetsEqual(comparisonBaseRun.adjustmentSet, comparisonTargetRun.adjustmentSet))}</li>
+                          <li>Added in comparison: {formatPreviewList(comparisonAdjustmentDiff.added, "none")}</li>
+                          <li>Removed from baseline: {formatPreviewList(comparisonAdjustmentDiff.removed, "none")}</li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <strong className="causal-card__meta">Estimand diff</strong>
+                        <ul className="causal-list">
+                          <li>Changed: {String(!areStringSetsEqual(comparisonBaseRun.estimandLabels, comparisonTargetRun.estimandLabels))}</li>
+                          <li>Added in comparison: {formatPreviewList(comparisonEstimandDiff.added, "none")}</li>
+                          <li>Removed from baseline: {formatPreviewList(comparisonEstimandDiff.removed, "none")}</li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <strong className="causal-card__meta">Blocking reason diff</strong>
+                        <ul className="causal-list">
+                          <li>Changed: {String(!areStringSetsEqual(comparisonBaseRun.blockingReasons, comparisonTargetRun.blockingReasons))}</li>
+                          <li>Added in comparison: {formatPreviewList(comparisonBlockingReasonDiff.added, "none")}</li>
+                          <li>Removed from baseline: {formatPreviewList(comparisonBlockingReasonDiff.removed, "none")}</li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <strong className="causal-card__meta">Refuter diff</strong>
+                        <ul className="causal-list">
+                          <li>Changed: {String(!areStringSetsEqual(comparisonBaseRun.refuterNames, comparisonTargetRun.refuterNames))}</li>
+                          <li>Added in comparison: {formatPreviewList(comparisonRefuterDiff.added, "none")}</li>
+                          <li>Removed from baseline: {formatPreviewList(comparisonRefuterDiff.removed, "none")}</li>
+                        </ul>
+                      </div>
+                    </div>
                   </section>
                 </div>
               ) : null}
@@ -2772,6 +3387,42 @@ export function CausalStudyPageClient({
                     </strong>
                     <span className="causal-study-list__status">{run.status}</span>
                   </div>
+                  {runBadgesByRunId.get(run.id)?.length ? (
+                    <div className="causal-inline-actions" style={{ marginTop: 8, rowGap: 8 }}>
+                      {runBadgesByRunId.get(run.id)!.map((badge) => (
+                        <span
+                          key={badge}
+                          className="causal-card__meta"
+                          style={{
+                            background:
+                              badge === "Current baseline"
+                                ? "#eff6ff"
+                                : badge === "Current comparison"
+                                  ? "#f5f3ff"
+                                  : "#f8fafc",
+                            border:
+                              badge === "Current baseline"
+                                ? "1px solid rgba(37, 99, 235, 0.18)"
+                                : badge === "Current comparison"
+                                  ? "1px solid rgba(109, 40, 217, 0.18)"
+                                  : "1px solid rgba(148, 163, 184, 0.22)",
+                            borderRadius: 999,
+                            color:
+                              badge === "Current baseline"
+                                ? "#1d4ed8"
+                                : badge === "Current comparison"
+                                  ? "#6d28d9"
+                                  : "#475569",
+                            display: "inline-flex",
+                            fontWeight: 600,
+                            padding: "4px 10px",
+                          }}
+                        >
+                          {badge}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="causal-study-list__meta">
                     Started {formatTimestamp(run.createdAt)}
                     {run.completedAt ? ` · completed ${formatTimestamp(run.completedAt)}` : ""}
@@ -2782,13 +3433,47 @@ export function CausalStudyPageClient({
                     {run.primaryEstimateValue != null ? ` · estimate ${formatNumber(run.primaryEstimateValue)}` : ""}
                   </p>
                   <p className="causal-study-list__meta">
+                    {run.adjustmentSet.length ? `Adjustment set: ${run.adjustmentSet.join(", ")}` : "No stored adjustment set"}
+                    {run.blockingReasons.length ? ` · blocking reasons ${run.blockingReasons.length}` : ""}
+                  </p>
+                  <p className="causal-study-list__meta">
                     {run.refutationCount} refutations · {run.answerCount} answers · {run.artifactCount} artifacts
                   </p>
-                  <p className="causal-card__meta" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                  <div className="causal-inline-actions" style={{ marginTop: 8, rowGap: 8 }}>
                     <a className="causal-study-list__link" href={`/api/causal/runs/${run.id}/export`}>
                       Download export bundle
                     </a>
-                  </p>
+                    {runs.length >= 2 ? (
+                      <>
+                        <button
+                          className="causal-inline-button"
+                          onClick={() => setComparisonBaseline(run.id)}
+                          type="button"
+                        >
+                          {comparisonBaseRunId === run.id ? "Baseline selected" : "Set as baseline"}
+                        </button>
+                        <button
+                          className="causal-inline-button"
+                          onClick={() => setComparisonTarget(run.id)}
+                          type="button"
+                        >
+                          {comparisonTargetRunId === run.id ? "Comparison selected" : "Set as comparison"}
+                        </button>
+                        <button
+                          className="causal-inline-button"
+                          disabled={runs.length < 2}
+                          onClick={() => compareAgainstCurrentBaseline(run.id)}
+                          type="button"
+                        >
+                          {comparisonBaseRunId === run.id
+                            ? "Pick another run for this baseline"
+                            : comparisonTargetRunId === run.id && comparisonBaseRunId
+                              ? "Compared to current baseline"
+                              : "Compare against current baseline"}
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>

@@ -8,13 +8,22 @@ import { getStudyDatasetBindingDetail } from "@/lib/study-dataset-bindings";
 
 export const dynamic = "force-dynamic";
 
+function getSingleQueryParam(
+  value: string | string[] | undefined,
+): string | null {
+  return typeof value === "string" ? value : Array.isArray(value) ? value[0] ?? null : null;
+}
+
 export default async function CausalStudyPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ studyId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requirePageUser();
   const { studyId } = await params;
+  const resolvedSearchParams = await searchParams;
   const study = await getCausalStudyById({
     organizationId: user.organizationId,
     studyId,
@@ -59,6 +68,10 @@ export default async function CausalStudyPage({
   return (
     <CausalStudyPageClient
       initialAnswers={initialAnswers}
+      initialComparison={{
+        baseRunId: getSingleQueryParam(resolvedSearchParams.baseRunId),
+        targetRunId: getSingleQueryParam(resolvedSearchParams.targetRunId),
+      }}
       initialCurrentQuestion={currentQuestion}
       initialDagWorkspace={initialDagWorkspace}
       initialDatasetBinding={datasetBinding}
