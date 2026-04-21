@@ -14,6 +14,8 @@
     "test:e2e": "pnpm --filter web test:e2e",
     "test:all": "pnpm --filter web test:all",
     "db:migrate": "pnpm --filter web db:migrate",
+    "archive:legacy": "pnpm --filter web archive:legacy",
+    "import:v1-foundations": "pnpm --filter web import:v1-foundations",
     "sandbox-supervisor:start": "pnpm --filter sandbox-supervisor start",
     "backup:create": "pnpm --filter web backup:create",
     "backup:restore": "pnpm --filter web backup:restore",

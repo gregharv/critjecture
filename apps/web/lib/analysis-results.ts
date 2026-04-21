@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, gt, lte } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { analysisResults } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { analysisResults } from "@/lib/legacy-app-schema";
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
 import { splitCsvRecord } from "@/lib/csv-utils";
 import type { UserRole } from "@/lib/roles";

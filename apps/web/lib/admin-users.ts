@@ -7,8 +7,8 @@ import {
   buildAccessSnapshot,
   type MembershipStatus,
 } from "@/lib/access-control";
-import { getAppDatabase } from "@/lib/app-db";
-import { organizationMemberships, organizations, users } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizationMemberships, organizations, users } from "@/lib/legacy-app-schema";
 import type { AdminMemberRecord, OrganizationAdminSummary } from "@/lib/admin-types";
 import { ensureOrganizationMembership } from "@/lib/organizations";
 import { hashPassword } from "@/lib/passwords";

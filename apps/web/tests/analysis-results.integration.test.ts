@@ -7,8 +7,8 @@ import {
   storeAnalysisResult,
 } from "@/lib/analysis-results";
 import { createChatTurnLog } from "@/lib/audit-log";
-import { getAppDatabase, resetAppDatabaseForTests } from "@/lib/app-db";
-import { analysisResults } from "@/lib/app-schema";
+import { getAppDatabase, resetAppDatabaseForTests } from "@/lib/legacy-app-db";
+import { analysisResults } from "@/lib/legacy-app-schema";
 import { uploadKnowledgeFile } from "@/lib/knowledge-files";
 import { ensureSeedState, getAuthenticatedUserByEmail } from "@/lib/users";
 import { createTestAppEnvironment } from "@/tests/helpers/test-environment";

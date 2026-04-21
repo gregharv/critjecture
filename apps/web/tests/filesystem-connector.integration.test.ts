@@ -4,8 +4,8 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, dataAssetVersions, dataConnections, workflowRunResolvedInputs } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataAssets, dataAssetVersions, dataConnections, workflowRunResolvedInputs } from "@/lib/legacy-app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { syncFilesystemDataConnection } from "@/lib/connectors/filesystem-connector";
 import { executeWorkflowRun } from "@/lib/workflow-engine";

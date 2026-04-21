@@ -2,8 +2,8 @@ import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { documents } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { documents } from "@/lib/legacy-app-schema";
 import { KNOWLEDGE_MANAGED_SOURCE_TYPES } from "@/lib/knowledge-import-types";
 
 export async function getManagedKnowledgeDocumentByPath(input: {

@@ -16,7 +16,7 @@ import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
 import type { SessionUser } from "@/lib/auth-state";
 import { ensureOrganizationKnowledgeStagingRoot } from "@/lib/app-paths";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   documents,
   documentChunks,
@@ -25,7 +25,7 @@ import {
   organizations,
   usageEvents,
   users,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { ensureDocumentAsset } from "@/lib/data-assets";
 import {

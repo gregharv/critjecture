@@ -6,14 +6,14 @@ import path from "node:path";
 
 import { and, eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   dataAssets,
   dataConnections,
   documents,
   documentChunks,
   organizations,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import {
   createAssetVersionIfChanged,

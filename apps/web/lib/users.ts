@@ -4,8 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { buildAccessSnapshot, type MembershipStatus } from "@/lib/access-control";
-import { getAppDatabase } from "@/lib/app-db";
-import { organizationMemberships, users } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizationMemberships, users } from "@/lib/legacy-app-schema";
 import { isSingleOrgDeployment } from "@/lib/deployment-mode";
 import {
   ensureDefaultOrganization,

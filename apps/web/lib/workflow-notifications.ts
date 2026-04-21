@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, inArray, lte } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { workflowInputRequests } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { workflowInputRequests } from "@/lib/legacy-app-schema";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
 import { parseWorkflowJsonStringArray } from "@/lib/workflow-types";
 

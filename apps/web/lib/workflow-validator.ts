@@ -5,8 +5,8 @@ import { readFile } from "node:fs/promises";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { workflowRunInputChecks, workflowRuns } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { workflowRunInputChecks, workflowRuns } from "@/lib/legacy-app-schema";
 import { resolveAuthorizedCompanyDataFile } from "@/lib/company-data";
 import { countCsvDelimiters, splitCsvRecord } from "@/lib/csv-utils";
 import type { UserRole } from "@/lib/roles";

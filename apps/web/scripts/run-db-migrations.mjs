@@ -42,13 +42,16 @@ async function resolveStorageRoot() {
 }
 
 async function resolveDatabaseFilePath() {
-  const configuredPath = parseConfiguredFilePath(process.env.DATABASE_URL ?? "", repoRoot);
+  const configuredPath = parseConfiguredFilePath(
+    process.env.DATABASE_URL ?? process.env.CRITJECTURE_V2_DATABASE_URL ?? "",
+    repoRoot,
+  );
 
   if (configuredPath) {
     return configuredPath;
   }
 
-  return path.join(await resolveStorageRoot(), "critjecture.sqlite");
+  return path.join(await resolveStorageRoot(), "critjecture-v2.sqlite");
 }
 
 async function getMigrationFileNames(migrationsDir) {
@@ -62,7 +65,7 @@ async function getMigrationFileNames(migrationsDir) {
 
 async function run() {
   const dbFilePath = await resolveDatabaseFilePath();
-  const migrationsDir = path.join(webRoot, "drizzle");
+  const migrationsDir = path.join(webRoot, "drizzle-v2");
 
   await mkdir(path.dirname(dbFilePath), { recursive: true });
 

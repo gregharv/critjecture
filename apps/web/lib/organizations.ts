@@ -8,13 +8,13 @@ import {
   getDefaultOrganizationName,
   getDefaultOrganizationSlug,
 } from "@/lib/app-paths";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import { isHostedDeployment, isSingleOrgDeployment } from "@/lib/deployment-mode";
 import { getHostedDeploymentValidation } from "@/lib/hosted-deployment";
 import {
   organizationMemberships,
   organizations,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import type { MembershipStatus } from "@/lib/access-control";
 import type { UserRole } from "@/lib/roles";
 import { ensureWorkspacePlanForOrganization } from "@/lib/workspace-plans";

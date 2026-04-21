@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { requestLogs } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { requestLogs } from "@/lib/legacy-app-schema";
 import { beginObservedRequest, finalizeObservedRequest } from "@/lib/operations";
 import { getAuthenticatedUserByEmail } from "@/lib/users";
 import {

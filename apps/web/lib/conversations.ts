@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 
 import type { AgentMessage, SessionData, SessionMetadata } from "@mariozechner/pi-web-ui";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { conversationPins, conversations } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { conversationPins, conversations } from "@/lib/legacy-app-schema";
 import { DEFAULT_CHAT_THINKING_LEVEL } from "@/lib/chat-models";
 import type {
   ConversationMetadata,

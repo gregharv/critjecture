@@ -24,7 +24,7 @@ import type {
   OrganizationComplianceSettings,
 } from "@/lib/admin-types";
 import { ensureOrganizationGovernanceRoot, resolveRepositoryRoot } from "@/lib/app-paths";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   assistantMessages,
   chatTurns,
@@ -46,7 +46,7 @@ import {
   toolCalls,
   usageEvents,
   users,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import type { SessionUser } from "@/lib/auth-state";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import {

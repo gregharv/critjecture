@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createOrganizationMember } from "@/lib/admin-users";
-import { getAppDatabase } from "@/lib/app-db";
-import { organizations, operationalAlerts } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizations, operationalAlerts } from "@/lib/legacy-app-schema";
 import { getHostedDeploymentValidation } from "@/lib/hosted-deployment";
 import {
   getHealthSummary,

@@ -7,13 +7,13 @@ import path from "node:path";
 import { and, desc, eq, inArray, like } from "drizzle-orm";
 
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   dataAssets,
   dataAssetVersions,
   documents,
   workflowRunResolvedInputs,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import {
   createAssetVersionIfChanged,
   ensureDocumentAsset,

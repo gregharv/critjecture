@@ -9,8 +9,8 @@ import { complete, getModel } from "@mariozechner/pi-ai";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { canRoleAccessKnowledgeScope } from "@/lib/access-control";
-import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, dataAssetVersions, documentChunks, documents } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataAssets, dataAssetVersions, documentChunks, documents } from "@/lib/legacy-app-schema";
 import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { syncFilesystemDataConnection } from "@/lib/connectors/filesystem-connector";

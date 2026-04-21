@@ -20,7 +20,7 @@ import { NextResponse } from "next/server";
 
 import type { SessionUser } from "@/lib/auth-state";
 import { ensureStorageRoot } from "@/lib/app-paths";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import { cleanupExpiredAnalysisResults } from "@/lib/analysis-results";
 import {
   operationalAlerts,
@@ -36,7 +36,7 @@ import {
   workflowVersions,
   workflows,
   workspaceCommercialLedger,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import {
   getFallbackOperationsRetentionDefaults,
   getOrganizationRetentionOverrides,

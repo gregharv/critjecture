@@ -31,7 +31,7 @@ export async function loginAction(
     await signIn("credentials", {
       email,
       password,
-      redirectTo: "/chat",
+      redirectTo: "/causal",
     });
 
     return { error: null };

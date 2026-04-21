@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataConnections } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataConnections } from "@/lib/legacy-app-schema";
 
 export type DataConnectionSourceKind = "bulk_import" | "filesystem" | "upload";
 

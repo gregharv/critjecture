@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { resetOperationsMaintenanceStateForTests } from "@/lib/operations";
 import { resetAppDatabaseForTests } from "@/lib/app-db";
+import { resetLegacyAppDatabaseForTests } from "@/lib/legacy-app-db";
 import { resetRuntimeToolchainStateForTests } from "@/lib/runtime-toolchain";
 import { resetUserSeedStateForTests } from "@/lib/users";
 
@@ -47,8 +48,10 @@ const ENV_KEYS = [
   "CRITJECTURE_INTERN_NAME",
   "CRITJECTURE_INTERN_PASSWORD",
   "CRITJECTURE_HOSTED_ORGANIZATION_SLUG",
+  "CRITJECTURE_LEGACY_DATABASE_URL",
   "CRITJECTURE_ORGANIZATION_NAME",
   "CRITJECTURE_ORGANIZATION_SLUG",
+  "CRITJECTURE_V2_DATABASE_URL",
   "CRITJECTURE_OWNER_EMAIL",
   "CRITJECTURE_OWNER_NAME",
   "CRITJECTURE_OWNER_PASSWORD",
@@ -68,6 +71,7 @@ export async function resetTestAppState() {
   resetRuntimeToolchainStateForTests();
   resetUserSeedStateForTests();
   await resetAppDatabaseForTests();
+  await resetLegacyAppDatabaseForTests();
 }
 
 function setEnvValue(key: string, value: string | undefined) {
@@ -84,7 +88,8 @@ export async function createTestAppEnvironment(
 ): Promise<TestAppEnvironment> {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "critjecture-test-"));
   const storageRoot = path.join(rootDir, "storage");
-  const databaseFilePath = path.join(rootDir, "critjecture.sqlite");
+  const databaseFilePath = path.join(rootDir, "critjecture-v2.sqlite");
+  const legacyDatabaseFilePath = path.join(rootDir, "critjecture.sqlite");
   const previousEnv = new Map<string, string | undefined>(
     ENV_KEYS.map((key) => [key, process.env[key]]),
   );
@@ -105,6 +110,8 @@ export async function createTestAppEnvironment(
   setEnvValue("CRITJECTURE_INTERN_NAME", intern.name);
   setEnvValue("CRITJECTURE_INTERN_PASSWORD", intern.password);
   setEnvValue("CRITJECTURE_STORAGE_ROOT", storageRoot);
+  setEnvValue("CRITJECTURE_LEGACY_DATABASE_URL", legacyDatabaseFilePath);
+  setEnvValue("CRITJECTURE_V2_DATABASE_URL", databaseFilePath);
   setEnvValue("DATABASE_URL", databaseFilePath);
   setEnvValue("OPENAI_API_KEY", options.openAiApiKey ?? "test-openai-key");
 

@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   assistantMessages,
   chatTurns,
@@ -13,7 +13,7 @@ import {
   sandboxRuns,
   toolCalls,
   users,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import type {
   AssistantMessageType,
   ChatTurnLog,

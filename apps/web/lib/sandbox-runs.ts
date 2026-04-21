@@ -7,14 +7,14 @@ import path from "node:path";
 import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 
 import { ensureOrganizationGeneratedAssetsRoot, resolveOrganizationStorageRoot } from "@/lib/app-paths";
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   organizations,
   sandboxGeneratedAssets,
   sandboxRuns,
   toolCalls,
   users,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import type { UserRole } from "@/lib/roles";
 import {
   getSandboxExecutionBackend,

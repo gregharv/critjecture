@@ -18,6 +18,9 @@ This file indexes the project documents that live in the repository root and in 
 - [Release Checklist](release_checklist.md)
 - [Sandbox Decisions](sandbox.md)
 - [Polars Guardrails](polars_guardrails.md)
+- [Causal Intent Gate And DAG Workflow Implementation Plan](causal_guardrail_implementation_plan.md)
+- [Causal V2 Database Schema Specification](causal_v2_db_schema_spec.md)
+- [Causal V2 Implementation Coordination Plan](causal_v2_implementation_coordination_plan.md)
 
 ## apps/web/docs
 

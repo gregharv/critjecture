@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataConnections, organizations } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataConnections, organizations } from "@/lib/legacy-app-schema";
 import {
   normalizeCompanyDataRelativePath,
   resolveCompanyDataRoot,

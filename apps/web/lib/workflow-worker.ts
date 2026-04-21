@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, asc, eq, inArray, lt } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   organizations,
   workflowDeliveries,
@@ -10,7 +10,7 @@ import {
   workflowRunInputChecks,
   workflowRuns,
   workflowRunSteps,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { getWorkflowSchedulerGateStatus } from "@/lib/workflow-flags";
 import { executeWorkflowRun } from "@/lib/workflow-engine";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";

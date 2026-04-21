@@ -4,7 +4,7 @@ import { createHmac, randomUUID } from "node:crypto";
 
 import { and, asc, eq, inArray, lte } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   sandboxGeneratedAssets,
   workflowDeliveries,
@@ -13,7 +13,7 @@ import {
   workflowRunSteps,
   workflowVersions,
   workflows,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
 import {
   parseWorkflowDeliverySnapshotJson,

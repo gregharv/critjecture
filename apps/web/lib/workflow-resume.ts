@@ -2,8 +2,8 @@ import "server-only";
 
 import { and, asc, eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { organizations, workflowRuns } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizations, workflowRuns } from "@/lib/legacy-app-schema";
 import { executeWorkflowRun } from "@/lib/workflow-engine";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
 import { expireStaleWorkflowInputRequests } from "@/lib/workflow-notifications";

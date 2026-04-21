@@ -3,8 +3,8 @@ import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { workflowVersions, workflows } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { workflowVersions, workflows } from "@/lib/legacy-app-schema";
 import { computeNextScheduledRunAt } from "@/lib/workflow-schedule";
 import {
   parseWorkflowScheduleJson,

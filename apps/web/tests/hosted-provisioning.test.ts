@@ -4,8 +4,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { organizations } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizations } from "@/lib/legacy-app-schema";
 import {
   createTestAppEnvironment,
   resetTestAppState,

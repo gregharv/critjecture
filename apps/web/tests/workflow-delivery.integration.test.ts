@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { workflowDeliveries } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { workflowDeliveries } from "@/lib/legacy-app-schema";
 import { processDueWorkflowDeliveryRetries } from "@/lib/workflow-delivery";
 import { executeWorkflowRun } from "@/lib/workflow-engine";
 import { createManualWorkflowRun } from "@/lib/workflow-runs";

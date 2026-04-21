@@ -9,7 +9,7 @@ export default async function LoginPage() {
   const user = await getSessionUser();
 
   if (user) {
-    redirect("/chat");
+    redirect("/causal");
   }
 
   return (

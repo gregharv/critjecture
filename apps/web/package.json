@@ -11,6 +11,8 @@
     "test:e2e": "playwright test",
     "test:all": "pnpm lint && pnpm test && pnpm build && pnpm test:e2e",
     "db:migrate": "node ./scripts/run-db-migrations.mjs",
+    "archive:legacy": "node ./scripts/archive-legacy-v1.mjs",
+    "import:v1-foundations": "node ./scripts/import-v1-foundations-to-v2.mjs",
     "backup:create": "node ./scripts/create-backup.mjs",
     "backup:restore": "node ./scripts/restore-backup.mjs",
     "backup:verify": "node ./scripts/verify-backups.mjs",

@@ -4,14 +4,14 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   organizationMemberships,
   workflowRunSteps,
   workflowRuns,
   workflowVersions,
   workflows,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import {
   DataAssetResolutionError,
   freezeWorkflowInputSnapshot,

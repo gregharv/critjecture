@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, dataAssetVersions, dataConnections, documents } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataAssets, dataAssetVersions, dataConnections, documents } from "@/lib/legacy-app-schema";
 import {
   createKnowledgeImportJobFromFiles,
   getKnowledgeImportJob,

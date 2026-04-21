@@ -100,10 +100,10 @@ export async function ensureStorageRoot() {
   return storageRoot;
 }
 
-export async function resolveDatabaseFilePath() {
+export async function resolveLegacyDatabaseFilePath() {
   const repositoryRoot = await resolveRepositoryRoot();
   const configuredPath = parseConfiguredFilePath(
-    process.env.DATABASE_URL ?? "",
+    process.env.CRITJECTURE_LEGACY_DATABASE_URL ?? process.env.LEGACY_DATABASE_URL ?? "",
     repositoryRoot,
   );
 
@@ -114,6 +114,22 @@ export async function resolveDatabaseFilePath() {
   const storageRoot = await ensureStorageRoot();
 
   return path.join(storageRoot, "critjecture.sqlite");
+}
+
+export async function resolveDatabaseFilePath() {
+  const repositoryRoot = await resolveRepositoryRoot();
+  const configuredPath = parseConfiguredFilePath(
+    process.env.DATABASE_URL ?? process.env.CRITJECTURE_V2_DATABASE_URL ?? "",
+    repositoryRoot,
+  );
+
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const storageRoot = await ensureStorageRoot();
+
+  return path.join(storageRoot, "critjecture-v2.sqlite");
 }
 
 export function getDefaultOrganizationName() {

@@ -4,14 +4,14 @@ import path from "node:path";
 
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   analysisResults,
   chatTurns,
   documents,
   organizations,
   toolCalls,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { ensureDocumentAsset, ensureFilesystemAssetVersion } from "@/lib/data-assets";
 import type {
   BuildWorkflowFromChatTurnResponse,

@@ -30,7 +30,7 @@ async function resolveMigrationPaths() {
 
   return {
     dbFilePath: await resolveDatabaseFilePath(),
-    migrationsDir: path.join(webRoot, "drizzle"),
+    migrationsDir: path.join(webRoot, "drizzle-v2"),
   };
 }
 

@@ -3,12 +3,12 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   organizationMemberships,
   workspaceCommercialLedger,
   workspacePlans,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 
 export const COMMERCIAL_USAGE_CLASSES = [
   "analysis",

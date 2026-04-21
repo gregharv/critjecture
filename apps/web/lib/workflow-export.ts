@@ -5,8 +5,8 @@ import { readFile } from "node:fs/promises";
 
 import { and, eq, inArray } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, documents } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataAssets, documents } from "@/lib/legacy-app-schema";
 import {
   collectWorkflowStepInputPathHints,
   formatWorkflowStepInputRef,

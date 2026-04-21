@@ -5,7 +5,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   dataAssets,
   dataAssetVersions,
@@ -17,7 +17,7 @@ import {
   workflowRunResolvedInputs,
   workflowRuns,
   workflowRunSteps,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { ensureFilesystemAssetVersion } from "@/lib/data-assets";
 import { executeWorkflowRun } from "@/lib/workflow-engine";

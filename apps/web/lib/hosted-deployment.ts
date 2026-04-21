@@ -2,9 +2,9 @@ import "server-only";
 
 import { asc } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import { isHostedDeployment } from "@/lib/deployment-mode";
-import { organizations } from "@/lib/app-schema";
+import { organizations } from "@/lib/legacy-app-schema";
 
 export type HostedDeploymentValidation = {
   boundOrganizationId: string | null;

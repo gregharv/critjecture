@@ -9,21 +9,199 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+function sqlEnum(values: readonly string[]) {
+  return sql.raw(values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", "));
+}
+
+function enumCheck(name: string, column: unknown, values: readonly string[]) {
+  return check(name, sql`${column} in (${sqlEnum(values)})`);
+}
+
+const userStatusValues = ["active", "suspended"] as const;
+const organizationStatusValues = ["active", "suspended", "archived"] as const;
+const membershipRoleValues = ["member", "admin", "owner"] as const;
+const membershipStatusValues = ["active", "restricted", "suspended"] as const;
+const runnerKindValues = ["pywhy", "dowhy", "hybrid"] as const;
+const workspaceLedgerUsageClassValues = [
+  "causal_intake",
+  "causal_run",
+  "causal_answer",
+  "dataset_profile",
+  "reference_ingest",
+  "system",
+] as const;
+const workspaceLedgerStatusValues = ["reserved", "committed", "released", "blocked"] as const;
+const dataConnectionKindValues = [
+  "filesystem",
+  "upload",
+  "bulk_import",
+  "google_drive",
+  "google_sheets",
+  "s3",
+  "database",
+] as const;
+const dataConnectionStatusValues = ["active", "paused", "error", "archived"] as const;
+const datasetAccessScopeValues = ["public", "admin"] as const;
+const datasetStatusValues = ["active", "archived", "deprecated"] as const;
+const datasetDataKindValues = ["table", "spreadsheet", "panel", "event_log"] as const;
+const datasetIngestionStatusValues = ["pending", "profiling", "ready", "failed", "archived"] as const;
+const datasetProfileStatusValues = ["pending", "ready", "failed"] as const;
+const datasetSemanticTypeValues = [
+  "unknown",
+  "identifier",
+  "time",
+  "numeric",
+  "categorical",
+  "boolean",
+  "text",
+  "currency",
+  "percentage",
+  "treatment_candidate",
+  "outcome_candidate",
+] as const;
+const causalStudyStatusValues = [
+  "draft",
+  "awaiting_dataset",
+  "awaiting_dag",
+  "awaiting_approval",
+  "ready_to_run",
+  "running",
+  "completed",
+  "blocked",
+  "archived",
+] as const;
+const studyQuestionTypeValues = [
+  "cause_of_observed_change",
+  "intervention_effect",
+  "counterfactual",
+  "mediation",
+  "instrumental_variable",
+  "selection_bias",
+  "other",
+] as const;
+const studyQuestionStatusValues = ["open", "clarifying", "ready", "closed", "archived"] as const;
+const intentTypeValues = ["descriptive", "diagnostic", "causal", "counterfactual", "unclear"] as const;
+const routingDecisionValues = [
+  "continue_descriptive",
+  "open_causal_study",
+  "ask_clarification",
+  "blocked",
+] as const;
+const studyMessageAuthorTypeValues = ["user", "assistant", "system"] as const;
+const studyMessageKindValues = [
+  "question",
+  "clarification",
+  "classification_notice",
+  "dataset_binding_notice",
+  "dag_note",
+  "approval_notice",
+  "run_summary",
+  "final_answer",
+] as const;
+const studyDatasetBindingRoleValues = ["primary", "auxiliary", "candidate", "external_requirement"] as const;
+const causalDagStatusValues = ["draft", "ready_for_approval", "approved", "superseded", "archived"] as const;
+const causalDagNodeTypeValues = [
+  "observed_feature",
+  "treatment",
+  "outcome",
+  "confounder",
+  "mediator",
+  "collider",
+  "instrument",
+  "selection",
+  "latent",
+  "external_data_needed",
+  "note",
+] as const;
+const causalDagNodeSourceTypeValues = ["dataset", "user", "system"] as const;
+const causalDagNodeObservedStatusValues = ["observed", "unobserved", "missing_external"] as const;
+const causalAssumptionTypeValues = [
+  "no_unmeasured_confounding",
+  "positivity",
+  "consistency",
+  "measurement_validity",
+  "selection_ignorability",
+  "instrument_validity",
+  "frontdoor_sufficiency",
+  "custom",
+] as const;
+const causalAssumptionStatusValues = ["asserted", "flagged", "contested", "accepted"] as const;
+const causalDataRequirementStatusValues = ["missing", "requested", "in_progress", "collected", "waived"] as const;
+const causalApprovalKindValues = ["user_signoff", "admin_signoff", "compliance_signoff"] as const;
+const causalRunStatusValues = [
+  "queued",
+  "running",
+  "identified",
+  "estimated",
+  "refuted",
+  "completed",
+  "failed",
+  "not_identifiable",
+  "cancelled",
+] as const;
+const causalIdentificationMethodValues = ["backdoor", "frontdoor", "iv", "mediation", "none"] as const;
+const causalEstimandKindValues = ["ate", "att", "atc", "nde", "nie", "late", "custom"] as const;
+const causalRefutationStatusValues = ["passed", "failed", "warning", "not_run"] as const;
+const computeRunKindValues = [
+  "causal_identification",
+  "causal_estimation",
+  "causal_refutation",
+  "dataset_profiling",
+  "document_chunking",
+] as const;
+const computeRunStatusValues = [
+  "queued",
+  "starting",
+  "running",
+  "finalizing",
+  "completed",
+  "failed",
+  "timed_out",
+  "rejected",
+  "abandoned",
+] as const;
+const runArtifactKindValues = [
+  "graph_json",
+  "graph_export_png",
+  "estimand_report",
+  "estimate_json",
+  "refutation_report",
+  "answer_package",
+  "stdout",
+  "stderr",
+  "misc",
+] as const;
+const governanceJobTypeValues = [
+  "organization_export",
+  "history_purge",
+  "reference_delete",
+  "legacy_archive_export",
+] as const;
+const governanceJobStatusValues = ["queued", "running", "completed", "failed"] as const;
+const usageEventUsageClassValues = [
+  "causal_intake",
+  "causal_classification",
+  "dataset_profile",
+  "dag_authoring",
+  "causal_run",
+  "causal_answer",
+  "reference_ingest",
+  "system",
+] as const;
+
 export const users = sqliteTable(
   "users",
   {
     id: text("id").primaryKey(),
     email: text("email").notNull().unique(),
     name: text("name"),
-    role: text("role", { enum: ["intern", "owner"] }).notNull(),
-    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+    status: text("status", { enum: userStatusValues }).notNull().default("active"),
     passwordHash: text("password_hash").notNull(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check("users_role_check", sql`${table.role} in ('intern', 'owner')`),
-    check("users_status_check", sql`${table.status} in ('active', 'suspended')`),
+    enumCheck("users_status_check", table.status, userStatusValues),
     index("users_status_idx").on(table.status),
   ],
 );
@@ -34,10 +212,15 @@ export const organizations = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    status: text("status", { enum: organizationStatusValues }).notNull().default("active"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (table) => [uniqueIndex("organizations_slug_idx").on(table.slug)],
+  (table) => [
+    enumCheck("organizations_status_check", table.status, organizationStatusValues),
+    uniqueIndex("organizations_slug_idx").on(table.slug),
+    index("organizations_status_idx").on(table.status),
+  ],
 );
 
 export const organizationMemberships = sqliteTable(
@@ -50,28 +233,48 @@ export const organizationMemberships = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["member", "admin", "owner"] }).notNull(),
-    status: text("status", { enum: ["active", "restricted", "suspended"] })
-      .notNull()
-      .default("active"),
+    role: text("role", { enum: membershipRoleValues }).notNull(),
+    status: text("status", { enum: membershipStatusValues }).notNull().default("active"),
     monthlyCreditCap: integer("monthly_credit_cap"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "organization_memberships_role_check",
-      sql`${table.role} in ('member', 'admin', 'owner')`,
-    ),
-    check(
-      "organization_memberships_status_check",
-      sql`${table.status} in ('active', 'restricted', 'suspended')`,
-    ),
-    uniqueIndex("organization_memberships_org_user_idx").on(
-      table.organizationId,
-      table.userId,
-    ),
+    enumCheck("organization_memberships_role_check", table.role, membershipRoleValues),
+    enumCheck("organization_memberships_status_check", table.status, membershipStatusValues),
+    uniqueIndex("organization_memberships_org_user_idx").on(table.organizationId, table.userId),
     index("organization_memberships_org_status_idx").on(table.organizationId, table.status),
+    index("organization_memberships_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const organizationSettings = sqliteTable(
+  "organization_settings",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    causalModeRequired: integer("causal_mode_required", { mode: "boolean" }).notNull().default(true),
+    requireDagApproval: integer("require_dag_approval", { mode: "boolean" }).notNull().default(true),
+    requireAdminApprovalForSignedDags: integer("require_admin_approval_for_signed_dags", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    allowDescriptiveMode: integer("allow_descriptive_mode", { mode: "boolean" }).notNull().default(true),
+    defaultRunnerKind: text("default_runner_kind", { enum: runnerKindValues }).notNull().default("pywhy"),
+    defaultRunnerVersion: text("default_runner_version"),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    enumCheck("organization_settings_default_runner_kind_check", table.defaultRunnerKind, runnerKindValues),
+    uniqueIndex("organization_settings_org_idx").on(table.organizationId),
+    index("organization_settings_updated_by_idx").on(table.updatedByUserId),
   ],
 );
 
@@ -88,9 +291,7 @@ export const workspacePlans = sqliteTable(
     billingAnchorAt: integer("billing_anchor_at").notNull(),
     currentWindowStartAt: integer("current_window_start_at").notNull(),
     currentWindowEndAt: integer("current_window_end_at").notNull(),
-    hardCapBehavior: text("hard_cap_behavior", { enum: ["block"] })
-      .notNull()
-      .default("block"),
+    hardCapBehavior: text("hard_cap_behavior").notNull().default("block"),
     rateCardJson: text("rate_card_json").notNull().default("{}"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
@@ -99,6 +300,40 @@ export const workspacePlans = sqliteTable(
     check("workspace_plans_hard_cap_behavior_check", sql`${table.hardCapBehavior} in ('block')`),
     uniqueIndex("workspace_plans_organization_id_idx").on(table.organizationId),
     index("workspace_plans_window_end_idx").on(table.currentWindowEndAt),
+  ],
+);
+
+export const requestLogs = sqliteTable(
+  "request_logs",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id").notNull().unique(),
+    routeKey: text("route_key").notNull(),
+    routeGroup: text("route_group").notNull(),
+    method: text("method").notNull(),
+    organizationId: text("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    studyId: text("study_id"),
+    studyQuestionId: text("study_question_id"),
+    causalRunId: text("causal_run_id"),
+    computeRunId: text("compute_run_id"),
+    statusCode: integer("status_code").notNull(),
+    outcome: text("outcome").notNull(),
+    errorCode: text("error_code"),
+    modelName: text("model_name"),
+    durationMs: integer("duration_ms").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at").notNull(),
+  },
+  (table) => [
+    index("request_logs_route_group_started_at_idx").on(table.routeGroup, table.startedAt),
+    index("request_logs_organization_id_started_at_idx").on(table.organizationId, table.startedAt),
+    index("request_logs_user_id_started_at_idx").on(table.userId, table.startedAt),
+    index("request_logs_study_id_started_at_idx").on(table.studyId, table.startedAt),
+    index("request_logs_causal_run_id_started_at_idx").on(table.causalRunId, table.startedAt),
   ],
 );
 
@@ -116,31 +351,18 @@ export const workspaceCommercialLedger = sqliteTable(
     requestLogId: text("request_log_id").references(() => requestLogs.id, {
       onDelete: "set null",
     }),
-    routeGroup: text("route_group").notNull(),
-    usageClass: text("usage_class", {
-      enum: ["analysis", "chart", "chat", "document", "import"],
-    }).notNull(),
+    usageClass: text("usage_class", { enum: workspaceLedgerUsageClassValues }).notNull(),
     creditsDelta: integer("credits_delta").notNull(),
     windowStartAt: integer("window_start_at").notNull(),
     windowEndAt: integer("window_end_at").notNull(),
-    status: text("status", {
-      enum: ["reserved", "committed", "released", "blocked"],
-    })
-      .notNull()
-      .default("reserved"),
+    status: text("status", { enum: workspaceLedgerStatusValues }).notNull().default("reserved"),
     metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "workspace_commercial_ledger_usage_class_check",
-      sql`${table.usageClass} in ('analysis', 'chart', 'chat', 'document', 'import')`,
-    ),
-    check(
-      "workspace_commercial_ledger_status_check",
-      sql`${table.status} in ('reserved', 'committed', 'released', 'blocked')`,
-    ),
+    enumCheck("workspace_commercial_ledger_usage_class_check", table.usageClass, workspaceLedgerUsageClassValues),
+    enumCheck("workspace_commercial_ledger_status_check", table.status, workspaceLedgerStatusValues),
     index("workspace_commercial_ledger_request_id_idx").on(table.requestId),
     index("workspace_commercial_ledger_org_window_status_idx").on(
       table.organizationId,
@@ -155,369 +377,6 @@ export const workspaceCommercialLedger = sqliteTable(
   ],
 );
 
-export const conversations = sqliteTable(
-  "conversations",
-  {
-    id: text("id").primaryKey(),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    userRole: text("user_role", { enum: ["intern", "owner"] }).notNull(),
-    visibility: text("visibility", { enum: ["private", "organization"] })
-      .notNull()
-      .default("private"),
-    title: text("title").notNull(),
-    manualTitle: text("manual_title"),
-    previewText: text("preview_text").notNull(),
-    messageCount: integer("message_count").notNull(),
-    usageJson: text("usage_json").notNull(),
-    sessionDataJson: text("session_data_json").notNull(),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "conversations_user_role_check",
-      sql`${table.userRole} in ('intern', 'owner')`,
-    ),
-    check(
-      "conversations_visibility_check",
-      sql`${table.visibility} in ('private', 'organization')`,
-    ),
-    index("conversations_organization_id_updated_at_idx").on(
-      table.organizationId,
-      table.updatedAt,
-    ),
-    index("conversations_org_visibility_updated_at_idx").on(
-      table.organizationId,
-      table.visibility,
-      table.updatedAt,
-    ),
-    index("conversations_user_id_updated_at_idx").on(table.userId, table.updatedAt),
-    index("conversations_user_role_idx").on(table.userRole),
-  ],
-);
-
-export const conversationPins = sqliteTable(
-  "conversation_pins",
-  {
-    id: text("id").primaryKey(),
-    conversationId: text("conversation_id")
-      .notNull()
-      .references(() => conversations.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("conversation_pins_conversation_user_idx").on(
-      table.conversationId,
-      table.userId,
-    ),
-    index("conversation_pins_org_user_updated_at_idx").on(
-      table.organizationId,
-      table.userId,
-      table.updatedAt,
-    ),
-    index("conversation_pins_conversation_id_idx").on(table.conversationId),
-  ],
-);
-
-export const chatTurns = sqliteTable(
-  "chat_turns",
-  {
-    id: text("id").primaryKey(),
-    conversationId: text("conversation_id").notNull(),
-    chatSessionId: text("chat_session_id").notNull(),
-    organizationId: text("organization_id").references(() => organizations.id, {
-      onDelete: "set null",
-    }),
-    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
-    userRole: text("user_role", { enum: ["intern", "owner"] }).notNull(),
-    userPromptText: text("user_prompt_text").notNull(),
-    status: text("status", { enum: ["started", "completed", "failed"] }).notNull(),
-    createdAt: integer("created_at").notNull(),
-    completedAt: integer("completed_at"),
-  },
-  (table) => [
-    check(
-      "chat_turns_user_role_check",
-      sql`${table.userRole} in ('intern', 'owner')`,
-    ),
-    check(
-      "chat_turns_status_check",
-      sql`${table.status} in ('started', 'completed', 'failed')`,
-    ),
-    index("chat_turns_created_at_idx").on(table.createdAt),
-    index("chat_turns_chat_session_id_idx").on(table.chatSessionId),
-    index("chat_turns_conversation_id_idx").on(table.conversationId),
-    index("chat_turns_organization_id_created_at_idx").on(table.organizationId, table.createdAt),
-    index("chat_turns_user_id_created_at_idx").on(table.userId, table.createdAt),
-  ],
-);
-
-export const toolCalls = sqliteTable(
-  "tool_calls",
-  {
-    id: text("id").primaryKey(),
-    turnId: text("turn_id")
-      .notNull()
-      .references(() => chatTurns.id, { onDelete: "cascade" }),
-    runtimeToolCallId: text("runtime_tool_call_id").notNull().unique(),
-    toolName: text("tool_name").notNull(),
-    toolParametersJson: text("tool_parameters_json").notNull(),
-    accessedFilesJson: text("accessed_files_json").notNull().default("[]"),
-    sandboxRunId: text("sandbox_run_id"),
-    status: text("status", { enum: ["started", "completed", "error"] }).notNull(),
-    resultSummary: text("result_summary"),
-    errorMessage: text("error_message"),
-    startedAt: integer("started_at").notNull(),
-    completedAt: integer("completed_at"),
-  },
-  (table) => [
-    check(
-      "audit_tool_calls_status_check",
-      sql`${table.status} in ('started', 'completed', 'error')`,
-    ),
-    index("tool_calls_turn_id_started_at_idx").on(table.turnId, table.startedAt),
-    index("tool_calls_sandbox_run_id_idx").on(table.sandboxRunId),
-  ],
-);
-
-export const assistantMessages = sqliteTable(
-  "assistant_messages",
-  {
-    id: text("id").primaryKey(),
-    turnId: text("turn_id")
-      .notNull()
-      .references(() => chatTurns.id, { onDelete: "cascade" }),
-    messageIndex: integer("message_index").notNull(),
-    messageType: text("message_type", {
-      enum: ["final-response", "planner-selection"],
-    }).notNull(),
-    messageText: text("message_text").notNull(),
-    modelName: text("model_name").notNull(),
-    createdAt: integer("created_at").notNull(),
-  },
-  (table) => [
-    check(
-      "assistant_messages_type_check",
-      sql`${table.messageType} in ('final-response', 'planner-selection')`,
-    ),
-    uniqueIndex("assistant_messages_turn_id_message_index_idx").on(
-      table.turnId,
-      table.messageIndex,
-    ),
-    index("assistant_messages_turn_id_created_at_idx").on(table.turnId, table.createdAt),
-  ],
-);
-
-export const sandboxRuns = sqliteTable(
-  "sandbox_runs",
-  {
-    runId: text("run_id").primaryKey(),
-    organizationId: text("organization_id").references(() => organizations.id, {
-      onDelete: "set null",
-    }),
-    turnId: text("turn_id").references(() => chatTurns.id, { onDelete: "set null" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    runtimeToolCallId: text("runtime_tool_call_id"),
-    toolName: text("tool_name").notNull(),
-    backend: text("backend", {
-      enum: ["container_supervisor", "local_supervisor", "hosted_supervisor"],
-    })
-      .notNull()
-      .default("container_supervisor"),
-    runner: text("runner").notNull().default("oci-container"),
-    status: text("status", {
-      enum: [
-        "queued",
-        "starting",
-        "running",
-        "finalizing",
-        "completed",
-        "failed",
-        "timed_out",
-        "rejected",
-        "abandoned",
-      ],
-    })
-      .notNull()
-      .default("queued"),
-    failureReason: text("failure_reason"),
-    exitCode: integer("exit_code"),
-    timeoutMs: integer("timeout_ms").notNull().default(0),
-    cpuLimitSeconds: integer("cpu_limit_seconds").notNull().default(0),
-    memoryLimitBytes: integer("memory_limit_bytes").notNull().default(0),
-    maxProcesses: integer("max_processes").notNull().default(0),
-    stdoutMaxBytes: integer("stdout_max_bytes").notNull().default(0),
-    artifactMaxBytes: integer("artifact_max_bytes").notNull().default(0),
-    artifactTtlMs: integer("artifact_ttl_ms").notNull().default(0),
-    codeText: text("code_text").notNull().default(""),
-    inputFilesJson: text("input_files_json").notNull().default("[]"),
-    inlineWorkspaceFilesJson: text("inline_workspace_files_json").notNull().default("[]"),
-    stdoutText: text("stdout_text"),
-    stderrText: text("stderr_text"),
-    supervisorId: text("supervisor_id"),
-    leaseExpiresAt: integer("lease_expires_at"),
-    lastHeartbeatAt: integer("last_heartbeat_at"),
-    workspacePath: text("workspace_path"),
-    cleanupStatus: text("cleanup_status", {
-      enum: ["pending", "completed", "failed", "skipped"],
-    })
-      .notNull()
-      .default("pending"),
-    cleanupCompletedAt: integer("cleanup_completed_at"),
-    cleanupError: text("cleanup_error"),
-    cleanupAttemptCount: integer("cleanup_attempt_count").notNull().default(0),
-    reconciliationCount: integer("reconciliation_count").notNull().default(0),
-    generatedAssetsJson: text("generated_assets_json").notNull().default("[]"),
-    createdAt: integer("created_at").notNull(),
-    startedAt: integer("started_at").notNull().default(0),
-    completedAt: integer("completed_at"),
-  },
-  (table) => [
-    check(
-      "sandbox_runs_backend_check",
-      sql`${table.backend} in ('container_supervisor', 'local_supervisor', 'hosted_supervisor')`,
-    ),
-    check(
-      "sandbox_runs_status_check",
-      sql`${table.status} in ('queued', 'starting', 'running', 'finalizing', 'completed', 'failed', 'timed_out', 'rejected', 'abandoned')`,
-    ),
-    check(
-      "sandbox_runs_cleanup_status_check",
-      sql`${table.cleanupStatus} in ('pending', 'completed', 'failed', 'skipped')`,
-    ),
-    index("sandbox_runs_user_id_created_at_idx").on(table.userId, table.createdAt),
-    index("sandbox_runs_organization_id_created_at_idx").on(
-      table.organizationId,
-      table.createdAt,
-    ),
-    index("sandbox_runs_backend_status_created_at_idx").on(
-      table.backend,
-      table.status,
-      table.createdAt,
-    ),
-    index("sandbox_runs_status_lease_expires_at_idx").on(
-      table.status,
-      table.leaseExpiresAt,
-    ),
-    index("sandbox_runs_status_started_at_idx").on(table.status, table.startedAt),
-    index("sandbox_runs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
-  ],
-);
-
-export const analysisResults = sqliteTable(
-  "analysis_results",
-  {
-    id: text("id").primaryKey(),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    turnId: text("turn_id")
-      .notNull()
-      .references(() => chatTurns.id, { onDelete: "cascade" }),
-    inputFilesJson: text("input_files_json").notNull().default("[]"),
-    csvSchemasJson: text("csv_schemas_json").notNull().default("[]"),
-    chartJson: text("chart_json").notNull(),
-    pointCount: integer("point_count").notNull(),
-    payloadBytes: integer("payload_bytes").notNull(),
-    createdAt: integer("created_at").notNull(),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (table) => [
-    index("analysis_results_expires_at_idx").on(table.expiresAt),
-    index("analysis_results_org_turn_user_idx").on(
-      table.organizationId,
-      table.turnId,
-      table.userId,
-    ),
-  ],
-);
-
-export const sandboxGeneratedAssets = sqliteTable(
-  "sandbox_generated_assets",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => sandboxRuns.runId, { onDelete: "cascade" }),
-    relativePath: text("relative_path").notNull(),
-    storagePath: text("storage_path").notNull(),
-    fileName: text("file_name").notNull(),
-    mimeType: text("mime_type").notNull(),
-    byteSize: integer("byte_size").notNull(),
-    createdAt: integer("created_at").notNull(),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("sandbox_generated_assets_run_path_idx").on(table.runId, table.relativePath),
-    index("sandbox_generated_assets_run_id_idx").on(table.runId),
-    index("sandbox_generated_assets_expires_at_idx").on(table.expiresAt),
-  ],
-);
-
-export const documents = sqliteTable(
-  "documents",
-  {
-    id: text("id").primaryKey(),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    sourcePath: text("source_path").notNull(),
-    sourceType: text("source_type").notNull(),
-    displayName: text("display_name").notNull().default(""),
-    accessScope: text("access_scope", { enum: ["public", "admin"] })
-      .notNull()
-      .default("admin"),
-    ingestionStatus: text("ingestion_status", {
-      enum: ["pending", "ready", "failed"],
-    })
-      .notNull()
-      .default("ready"),
-    ingestionError: text("ingestion_error"),
-    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    contentSha256: text("content_sha256").notNull(),
-    mimeType: text("mime_type"),
-    byteSize: integer("byte_size"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-    lastIndexedAt: integer("last_indexed_at"),
-  },
-  (table) => [
-    check("documents_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
-    check(
-      "documents_ingestion_status_check",
-      sql`${table.ingestionStatus} in ('pending', 'ready', 'failed')`,
-    ),
-    uniqueIndex("documents_org_source_path_idx").on(table.organizationId, table.sourcePath),
-    index("documents_organization_id_idx").on(table.organizationId),
-    index("documents_org_source_type_idx").on(table.organizationId, table.sourceType),
-    index("documents_org_access_scope_idx").on(table.organizationId, table.accessScope),
-    index("documents_org_ingestion_status_idx").on(
-      table.organizationId,
-      table.ingestionStatus,
-    ),
-    index("documents_uploaded_by_user_id_idx").on(table.uploadedByUserId),
-  ],
-);
-
 export const dataConnections = sqliteTable(
   "data_connections",
   {
@@ -525,13 +384,9 @@ export const dataConnections = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    kind: text("kind", {
-      enum: ["filesystem", "upload", "bulk_import", "google_drive", "google_sheets", "s3"],
-    }).notNull(),
+    kind: text("kind", { enum: dataConnectionKindValues }).notNull(),
     displayName: text("display_name").notNull(),
-    status: text("status", { enum: ["active", "paused", "error"] })
-      .notNull()
-      .default("active"),
+    status: text("status", { enum: dataConnectionStatusValues }).notNull().default("active"),
     configJson: text("config_json").notNull().default("{}"),
     credentialsRef: text("credentials_ref"),
     lastSyncAt: integer("last_sync_at"),
@@ -539,14 +394,8 @@ export const dataConnections = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "data_connections_kind_check",
-      sql`${table.kind} in ('filesystem', 'upload', 'bulk_import', 'google_drive', 'google_sheets', 's3')`,
-    ),
-    check(
-      "data_connections_status_check",
-      sql`${table.status} in ('active', 'paused', 'error')`,
-    ),
+    enumCheck("data_connections_kind_check", table.kind, dataConnectionKindValues),
+    enumCheck("data_connections_status_check", table.status, dataConnectionStatusValues),
     index("data_connections_org_kind_idx").on(table.organizationId, table.kind),
     index("data_connections_org_status_updated_at_idx").on(
       table.organizationId,
@@ -556,8 +405,8 @@ export const dataConnections = sqliteTable(
   ],
 );
 
-export const dataAssets = sqliteTable(
-  "data_assets",
+export const datasets = sqliteTable(
+  "datasets",
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
@@ -566,363 +415,813 @@ export const dataAssets = sqliteTable(
     connectionId: text("connection_id").references(() => dataConnections.id, {
       onDelete: "set null",
     }),
-    assetKey: text("asset_key").notNull(),
+    datasetKey: text("dataset_key").notNull(),
     displayName: text("display_name").notNull(),
-    accessScope: text("access_scope", { enum: ["public", "admin"] })
-      .notNull()
-      .default("admin"),
-    dataKind: text("data_kind", { enum: ["table", "text_document", "pdf", "spreadsheet"] })
-      .notNull()
-      .default("text_document"),
-    externalObjectId: text("external_object_id"),
+    description: text("description"),
+    accessScope: text("access_scope", { enum: datasetAccessScopeValues }).notNull().default("admin"),
+    dataKind: text("data_kind", { enum: datasetDataKindValues }).notNull().default("table"),
+    grainDescription: text("grain_description"),
+    timeColumnName: text("time_column_name"),
+    entityIdColumnName: text("entity_id_column_name"),
+    status: text("status", { enum: datasetStatusValues }).notNull().default("active"),
     activeVersionId: text("active_version_id"),
-    status: text("status", { enum: ["active", "archived"] })
-      .notNull()
-      .default("active"),
     metadataJson: text("metadata_json").notNull().default("{}"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check("data_assets_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
-    check(
-      "data_assets_data_kind_check",
-      sql`${table.dataKind} in ('table', 'text_document', 'pdf', 'spreadsheet')`,
-    ),
-    check("data_assets_status_check", sql`${table.status} in ('active', 'archived')`),
-    uniqueIndex("data_assets_org_asset_key_idx").on(table.organizationId, table.assetKey),
-    index("data_assets_connection_external_object_idx").on(
-      table.connectionId,
-      table.externalObjectId,
-    ),
-    index("data_assets_org_scope_updated_at_idx").on(
-      table.organizationId,
-      table.accessScope,
-      table.updatedAt,
-    ),
-    index("data_assets_active_version_id_idx").on(table.activeVersionId),
+    enumCheck("datasets_access_scope_check", table.accessScope, datasetAccessScopeValues),
+    enumCheck("datasets_data_kind_check", table.dataKind, datasetDataKindValues),
+    enumCheck("datasets_status_check", table.status, datasetStatusValues),
+    uniqueIndex("datasets_org_key_idx").on(table.organizationId, table.datasetKey),
+    index("datasets_org_scope_updated_at_idx").on(table.organizationId, table.accessScope, table.updatedAt),
+    index("datasets_status_updated_at_idx").on(table.status, table.updatedAt),
+    index("datasets_active_version_id_idx").on(table.activeVersionId),
   ],
 );
 
-export const dataAssetVersions = sqliteTable(
-  "data_asset_versions",
+export const datasetVersions = sqliteTable(
+  "dataset_versions",
   {
     id: text("id").primaryKey(),
-    assetId: text("asset_id")
+    datasetId: text("dataset_id")
       .notNull()
-      .references(() => dataAssets.id, { onDelete: "cascade" }),
+      .references(() => datasets.id, { onDelete: "cascade" }),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
     sourceVersionToken: text("source_version_token"),
     sourceModifiedAt: integer("source_modified_at"),
     contentHash: text("content_hash").notNull(),
-    schemaHash: text("schema_hash"),
-    mimeType: text("mime_type"),
-    byteSize: integer("byte_size"),
+    schemaHash: text("schema_hash").notNull(),
     rowCount: integer("row_count"),
+    byteSize: integer("byte_size"),
     materializedPath: text("materialized_path").notNull(),
-    ingestionStatus: text("ingestion_status", { enum: ["pending", "ready", "failed"] })
-      .notNull()
-      .default("pending"),
+    ingestionStatus: text("ingestion_status", { enum: datasetIngestionStatusValues }).notNull().default("pending"),
+    profileStatus: text("profile_status", { enum: datasetProfileStatusValues }).notNull().default("pending"),
     ingestionError: text("ingestion_error"),
+    profileError: text("profile_error"),
     indexedAt: integer("indexed_at"),
     metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "data_asset_versions_ingestion_status_check",
-      sql`${table.ingestionStatus} in ('pending', 'ready', 'failed')`,
-    ),
-    index("data_asset_versions_asset_created_at_idx").on(table.assetId, table.createdAt),
-    index("data_asset_versions_asset_content_hash_idx").on(table.assetId, table.contentHash),
-    index("data_asset_versions_org_ingestion_status_updated_at_idx").on(
+    enumCheck("dataset_versions_ingestion_status_check", table.ingestionStatus, datasetIngestionStatusValues),
+    enumCheck("dataset_versions_profile_status_check", table.profileStatus, datasetProfileStatusValues),
+    uniqueIndex("dataset_versions_dataset_version_idx").on(table.datasetId, table.versionNumber),
+    index("dataset_versions_dataset_created_at_idx").on(table.datasetId, table.createdAt),
+    index("dataset_versions_org_status_updated_at_idx").on(
       table.organizationId,
       table.ingestionStatus,
       table.updatedAt,
     ),
-    index("data_asset_versions_asset_materialized_path_idx").on(
-      table.assetId,
-      table.materializedPath,
-    ),
+    index("dataset_versions_content_hash_idx").on(table.datasetId, table.contentHash),
   ],
 );
 
-export const knowledgeImportJobs = sqliteTable(
-  "knowledge_import_jobs",
+export const datasetVersionColumns = sqliteTable(
+  "dataset_version_columns",
+  {
+    id: text("id").primaryKey(),
+    datasetVersionId: text("dataset_version_id")
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    columnName: text("column_name").notNull(),
+    displayName: text("display_name").notNull(),
+    columnOrder: integer("column_order").notNull(),
+    physicalType: text("physical_type").notNull(),
+    semanticType: text("semantic_type", { enum: datasetSemanticTypeValues }).notNull().default("unknown"),
+    nullable: integer("nullable", { mode: "boolean" }).notNull().default(true),
+    isIndexedCandidate: integer("is_indexed_candidate", { mode: "boolean" }).notNull().default(false),
+    isTreatmentCandidate: integer("is_treatment_candidate", { mode: "boolean" }).notNull().default(false),
+    isOutcomeCandidate: integer("is_outcome_candidate", { mode: "boolean" }).notNull().default(false),
+    description: text("description"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("dataset_version_columns_semantic_type_check", table.semanticType, datasetSemanticTypeValues),
+    uniqueIndex("dataset_version_columns_version_name_idx").on(table.datasetVersionId, table.columnName),
+    uniqueIndex("dataset_version_columns_version_order_idx").on(table.datasetVersionId, table.columnOrder),
+    index("dataset_version_columns_version_semantic_idx").on(table.datasetVersionId, table.semanticType),
+    index("dataset_version_columns_org_created_at_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const datasetVersionColumnProfiles = sqliteTable(
+  "dataset_version_column_profiles",
+  {
+    id: text("id").primaryKey(),
+    datasetVersionId: text("dataset_version_id")
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: "cascade" }),
+    columnId: text("column_id")
+      .notNull()
+      .references(() => datasetVersionColumns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    missingRate: real("missing_rate"),
+    distinctCount: integer("distinct_count"),
+    minValueText: text("min_value_text"),
+    maxValueText: text("max_value_text"),
+    sampleValuesJson: text("sample_values_json").notNull().default("[]"),
+    profileJson: text("profile_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("dataset_version_column_profiles_column_idx").on(table.columnId),
+    index("dataset_version_column_profiles_version_idx").on(table.datasetVersionId),
+  ],
+);
+
+export const causalStudies = sqliteTable(
+  "causal_studies",
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    createdByUserId: text("created_by_user_id").references(() => users.id, {
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status", { enum: causalStudyStatusValues }).notNull().default("draft"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    currentQuestionId: text("current_question_id"),
+    currentDagId: text("current_dag_id"),
+    currentDagVersionId: text("current_dag_version_id"),
+    currentRunId: text("current_run_id"),
+    currentAnswerId: text("current_answer_id"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    archivedAt: integer("archived_at"),
+  },
+  (table) => [
+    enumCheck("causal_studies_status_check", table.status, causalStudyStatusValues),
+    index("causal_studies_org_status_updated_at_idx").on(table.organizationId, table.status, table.updatedAt),
+    index("causal_studies_created_by_updated_at_idx").on(table.createdByUserId, table.updatedAt),
+  ],
+);
+
+export const studyQuestions = sqliteTable(
+  "study_questions",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    askedByUserId: text("asked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    questionText: text("question_text").notNull(),
+    questionType: text("question_type", { enum: studyQuestionTypeValues }).notNull(),
+    status: text("status", { enum: studyQuestionStatusValues }).notNull().default("open"),
+    proposedTreatmentLabel: text("proposed_treatment_label"),
+    proposedOutcomeLabel: text("proposed_outcome_label"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    enumCheck("study_questions_type_check", table.questionType, studyQuestionTypeValues),
+    enumCheck("study_questions_status_check", table.status, studyQuestionStatusValues),
+    index("study_questions_study_created_at_idx").on(table.studyId, table.createdAt),
+    index("study_questions_org_status_created_at_idx").on(table.organizationId, table.status, table.createdAt),
+  ],
+);
+
+export const intentClassifications = sqliteTable(
+  "intent_classifications",
+  {
+    id: text("id").primaryKey(),
+    studyQuestionId: text("study_question_id")
+      .notNull()
+      .references(() => studyQuestions.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    classifierModelName: text("classifier_model_name").notNull(),
+    classifierPromptVersion: text("classifier_prompt_version").notNull(),
+    rawOutputJson: text("raw_output_json").notNull(),
+    isCausal: integer("is_causal", { mode: "boolean" }).notNull(),
+    intentType: text("intent_type", { enum: intentTypeValues }).notNull(),
+    confidence: real("confidence").notNull(),
+    reasonText: text("reason_text").notNull(),
+    routingDecision: text("routing_decision", { enum: routingDecisionValues }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("intent_classifications_intent_type_check", table.intentType, intentTypeValues),
+    enumCheck("intent_classifications_routing_decision_check", table.routingDecision, routingDecisionValues),
+    index("intent_classifications_question_created_at_idx").on(table.studyQuestionId, table.createdAt),
+    index("intent_classifications_org_created_at_idx").on(table.organizationId, table.createdAt),
+    index("intent_classifications_routing_decision_idx").on(table.routingDecision, table.createdAt),
+  ],
+);
+
+export const studyMessages = sqliteTable(
+  "study_messages",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    authorType: text("author_type", { enum: studyMessageAuthorTypeValues }).notNull(),
+    authorUserId: text("author_user_id").references(() => users.id, { onDelete: "set null" }),
+    messageKind: text("message_kind", { enum: studyMessageKindValues }).notNull(),
+    contentText: text("content_text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("study_messages_author_type_check", table.authorType, studyMessageAuthorTypeValues),
+    enumCheck("study_messages_message_kind_check", table.messageKind, studyMessageKindValues),
+    index("study_messages_study_created_at_idx").on(table.studyId, table.createdAt),
+    index("study_messages_org_created_at_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const studyDatasetBindings = sqliteTable(
+  "study_dataset_bindings",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    datasetId: text("dataset_id")
+      .notNull()
+      .references(() => datasets.id, { onDelete: "cascade" }),
+    datasetVersionId: text("dataset_version_id").references(() => datasetVersions.id, {
       onDelete: "set null",
     }),
-    accessScope: text("access_scope", { enum: ["public", "admin"] }).notNull(),
-    sourceKind: text("source_kind", {
-      enum: ["single_file", "directory", "zip"],
-    }).notNull(),
-    status: text("status", {
-      enum: ["queued", "running", "completed", "completed_with_errors", "failed"],
-    }).notNull(),
-    triggerRequestId: text("trigger_request_id"),
-    totalFileCount: integer("total_file_count").notNull().default(0),
-    queuedFileCount: integer("queued_file_count").notNull().default(0),
-    runningFileCount: integer("running_file_count").notNull().default(0),
-    readyFileCount: integer("ready_file_count").notNull().default(0),
-    failedFileCount: integer("failed_file_count").notNull().default(0),
-    retryableFailedFileCount: integer("retryable_failed_file_count").notNull().default(0),
+    bindingRole: text("binding_role", { enum: studyDatasetBindingRoleValues }).notNull(),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    bindingNote: text("binding_note"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at").notNull(),
-    startedAt: integer("started_at"),
-    completedAt: integer("completed_at"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check("knowledge_import_jobs_access_scope_check", sql`${table.accessScope} in ('public', 'admin')`),
-    check(
-      "knowledge_import_jobs_source_kind_check",
-      sql`${table.sourceKind} in ('single_file', 'directory', 'zip')`,
+    enumCheck("study_dataset_bindings_binding_role_check", table.bindingRole, studyDatasetBindingRoleValues),
+    uniqueIndex("study_dataset_bindings_study_dataset_role_idx").on(
+      table.studyId,
+      table.datasetId,
+      table.bindingRole,
     ),
-    check(
-      "knowledge_import_jobs_status_check",
-      sql`${table.status} in ('queued', 'running', 'completed', 'completed_with_errors', 'failed')`,
-    ),
-    index("knowledge_import_jobs_org_created_at_idx").on(table.organizationId, table.createdAt),
-    index("knowledge_import_jobs_org_status_updated_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.updatedAt,
-    ),
-    index("knowledge_import_jobs_created_by_user_id_idx").on(table.createdByUserId),
-    index("knowledge_import_jobs_trigger_request_id_idx").on(table.triggerRequestId),
+    uniqueIndex("study_dataset_bindings_one_active_primary_idx")
+      .on(table.studyId)
+      .where(sql`${table.bindingRole} = 'primary' and ${table.isActive} = 1`),
+    index("study_dataset_bindings_active_idx").on(table.studyId, table.isActive),
+    index("study_dataset_bindings_dataset_version_idx").on(table.datasetVersionId),
   ],
 );
 
-export const knowledgeImportJobFiles = sqliteTable(
-  "knowledge_import_job_files",
+export const causalDags = sqliteTable(
+  "causal_dags",
   {
     id: text("id").primaryKey(),
-    jobId: text("job_id")
+    studyId: text("study_id")
       .notNull()
-      .references(() => knowledgeImportJobs.id, { onDelete: "cascade" }),
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
-    relativePath: text("relative_path").notNull(),
-    displayName: text("display_name").notNull(),
-    mimeType: text("mime_type"),
-    byteSize: integer("byte_size"),
-    contentSha256: text("content_sha256"),
-    archiveEntryPath: text("archive_entry_path"),
-    stagingStoragePath: text("staging_storage_path").notNull(),
-    stage: text("stage", {
-      enum: ["queued", "validating", "extracting", "chunking", "indexing", "ready", "retryable_failed", "failed"],
-    }).notNull(),
-    attemptCount: integer("attempt_count").notNull().default(0),
-    lastError: text("last_error"),
-    lastErrorCode: text("last_error_code"),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status", { enum: causalDagStatusValues }).notNull().default("draft"),
+    currentVersionId: text("current_version_id"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at").notNull(),
-    startedAt: integer("started_at"),
-    completedAt: integer("completed_at"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "knowledge_import_job_files_stage_check",
-      sql`${table.stage} in ('queued', 'validating', 'extracting', 'chunking', 'indexing', 'ready', 'retryable_failed', 'failed')`,
-    ),
-    uniqueIndex("knowledge_import_job_files_job_relative_path_idx").on(
-      table.jobId,
-      table.relativePath,
-    ),
-    index("knowledge_import_job_files_org_stage_updated_at_idx").on(
-      table.organizationId,
-      table.stage,
-      table.updatedAt,
-    ),
-    index("knowledge_import_job_files_job_stage_updated_at_idx").on(
-      table.jobId,
-      table.stage,
-      table.updatedAt,
-    ),
+    enumCheck("causal_dags_status_check", table.status, causalDagStatusValues),
+    index("causal_dags_study_status_updated_at_idx").on(table.studyId, table.status, table.updatedAt),
+    index("causal_dags_org_updated_at_idx").on(table.organizationId, table.updatedAt),
   ],
 );
 
-export const documentChunks = sqliteTable(
-  "document_chunks",
+export const causalDagVersions = sqliteTable(
+  "causal_dag_versions",
   {
     id: text("id").primaryKey(),
-    documentId: text("document_id")
+    dagId: text("dag_id")
       .notNull()
-      .references(() => documents.id, { onDelete: "cascade" }),
-    chunkIndex: integer("chunk_index").notNull(),
-    chunkText: text("chunk_text").notNull(),
-    startOffset: integer("start_offset"),
-    endOffset: integer("end_offset"),
-    tokenCount: integer("token_count"),
-    contentSha256: text("content_sha256").notNull(),
+      .references(() => causalDags.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    primaryDatasetVersionId: text("primary_dataset_version_id").references(() => datasetVersions.id, {
+      onDelete: "set null",
+    }),
+    graphJson: text("graph_json").notNull(),
+    validationJson: text("validation_json").notNull().default("{}"),
+    layoutJson: text("layout_json").notNull().default("{}"),
+    treatmentNodeKey: text("treatment_node_key"),
+    outcomeNodeKey: text("outcome_node_key"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    uniqueIndex("document_chunks_document_chunk_index_idx").on(
-      table.documentId,
-      table.chunkIndex,
-    ),
-    index("document_chunks_document_id_idx").on(table.documentId),
+    uniqueIndex("causal_dag_versions_dag_version_idx").on(table.dagId, table.versionNumber),
+    index("causal_dag_versions_study_created_at_idx").on(table.studyId, table.createdAt),
+    index("causal_dag_versions_dataset_version_idx").on(table.primaryDatasetVersionId),
   ],
 );
 
-export const retrievalRuns = sqliteTable(
-  "retrieval_runs",
+export const causalDagNodes = sqliteTable(
+  "causal_dag_nodes",
   {
     id: text("id").primaryKey(),
-    turnId: text("turn_id")
+    dagVersionId: text("dag_version_id")
       .notNull()
-      .references(() => chatTurns.id, { onDelete: "cascade" }),
-    pipelineVersion: text("pipeline_version").notNull(),
-    status: text("status", { enum: ["started", "completed", "failed"] }).notNull(),
-    embeddingModel: text("embedding_model"),
-    rerankModel: text("rerank_model"),
-    startedAt: integer("started_at").notNull(),
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    nodeKey: text("node_key").notNull(),
+    label: text("label").notNull(),
+    nodeType: text("node_type", { enum: causalDagNodeTypeValues }).notNull(),
+    sourceType: text("source_type", { enum: causalDagNodeSourceTypeValues }).notNull(),
+    observedStatus: text("observed_status", { enum: causalDagNodeObservedStatusValues }).notNull(),
+    datasetVersionId: text("dataset_version_id").references(() => datasetVersions.id, { onDelete: "set null" }),
+    datasetColumnId: text("dataset_column_id").references(() => datasetVersionColumns.id, {
+      onDelete: "set null",
+    }),
+    description: text("description"),
+    assumptionNote: text("assumption_note"),
+    positionX: real("position_x"),
+    positionY: real("position_y"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("causal_dag_nodes_node_type_check", table.nodeType, causalDagNodeTypeValues),
+    enumCheck("causal_dag_nodes_source_type_check", table.sourceType, causalDagNodeSourceTypeValues),
+    enumCheck("causal_dag_nodes_observed_status_check", table.observedStatus, causalDagNodeObservedStatusValues),
+    check(
+      "causal_dag_nodes_dataset_source_requires_column_check",
+      sql`(${table.sourceType} != 'dataset' or ${table.datasetColumnId} is not null)`,
+    ),
+    uniqueIndex("causal_dag_nodes_version_key_idx").on(table.dagVersionId, table.nodeKey),
+    index("causal_dag_nodes_version_type_idx").on(table.dagVersionId, table.nodeType),
+    index("causal_dag_nodes_column_idx").on(table.datasetColumnId),
+  ],
+);
+
+export const causalDagEdges = sqliteTable(
+  "causal_dag_edges",
+  {
+    id: text("id").primaryKey(),
+    dagVersionId: text("dag_version_id")
+      .notNull()
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    edgeKey: text("edge_key").notNull(),
+    sourceNodeId: text("source_node_id")
+      .notNull()
+      .references(() => causalDagNodes.id, { onDelete: "cascade" }),
+    targetNodeId: text("target_node_id")
+      .notNull()
+      .references(() => causalDagNodes.id, { onDelete: "cascade" }),
+    relationshipLabel: text("relationship_label").notNull().default("causes"),
+    note: text("note"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("causal_dag_edges_version_edge_key_idx").on(table.dagVersionId, table.edgeKey),
+    uniqueIndex("causal_dag_edges_version_source_target_idx").on(
+      table.dagVersionId,
+      table.sourceNodeId,
+      table.targetNodeId,
+    ),
+    index("causal_dag_edges_source_idx").on(table.sourceNodeId),
+    index("causal_dag_edges_target_idx").on(table.targetNodeId),
+  ],
+);
+
+export const causalAssumptions = sqliteTable(
+  "causal_assumptions",
+  {
+    id: text("id").primaryKey(),
+    dagVersionId: text("dag_version_id")
+      .notNull()
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    assumptionType: text("assumption_type", { enum: causalAssumptionTypeValues }).notNull(),
+    description: text("description").notNull(),
+    status: text("status", { enum: causalAssumptionStatusValues }).notNull().default("asserted"),
+    relatedNodeId: text("related_node_id").references(() => causalDagNodes.id, { onDelete: "set null" }),
+    relatedEdgeId: text("related_edge_id").references(() => causalDagEdges.id, { onDelete: "set null" }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    enumCheck("causal_assumptions_type_check", table.assumptionType, causalAssumptionTypeValues),
+    enumCheck("causal_assumptions_status_check", table.status, causalAssumptionStatusValues),
+    index("causal_assumptions_dag_version_idx").on(table.dagVersionId),
+    index("causal_assumptions_status_idx").on(table.status, table.createdAt),
+    index("causal_assumptions_related_node_idx").on(table.relatedNodeId),
+  ],
+);
+
+export const causalDataRequirements = sqliteTable(
+  "causal_data_requirements",
+  {
+    id: text("id").primaryKey(),
+    dagVersionId: text("dag_version_id")
+      .notNull()
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    relatedNodeId: text("related_node_id").references(() => causalDagNodes.id, { onDelete: "set null" }),
+    variableLabel: text("variable_label").notNull(),
+    status: text("status", { enum: causalDataRequirementStatusValues }).notNull().default("missing"),
+    importanceRank: integer("importance_rank"),
+    reasonNeeded: text("reason_needed").notNull(),
+    suggestedSource: text("suggested_source"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    enumCheck("causal_data_requirements_status_check", table.status, causalDataRequirementStatusValues),
+    index("causal_data_requirements_dag_status_idx").on(table.dagVersionId, table.status),
+    index("causal_data_requirements_study_status_idx").on(table.studyId, table.status),
+  ],
+);
+
+export const causalApprovals = sqliteTable(
+  "causal_approvals",
+  {
+    id: text("id").primaryKey(),
+    dagVersionId: text("dag_version_id")
+      .notNull()
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    approvedByUserId: text("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    approvalKind: text("approval_kind", { enum: causalApprovalKindValues }).notNull(),
+    approvalText: text("approval_text").notNull(),
+    approvalHash: text("approval_hash"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("causal_approvals_kind_check", table.approvalKind, causalApprovalKindValues),
+    index("causal_approvals_dag_created_at_idx").on(table.dagVersionId, table.createdAt),
+    index("causal_approvals_study_created_at_idx").on(table.studyId, table.createdAt),
+    index("causal_approvals_approved_by_idx").on(table.approvedByUserId, table.createdAt),
+  ],
+);
+
+export const causalRuns = sqliteTable(
+  "causal_runs",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studyQuestionId: text("study_question_id")
+      .notNull()
+      .references(() => studyQuestions.id, { onDelete: "cascade" }),
+    dagVersionId: text("dag_version_id")
+      .notNull()
+      .references(() => causalDagVersions.id, { onDelete: "cascade" }),
+    primaryDatasetVersionId: text("primary_dataset_version_id")
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: "restrict" }),
+    approvalId: text("approval_id").references(() => causalApprovals.id, { onDelete: "set null" }),
+    treatmentNodeKey: text("treatment_node_key").notNull(),
+    outcomeNodeKey: text("outcome_node_key").notNull(),
+    status: text("status", { enum: causalRunStatusValues }).notNull().default("queued"),
+    runnerKind: text("runner_kind", { enum: runnerKindValues }).notNull().default("pywhy"),
+    runnerVersion: text("runner_version"),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    failureReason: text("failure_reason"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    startedAt: integer("started_at"),
     completedAt: integer("completed_at"),
-    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "retrieval_runs_status_check",
-      sql`${table.status} in ('started', 'completed', 'failed')`,
-    ),
-    index("retrieval_runs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
+    enumCheck("causal_runs_status_check", table.status, causalRunStatusValues),
+    enumCheck("causal_runs_runner_kind_check", table.runnerKind, runnerKindValues),
+    index("causal_runs_study_created_at_idx").on(table.studyId, table.createdAt),
+    index("causal_runs_org_status_created_at_idx").on(table.organizationId, table.status, table.createdAt),
+    index("causal_runs_dag_version_idx").on(table.dagVersionId),
+    index("causal_runs_primary_dataset_version_idx").on(table.primaryDatasetVersionId),
+    index("causal_runs_requested_by_idx").on(table.requestedByUserId, table.createdAt),
   ],
 );
 
-export const retrievalRewrites = sqliteTable(
-  "retrieval_rewrites",
+export const causalRunDatasetBindings = sqliteTable(
+  "causal_run_dataset_bindings",
   {
     id: text("id").primaryKey(),
-    retrievalRunId: text("retrieval_run_id")
+    runId: text("run_id")
       .notNull()
-      .references(() => retrievalRuns.id, { onDelete: "cascade" }),
-    rewriteType: text("rewrite_type", {
-      enum: ["contextual-rewrite", "hyde"],
-    }).notNull(),
-    inputText: text("input_text").notNull(),
-    outputText: text("output_text").notNull(),
-    modelName: text("model_name"),
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    datasetId: text("dataset_id")
+      .notNull()
+      .references(() => datasets.id, { onDelete: "cascade" }),
+    datasetVersionId: text("dataset_version_id")
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: "restrict" }),
+    bindingRole: text("binding_role", { enum: studyDatasetBindingRoleValues }).notNull(),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    check(
-      "retrieval_rewrites_type_check",
-      sql`${table.rewriteType} in ('contextual-rewrite', 'hyde')`,
+    enumCheck("causal_run_dataset_bindings_binding_role_check", table.bindingRole, studyDatasetBindingRoleValues),
+    uniqueIndex("causal_run_dataset_bindings_run_dataset_role_idx").on(
+      table.runId,
+      table.datasetVersionId,
+      table.bindingRole,
     ),
-    index("retrieval_rewrites_run_id_created_at_idx").on(table.retrievalRunId, table.createdAt),
+    index("causal_run_dataset_bindings_dataset_version_idx").on(table.datasetVersionId),
   ],
 );
 
-export const retrievalCandidates = sqliteTable(
-  "retrieval_candidates",
+export const causalIdentifications = sqliteTable(
+  "causal_identifications",
   {
     id: text("id").primaryKey(),
-    retrievalRunId: text("retrieval_run_id")
+    runId: text("run_id")
       .notNull()
-      .references(() => retrievalRuns.id, { onDelete: "cascade" }),
-    documentId: text("document_id").references(() => documents.id),
-    chunkId: text("chunk_id").references(() => documentChunks.id),
-    bm25Score: real("bm25_score"),
-    vectorScore: real("vector_score"),
-    rrfScore: real("rrf_score"),
-    rerankScore: real("rerank_score"),
-    retrievalRank: integer("retrieval_rank"),
-    rerankRank: integer("rerank_rank"),
-    selectedForRerank: integer("selected_for_rerank", { mode: "boolean" })
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
       .notNull()
-      .default(false),
-    selectedForAnswer: integer("selected_for_answer", { mode: "boolean" })
-      .notNull()
-      .default(false),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    identified: integer("identified", { mode: "boolean" }).notNull(),
+    method: text("method", { enum: causalIdentificationMethodValues }).notNull(),
+    estimandExpression: text("estimand_expression"),
+    adjustmentSetJson: text("adjustment_set_json").notNull().default("[]"),
+    blockingReasonsJson: text("blocking_reasons_json").notNull().default("[]"),
+    identificationJson: text("identification_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    index("retrieval_candidates_run_id_idx").on(table.retrievalRunId),
-    index("retrieval_candidates_run_id_retrieval_rank_idx").on(
-      table.retrievalRunId,
-      table.retrievalRank,
-    ),
-    index("retrieval_candidates_run_id_rerank_rank_idx").on(
-      table.retrievalRunId,
-      table.rerankRank,
-    ),
+    enumCheck("causal_identifications_method_check", table.method, causalIdentificationMethodValues),
+    uniqueIndex("causal_identifications_run_idx").on(table.runId),
+    index("causal_identifications_identified_idx").on(table.identified, table.createdAt),
   ],
 );
 
-export const responseCitations = sqliteTable(
-  "response_citations",
+export const causalEstimands = sqliteTable(
+  "causal_estimands",
   {
     id: text("id").primaryKey(),
-    assistantMessageId: text("assistant_message_id")
+    runId: text("run_id")
       .notNull()
-      .references(() => assistantMessages.id, { onDelete: "cascade" }),
-    retrievalCandidateId: text("retrieval_candidate_id")
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
       .notNull()
-      .references(() => retrievalCandidates.id, { onDelete: "cascade" }),
-    citationIndex: integer("citation_index").notNull(),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    estimandKind: text("estimand_kind", { enum: causalEstimandKindValues }).notNull(),
+    estimandLabel: text("estimand_label").notNull(),
+    estimandExpression: text("estimand_expression").notNull(),
+    identificationAssumptionsJson: text("identification_assumptions_json").notNull().default("[]"),
+    createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    uniqueIndex("response_citations_message_citation_index_idx").on(
-      table.assistantMessageId,
-      table.citationIndex,
-    ),
-    index("response_citations_message_id_idx").on(table.assistantMessageId),
-    index("response_citations_candidate_id_idx").on(table.retrievalCandidateId),
+    enumCheck("causal_estimands_kind_check", table.estimandKind, causalEstimandKindValues),
+    index("causal_estimands_run_idx").on(table.runId),
+    index("causal_estimands_kind_idx").on(table.estimandKind, table.createdAt),
   ],
 );
 
-export const requestLogs = sqliteTable(
-  "request_logs",
+export const causalEstimates = sqliteTable(
+  "causal_estimates",
   {
     id: text("id").primaryKey(),
-    requestId: text("request_id").notNull().unique(),
-    routeKey: text("route_key").notNull(),
-    routeGroup: text("route_group").notNull(),
-    method: text("method").notNull(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    estimandId: text("estimand_id")
+      .notNull()
+      .references(() => causalEstimands.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    estimatorName: text("estimator_name").notNull(),
+    estimatorConfigJson: text("estimator_config_json").notNull().default("{}"),
+    effectName: text("effect_name").notNull(),
+    estimateValue: real("estimate_value"),
+    stdError: real("std_error"),
+    confidenceIntervalLow: real("confidence_interval_low"),
+    confidenceIntervalHigh: real("confidence_interval_high"),
+    pValue: real("p_value"),
+    estimateJson: text("estimate_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("causal_estimates_run_idx").on(table.runId),
+    index("causal_estimates_estimand_idx").on(table.estimandId),
+    index("causal_estimates_estimator_idx").on(table.estimatorName, table.createdAt),
+  ],
+);
+
+export const causalRefutations = sqliteTable(
+  "causal_refutations",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    refuterName: text("refuter_name").notNull(),
+    status: text("status", { enum: causalRefutationStatusValues }).notNull(),
+    summaryText: text("summary_text").notNull(),
+    resultJson: text("result_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("causal_refutations_status_check", table.status, causalRefutationStatusValues),
+    uniqueIndex("causal_refutations_run_refuter_idx").on(table.runId, table.refuterName),
+    index("causal_refutations_status_idx").on(table.status, table.createdAt),
+  ],
+);
+
+export const computeRuns = sqliteTable(
+  "compute_runs",
+  {
+    id: text("id").primaryKey(),
     organizationId: text("organization_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
-    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
-    statusCode: integer("status_code").notNull(),
-    outcome: text("outcome").notNull(),
-    errorCode: text("error_code"),
-    modelName: text("model_name"),
-    toolName: text("tool_name"),
-    turnId: text("turn_id"),
-    runtimeToolCallId: text("runtime_tool_call_id"),
-    sandboxRunId: text("sandbox_run_id"),
-    governanceJobId: text("governance_job_id"),
-    knowledgeImportJobId: text("knowledge_import_job_id"),
-    totalTokens: integer("total_tokens"),
-    totalCostUsd: real("total_cost_usd"),
-    durationMs: integer("duration_ms").notNull(),
+    studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
+    runId: text("run_id").references(() => causalRuns.id, { onDelete: "set null" }),
+    computeKind: text("compute_kind", { enum: computeRunKindValues }).notNull(),
+    status: text("status", { enum: computeRunStatusValues }).notNull().default("queued"),
+    backend: text("backend").notNull(),
+    runner: text("runner").notNull(),
+    failureReason: text("failure_reason"),
+    timeoutMs: integer("timeout_ms").notNull().default(0),
+    cpuLimitSeconds: integer("cpu_limit_seconds").notNull().default(0),
+    memoryLimitBytes: integer("memory_limit_bytes").notNull().default(0),
+    maxProcesses: integer("max_processes").notNull().default(0),
+    stdoutMaxBytes: integer("stdout_max_bytes").notNull().default(0),
+    artifactMaxBytes: integer("artifact_max_bytes").notNull().default(0),
+    codeText: text("code_text").notNull().default(""),
+    inputManifestJson: text("input_manifest_json").notNull().default("[]"),
+    stdoutText: text("stdout_text"),
+    stderrText: text("stderr_text"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    cleanupStatus: text("cleanup_status").notNull().default("pending"),
     metadataJson: text("metadata_json").notNull().default("{}"),
-    startedAt: integer("started_at").notNull(),
-    completedAt: integer("completed_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
   },
   (table) => [
-    index("request_logs_route_group_started_at_idx").on(table.routeGroup, table.startedAt),
-    index("request_logs_organization_id_started_at_idx").on(table.organizationId, table.startedAt),
-    index("request_logs_user_id_started_at_idx").on(table.userId, table.startedAt),
-    index("request_logs_status_code_started_at_idx").on(table.statusCode, table.startedAt),
-    index("request_logs_turn_id_started_at_idx").on(table.turnId, table.startedAt),
-    index("request_logs_governance_job_id_started_at_idx").on(
-      table.governanceJobId,
-      table.startedAt,
+    enumCheck("compute_runs_kind_check", table.computeKind, computeRunKindValues),
+    enumCheck("compute_runs_status_check", table.status, computeRunStatusValues),
+    check("compute_runs_cleanup_status_check", sql`${table.cleanupStatus} in ('pending', 'completed', 'failed', 'skipped')`),
+    check("compute_runs_owner_check", sql`(${table.runId} is not null or ${table.studyId} is not null)`),
+    check(
+      "compute_runs_causal_kinds_require_run_id_check",
+      sql`(
+        ${table.computeKind} not in ('causal_identification', 'causal_estimation', 'causal_refutation')
+        or ${table.runId} is not null
+      )`,
     ),
-    index("request_logs_knowledge_import_job_id_started_at_idx").on(
-      table.knowledgeImportJobId,
-      table.startedAt,
-    ),
+    index("compute_runs_run_id_idx").on(table.runId),
+    index("compute_runs_study_id_idx").on(table.studyId),
+    index("compute_runs_org_status_created_at_idx").on(table.organizationId, table.status, table.createdAt),
+    index("compute_runs_status_lease_expires_at_idx").on(table.status, table.leaseExpiresAt),
+  ],
+);
+
+export const runArtifacts = sqliteTable(
+  "run_artifacts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
+    runId: text("run_id").references(() => causalRuns.id, { onDelete: "set null" }),
+    computeRunId: text("compute_run_id").references(() => computeRuns.id, { onDelete: "set null" }),
+    artifactKind: text("artifact_kind", { enum: runArtifactKindValues }).notNull(),
+    storagePath: text("storage_path").notNull(),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    contentHash: text("content_hash"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at"),
+  },
+  (table) => [
+    enumCheck("run_artifacts_kind_check", table.artifactKind, runArtifactKindValues),
+    index("run_artifacts_run_idx").on(table.runId),
+    index("run_artifacts_compute_run_idx").on(table.computeRunId),
+    index("run_artifacts_kind_created_at_idx").on(table.artifactKind, table.createdAt),
+    index("run_artifacts_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
+export const causalAnswerPackages = sqliteTable(
+  "causal_answer_packages",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    packageJson: text("package_json").notNull(),
+    packageHash: text("package_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("causal_answer_packages_run_idx").on(table.runId),
+    index("causal_answer_packages_study_created_at_idx").on(table.studyId, table.createdAt),
+  ],
+);
+
+export const causalAnswers = sqliteTable(
+  "causal_answers",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    answerPackageId: text("answer_package_id")
+      .notNull()
+      .references(() => causalAnswerPackages.id, { onDelete: "cascade" }),
+    modelName: text("model_name").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    answerText: text("answer_text").notNull(),
+    answerFormat: text("answer_format").notNull().default("markdown"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("causal_answers_run_idx").on(table.runId),
+    index("causal_answers_study_created_at_idx").on(table.studyId, table.createdAt),
   ],
 );
 
@@ -930,21 +1229,17 @@ export const usageEvents = sqliteTable(
   "usage_events",
   {
     id: text("id").primaryKey(),
-    requestLogId: text("request_log_id").references(() => requestLogs.id, {
-      onDelete: "set null",
-    }),
+    requestLogId: text("request_log_id").references(() => requestLogs.id, { onDelete: "set null" }),
     routeKey: text("route_key").notNull(),
     routeGroup: text("route_group").notNull(),
     eventType: text("event_type").notNull(),
-    usageClass: text("usage_class", {
-      enum: ["analysis", "chart", "chat", "document", "import", "search", "system"],
-    })
-      .notNull()
-      .default("system"),
+    usageClass: text("usage_class", { enum: usageEventUsageClassValues }).notNull(),
     organizationId: text("organization_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
     userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
+    causalRunId: text("causal_run_id").references(() => causalRuns.id, { onDelete: "set null" }),
     subjectName: text("subject_name"),
     status: text("status").notNull(),
     quantity: integer("quantity").notNull().default(0),
@@ -958,14 +1253,11 @@ export const usageEvents = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    check(
-      "usage_events_usage_class_check",
-      sql`${table.usageClass} in ('analysis', 'chart', 'chat', 'document', 'import', 'search', 'system')`,
-    ),
+    enumCheck("usage_events_usage_class_check", table.usageClass, usageEventUsageClassValues),
     index("usage_events_route_group_created_at_idx").on(table.routeGroup, table.createdAt),
     index("usage_events_organization_id_created_at_idx").on(table.organizationId, table.createdAt),
-    index("usage_events_user_id_created_at_idx").on(table.userId, table.createdAt),
-    index("usage_events_event_type_created_at_idx").on(table.eventType, table.createdAt),
+    index("usage_events_study_id_created_at_idx").on(table.studyId, table.createdAt),
+    index("usage_events_causal_run_id_created_at_idx").on(table.causalRunId, table.createdAt),
   ],
 );
 
@@ -1004,6 +1296,8 @@ export const operationalAlerts = sqliteTable(
     organizationId: text("organization_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
+    studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
+    causalRunId: text("causal_run_id").references(() => causalRuns.id, { onDelete: "set null" }),
     userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     message: text("message").notNull(),
@@ -1019,6 +1313,7 @@ export const operationalAlerts = sqliteTable(
       table.organizationId,
       table.lastSeenAt,
     ),
+    index("operational_alerts_causal_run_id_last_seen_at_idx").on(table.causalRunId, table.lastSeenAt),
   ],
 );
 
@@ -1031,21 +1326,17 @@ export const organizationComplianceSettings = sqliteTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     requestLogRetentionDays: integer("request_log_retention_days"),
     usageRetentionDays: integer("usage_retention_days"),
-    alertRetentionDays: integer("alert_retention_days"),
-    chatHistoryRetentionDays: integer("chat_history_retention_days"),
-    knowledgeImportRetentionDays: integer("knowledge_import_retention_days"),
-    exportArtifactRetentionDays: integer("export_artifact_retention_days")
-      .notNull()
-      .default(7),
-    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    studyHistoryRetentionDays: integer("study_history_retention_days"),
+    referenceRetentionDays: integer("reference_retention_days"),
+    runArtifactRetentionDays: integer("run_artifact_retention_days").notNull().default(7),
+    legacyArchiveRetentionDays: integer("legacy_archive_retention_days"),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
     uniqueIndex("organization_compliance_settings_org_idx").on(table.organizationId),
-    index("organization_compliance_settings_updated_by_user_id_idx").on(table.updatedByUserId),
+    index("organization_compliance_settings_updated_by_idx").on(table.updatedByUserId),
   ],
 );
 
@@ -1059,21 +1350,9 @@ export const governanceJobs = sqliteTable(
     requestedByUserId: text("requested_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    jobType: text("job_type", {
-      enum: [
-        "organization_export",
-        "knowledge_delete",
-        "history_purge",
-        "import_metadata_purge",
-      ],
-    }).notNull(),
-    status: text("status", {
-      enum: ["queued", "running", "completed", "failed"],
-    }).notNull(),
+    jobType: text("job_type", { enum: governanceJobTypeValues }).notNull(),
+    status: text("status", { enum: governanceJobStatusValues }).notNull(),
     triggerRequestId: text("trigger_request_id"),
-    triggerKind: text("trigger_kind", { enum: ["manual", "automatic"] })
-      .notNull()
-      .default("manual"),
     targetLabel: text("target_label").notNull(),
     cutoffTimestamp: integer("cutoff_timestamp"),
     artifactStoragePath: text("artifact_storage_path"),
@@ -1088,405 +1367,10 @@ export const governanceJobs = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    check(
-      "governance_jobs_type_check",
-      sql`${table.jobType} in ('organization_export', 'knowledge_delete', 'history_purge', 'import_metadata_purge')`,
-    ),
-    check(
-      "governance_jobs_status_check",
-      sql`${table.status} in ('queued', 'running', 'completed', 'failed')`,
-    ),
-    check(
-      "governance_jobs_trigger_kind_check",
-      sql`${table.triggerKind} in ('manual', 'automatic')`,
-    ),
+    enumCheck("governance_jobs_type_check", table.jobType, governanceJobTypeValues),
+    enumCheck("governance_jobs_status_check", table.status, governanceJobStatusValues),
     index("governance_jobs_org_created_at_idx").on(table.organizationId, table.createdAt),
-    index("governance_jobs_org_status_updated_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.updatedAt,
-    ),
-    index("governance_jobs_requested_by_user_id_idx").on(table.requestedByUserId),
+    index("governance_jobs_status_updated_at_idx").on(table.status, table.updatedAt),
     index("governance_jobs_type_completed_at_idx").on(table.jobType, table.completedAt),
-    index("governance_jobs_trigger_request_id_idx").on(table.triggerRequestId),
-  ],
-);
-
-export const workflows = sqliteTable(
-  "workflows",
-  {
-    id: text("id").primaryKey(),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    createdByUserId: text("created_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    name: text("name").notNull(),
-    description: text("description"),
-    visibility: text("visibility", {
-      enum: ["private", "organization"],
-    })
-      .notNull()
-      .default("organization"),
-    status: text("status", {
-      enum: ["draft", "active", "paused", "archived"],
-    })
-      .notNull()
-      .default("draft"),
-    currentVersionId: text("current_version_id"),
-    lastEnabledByUserId: text("last_enabled_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    nextRunAt: integer("next_run_at"),
-    lastRunAt: integer("last_run_at"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflows_visibility_check",
-      sql`${table.visibility} in ('private', 'organization')`,
-    ),
-    check(
-      "workflows_status_check",
-      sql`${table.status} in ('draft', 'active', 'paused', 'archived')`,
-    ),
-    index("workflows_org_status_next_run_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.nextRunAt,
-    ),
-    index("workflows_org_updated_at_idx").on(table.organizationId, table.updatedAt),
-    index("workflows_current_version_id_idx").on(table.currentVersionId),
-    index("workflows_created_by_user_id_idx").on(table.createdByUserId),
-  ],
-);
-
-export const workflowVersions = sqliteTable(
-  "workflow_versions",
-  {
-    id: text("id").primaryKey(),
-    workflowId: text("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    versionNumber: integer("version_number").notNull(),
-    inputContractJson: text("input_contract_json").notNull(),
-    inputBindingsJson: text("input_bindings_json").notNull(),
-    recipeJson: text("recipe_json").notNull(),
-    thresholdsJson: text("thresholds_json").notNull(),
-    outputsJson: text("outputs_json").notNull(),
-    deliveryJson: text("delivery_json").notNull(),
-    scheduleJson: text("schedule_json").notNull(),
-    executionIdentityJson: text("execution_identity_json").notNull(),
-    provenanceJson: text("provenance_json").notNull().default("{}"),
-    createdByUserId: text("created_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    createdAt: integer("created_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("workflow_versions_workflow_id_version_number_idx").on(
-      table.workflowId,
-      table.versionNumber,
-    ),
-    index("workflow_versions_workflow_id_created_at_idx").on(table.workflowId, table.createdAt),
-    index("workflow_versions_org_created_at_idx").on(table.organizationId, table.createdAt),
-    index("workflow_versions_created_by_user_id_idx").on(table.createdByUserId),
-  ],
-);
-
-export const workflowRuns = sqliteTable(
-  "workflow_runs",
-  {
-    id: text("id").primaryKey(),
-    workflowId: text("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    workflowVersionId: text("workflow_version_id")
-      .notNull()
-      .references(() => workflowVersions.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    triggerKind: text("trigger_kind", {
-      enum: ["manual", "scheduled", "resume"],
-    }).notNull(),
-    triggerWindowKey: text("trigger_window_key"),
-    status: text("status", {
-      enum: [
-        "queued",
-        "running",
-        "waiting_for_input",
-        "blocked_validation",
-        "completed",
-        "failed",
-        "cancelled",
-        "skipped",
-      ],
-    })
-      .notNull()
-      .default("queued"),
-    runAsUserId: text("run_as_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    runAsRole: text("run_as_role", { enum: ["member", "admin", "owner"] }).notNull(),
-    startedAt: integer("started_at"),
-    completedAt: integer("completed_at"),
-    failureReason: text("failure_reason"),
-    requestId: text("request_id"),
-    metadataJson: text("metadata_json").notNull().default("{}"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflow_runs_trigger_kind_check",
-      sql`${table.triggerKind} in ('manual', 'scheduled', 'resume')`,
-    ),
-    check(
-      "workflow_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'waiting_for_input', 'blocked_validation', 'completed', 'failed', 'cancelled', 'skipped')`,
-    ),
-    check(
-      "workflow_runs_run_as_role_check",
-      sql`${table.runAsRole} in ('member', 'admin', 'owner')`,
-    ),
-    check(
-      "workflow_runs_trigger_window_key_check",
-      sql`(
-        (${table.triggerKind} = 'scheduled' and ${table.triggerWindowKey} is not null)
-        or (${table.triggerKind} in ('manual', 'resume') and ${table.triggerWindowKey} is null)
-      )`,
-    ),
-    uniqueIndex("workflow_runs_scheduled_window_unique_idx").on(
-      table.workflowId,
-      table.triggerKind,
-      table.triggerWindowKey,
-    ),
-    index("workflow_runs_workflow_id_created_at_idx").on(table.workflowId, table.createdAt),
-    index("workflow_runs_org_status_created_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.createdAt,
-    ),
-    index("workflow_runs_status_updated_at_idx").on(table.status, table.updatedAt),
-    index("workflow_runs_trigger_window_key_idx").on(table.triggerWindowKey),
-    index("workflow_runs_run_as_user_id_created_at_idx").on(table.runAsUserId, table.createdAt),
-    index("workflow_runs_request_id_idx").on(table.requestId),
-  ],
-);
-
-export const workflowRunSteps = sqliteTable(
-  "workflow_run_steps",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    stepKey: text("step_key").notNull(),
-    stepOrder: integer("step_order").notNull(),
-    toolName: text("tool_name").notNull(),
-    status: text("status", {
-      enum: ["queued", "running", "completed", "failed", "skipped"],
-    })
-      .notNull()
-      .default("queued"),
-    inputJson: text("input_json").notNull().default("{}"),
-    outputJson: text("output_json").notNull().default("{}"),
-    sandboxRunId: text("sandbox_run_id").references(() => sandboxRuns.runId, {
-      onDelete: "set null",
-    }),
-    startedAt: integer("started_at"),
-    completedAt: integer("completed_at"),
-    errorMessage: text("error_message"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflow_run_steps_status_check",
-      sql`${table.status} in ('queued', 'running', 'completed', 'failed', 'skipped')`,
-    ),
-    uniqueIndex("workflow_run_steps_run_id_step_key_idx").on(table.runId, table.stepKey),
-    index("workflow_run_steps_run_id_step_order_idx").on(table.runId, table.stepOrder),
-    index("workflow_run_steps_run_id_status_idx").on(table.runId, table.status),
-    index("workflow_run_steps_sandbox_run_id_idx").on(table.sandboxRunId),
-  ],
-);
-
-export const workflowRunInputChecks = sqliteTable(
-  "workflow_run_input_checks",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    inputKey: text("input_key").notNull(),
-    status: text("status", { enum: ["pass", "warn", "fail"] }).notNull(),
-    reportJson: text("report_json").notNull(),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflow_run_input_checks_status_check",
-      sql`${table.status} in ('pass', 'warn', 'fail')`,
-    ),
-    uniqueIndex("workflow_run_input_checks_run_id_input_key_idx").on(table.runId, table.inputKey),
-    index("workflow_run_input_checks_run_id_status_idx").on(table.runId, table.status),
-    index("workflow_run_input_checks_org_created_at_idx").on(table.organizationId, table.createdAt),
-  ],
-);
-
-export const workflowRunResolvedInputs = sqliteTable(
-  "workflow_run_resolved_inputs",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    inputKey: text("input_key").notNull(),
-    inputItemIndex: integer("input_item_index").notNull().default(0),
-    assetId: text("asset_id")
-      .notNull()
-      .references(() => dataAssets.id, { onDelete: "cascade" }),
-    assetVersionId: text("asset_version_id")
-      .notNull()
-      .references(() => dataAssetVersions.id, { onDelete: "cascade" }),
-    contentHash: text("content_hash").notNull(),
-    schemaHash: text("schema_hash"),
-    materializedPath: text("materialized_path").notNull(),
-    displayName: text("display_name").notNull(),
-    resolvedAt: integer("resolved_at").notNull(),
-    metadataJson: text("metadata_json").notNull().default("{}"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("workflow_run_resolved_inputs_run_id_input_item_idx").on(
-      table.runId,
-      table.inputKey,
-      table.inputItemIndex,
-    ),
-    index("workflow_run_resolved_inputs_run_id_input_key_idx").on(table.runId, table.inputKey),
-    index("workflow_run_resolved_inputs_run_id_idx").on(table.runId),
-    index("workflow_run_resolved_inputs_asset_version_id_idx").on(table.assetVersionId),
-    index("workflow_run_resolved_inputs_org_created_at_idx").on(
-      table.organizationId,
-      table.createdAt,
-    ),
-  ],
-);
-
-export const workflowInputRequests = sqliteTable(
-  "workflow_input_requests",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    workflowId: text("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    status: text("status", {
-      enum: ["open", "sent", "fulfilled", "expired", "cancelled"],
-    })
-      .notNull()
-      .default("open"),
-    requestedInputKeysJson: text("requested_input_keys_json").notNull().default("[]"),
-    notificationChannelsJson: text("notification_channels_json").notNull().default("[]"),
-    message: text("message"),
-    sentAt: integer("sent_at"),
-    fulfilledAt: integer("fulfilled_at"),
-    expiresAt: integer("expires_at"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflow_input_requests_status_check",
-      sql`${table.status} in ('open', 'sent', 'fulfilled', 'expired', 'cancelled')`,
-    ),
-    index("workflow_input_requests_run_id_status_updated_at_idx").on(
-      table.runId,
-      table.status,
-      table.updatedAt,
-    ),
-    index("workflow_input_requests_org_status_updated_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.updatedAt,
-    ),
-    index("workflow_input_requests_status_expires_at_idx").on(table.status, table.expiresAt),
-  ],
-);
-
-export const workflowDeliveries = sqliteTable(
-  "workflow_deliveries",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    workflowId: text("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    channelKind: text("channel_kind", {
-      enum: ["webhook", "chart_pack", "ranked_table", "generated_document", "email"],
-    }).notNull(),
-    status: text("status", { enum: ["pending", "sent", "failed"] })
-      .notNull()
-      .default("pending"),
-    attemptNumber: integer("attempt_number").notNull().default(1),
-    payloadSnapshotJson: text("payload_snapshot_json").notNull(),
-    artifactManifestJson: text("artifact_manifest_json").notNull().default("[]"),
-    responseStatusCode: integer("response_status_code"),
-    responseBody: text("response_body"),
-    errorMessage: text("error_message"),
-    nextRetryAt: integer("next_retry_at"),
-    sentAt: integer("sent_at"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    check(
-      "workflow_deliveries_channel_kind_check",
-      sql`${table.channelKind} in ('webhook', 'chart_pack', 'ranked_table', 'generated_document', 'email')`,
-    ),
-    check(
-      "workflow_deliveries_status_check",
-      sql`${table.status} in ('pending', 'sent', 'failed')`,
-    ),
-    uniqueIndex("workflow_deliveries_run_id_channel_attempt_idx").on(
-      table.runId,
-      table.channelKind,
-      table.attemptNumber,
-    ),
-    index("workflow_deliveries_run_id_created_at_idx").on(table.runId, table.createdAt),
-    index("workflow_deliveries_org_status_next_retry_at_idx").on(
-      table.organizationId,
-      table.status,
-      table.nextRetryAt,
-    ),
-    index("workflow_deliveries_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );

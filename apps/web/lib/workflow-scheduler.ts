@@ -3,14 +3,14 @@ import "server-only";
 import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   organizationMemberships,
   users,
   workflowRuns,
   workflowVersions,
   workflows,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { getWorkflowSchedulerGateStatus } from "@/lib/workflow-flags";
 import { logStructuredError, logStructuredEvent } from "@/lib/observability";
 import {

@@ -6,8 +6,8 @@ import path from "node:path";
 
 import { and, desc, eq } from "drizzle-orm";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { dataAssets, dataAssetVersions, dataConnections, organizations } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { dataAssets, dataAssetVersions, dataConnections, organizations } from "@/lib/legacy-app-schema";
 import {
   ensureDataConnection,
   getConnectionSpecForSource,

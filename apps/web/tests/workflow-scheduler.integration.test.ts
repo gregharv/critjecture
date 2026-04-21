@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
-import { organizationMemberships, workflowRuns, workflows } from "@/lib/app-schema";
+import { getAppDatabase } from "@/lib/legacy-app-db";
+import { organizationMemberships, workflowRuns, workflows } from "@/lib/legacy-app-schema";
 import {
   buildScheduledWindowKey,
   computeNextScheduledRunAt,

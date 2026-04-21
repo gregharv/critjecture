@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, lt } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   workflowDeliveries,
   workflowInputRequests,
@@ -12,7 +12,7 @@ import {
   workflowRunSteps,
   workflowVersions,
   workflows,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import {
   parseWorkflowJsonRecord,
   parseWorkflowJsonStringArray,

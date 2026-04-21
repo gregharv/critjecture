@@ -5,7 +5,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getAppDatabase } from "@/lib/app-db";
+import { getAppDatabase } from "@/lib/legacy-app-db";
 import {
   analysisResults,
   chatTurns,
@@ -14,7 +14,7 @@ import {
   dataConnections,
   documents,
   toolCalls,
-} from "@/lib/app-schema";
+} from "@/lib/legacy-app-schema";
 import { resolveCompanyDataRoot } from "@/lib/company-data";
 import { getAuthenticatedUserByEmail } from "@/lib/users";
 import { buildWorkflowDraftFromChatTurn } from "@/lib/workflow-builder";
