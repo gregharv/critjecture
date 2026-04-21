@@ -4,6 +4,7 @@ import {
   type CausalIntentClassification,
   type CausalQuestionType,
   DESCRIPTIVE_FALLBACK_PATH,
+  PREDICTIVE_FALLBACK_PATH,
   parseClassifierOutput,
 } from "@/lib/causal-intent-types";
 
@@ -24,29 +25,28 @@ const COUNTERFACTUAL_PATTERNS = [
   /\bif we (increase|decrease|change|raise|lower|reduce|remove|add)\b/i,
 ];
 
-const INTERVENTION_PATTERNS = [
+const EXPLICIT_CAUSAL_PATTERNS = [
   /\bimpact of\b/i,
   /\beffect of\b/i,
   /\bdid .* affect\b/i,
-  /\bif we\b/i,
-  /\bif i\b/i,
-  /\bincrease\b/i,
-  /\bdecrease\b/i,
-  /\braise\b/i,
-  /\blower\b/i,
-  /\breduce\b/i,
-  /\bchange\b/i,
-];
-
-const CAUSAL_EXPLANATION_PATTERNS = [
-  /\bwhy did\b/i,
-  /\bwhy does\b/i,
-  /\bwhy is\b/i,
+  /\bdid .* increase\b/i,
+  /\bdid .* reduce\b/i,
+  /\bdid .* decrease\b/i,
+  /\bdid .* cause\b/i,
   /\bwhat caused\b/i,
   /\bcause of\b/i,
   /\bcaused by\b/i,
   /\bdriver of\b/i,
   /\bdrivers of\b/i,
+  /\bif we\b/i,
+  /\bif i\b/i,
+];
+
+const DIAGNOSTIC_EXPLANATION_PATTERNS = [
+  /\bwhy did\b/i,
+  /\bwhy does\b/i,
+  /\bwhy is\b/i,
+  /\bwhy are\b/i,
 ];
 
 const MEDIATION_PATTERNS = [/\bmediate\b/i, /\bmediator\b/i, /\bmediation\b/i];
@@ -64,26 +64,42 @@ const DESCRIPTIVE_PATTERNS = [
   /\blist\b/i,
   /\bbreakdown\b/i,
   /\bdistribution\b/i,
+  /\bwhich segment\b/i,
+  /\bwhich segments\b/i,
   /\blast month\b/i,
   /\byesterday\b/i,
   /\bthis week\b/i,
 ];
 
-const DIAGNOSTIC_PATTERNS = [
+const ASSOCIATIONAL_PATTERNS = [
   /\bassociated with\b/i,
   /\bcorrelat/i,
   /\brelated to\b/i,
   /\bwhich factors\b/i,
   /\bwhich variables\b/i,
-  /\bsegments explain\b/i,
+  /\bfeature importance\b/i,
+  /\bimportant features\b/i,
+];
+
+const PREDICTIVE_PATTERNS = [
+  /\bpredict\b/i,
+  /\bpredicts\b/i,
+  /\bpredictive\b/i,
+  /\bforecast\b/i,
+  /\bforecasting\b/i,
+  /\blikely to\b/i,
+  /\bprobability of\b/i,
+  /\bnext month\b/i,
+  /\bnext quarter\b/i,
+  /\bnext week\b/i,
 ];
 
 export function buildCausalIntentPrompt(message: string) {
   return [
     "Classify the user request before any dataset analysis begins.",
     "Return strict JSON with: is_causal, intent_type, reason, confidence, question_type, routing_decision.",
-    "Allowed intent_type: descriptive, diagnostic, causal, counterfactual, unclear.",
-    "Allowed routing_decision: continue_descriptive, open_causal_study, ask_clarification, blocked.",
+    "Allowed intent_type: descriptive, associational, predictive, diagnostic, causal, counterfactual, unclear.",
+    "Allowed routing_decision: continue_descriptive, open_predictive_analysis, open_causal_study, ask_clarification, blocked.",
     "Never use tools or dataset access while classifying.",
     `User message: ${message.trim()}`,
   ].join("\n");
@@ -166,11 +182,11 @@ function inferQuestionType(message: string): CausalQuestionType {
     return "counterfactual";
   }
 
-  if (matchesAny(message, INTERVENTION_PATTERNS)) {
+  if (matchesAny(message, EXPLICIT_CAUSAL_PATTERNS)) {
     return "intervention_effect";
   }
 
-  if (matchesAny(message, CAUSAL_EXPLANATION_PATTERNS)) {
+  if (matchesAny(message, DIAGNOSTIC_EXPLANATION_PATTERNS)) {
     return "cause_of_observed_change";
   }
 
@@ -205,14 +221,83 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
     };
   }
 
-  if (matchesAny(normalized, CAUSAL_EXPLANATION_PATTERNS) || matchesAny(normalized, INTERVENTION_PATTERNS)) {
+  if (matchesAny(normalized, EXPLICIT_CAUSAL_PATTERNS)) {
     const raw = {
       confidence: 0.93,
       intent_type: "causal",
       is_causal: true,
       question_type: questionType,
-      reason: "The request asks for a causal explanation or intervention effect, not a descriptive summary.",
+      reason: "The request asks for an explicit intervention effect or causal attribution.",
       routing_decision: "open_causal_study",
+    } as const;
+
+    return {
+      confidence: raw.confidence,
+      intentType: raw.intent_type,
+      isCausal: raw.is_causal,
+      proposedOutcomeLabel: suggestedLabels.proposedOutcomeLabel,
+      proposedTreatmentLabel: suggestedLabels.proposedTreatmentLabel,
+      questionType,
+      rawOutputJson: JSON.stringify(raw),
+      reason: raw.reason,
+      routingDecision: raw.routing_decision,
+    };
+  }
+
+  if (matchesAny(normalized, PREDICTIVE_PATTERNS)) {
+    const raw = {
+      confidence: 0.91,
+      intent_type: "predictive",
+      is_causal: false,
+      question_type: questionType,
+      reason: "The request asks for prediction or forecasting rather than a causal effect estimate.",
+      routing_decision: "open_predictive_analysis",
+    } as const;
+
+    return {
+      confidence: raw.confidence,
+      intentType: raw.intent_type,
+      isCausal: raw.is_causal,
+      proposedOutcomeLabel: suggestedLabels.proposedOutcomeLabel,
+      proposedTreatmentLabel: suggestedLabels.proposedTreatmentLabel,
+      questionType,
+      rawOutputJson: JSON.stringify(raw),
+      reason: raw.reason,
+      routingDecision: raw.routing_decision,
+    };
+  }
+
+  if (matchesAny(normalized, ASSOCIATIONAL_PATTERNS)) {
+    const raw = {
+      confidence: 0.87,
+      intent_type: "associational",
+      is_causal: false,
+      question_type: questionType,
+      reason: "The request asks for correlations or observational predictors rather than an intervention effect.",
+      routing_decision: "open_predictive_analysis",
+    } as const;
+
+    return {
+      confidence: raw.confidence,
+      intentType: raw.intent_type,
+      isCausal: raw.is_causal,
+      proposedOutcomeLabel: suggestedLabels.proposedOutcomeLabel,
+      proposedTreatmentLabel: suggestedLabels.proposedTreatmentLabel,
+      questionType,
+      rawOutputJson: JSON.stringify(raw),
+      reason: raw.reason,
+      routingDecision: raw.routing_decision,
+    };
+  }
+
+  if (matchesAny(normalized, DIAGNOSTIC_EXPLANATION_PATTERNS)) {
+    const raw = {
+      confidence: 0.82,
+      intent_type: "diagnostic",
+      is_causal: false,
+      question_type: questionType,
+      reason: "The request asks for an explanation of an observed pattern and should start with observational diagnostic analysis.",
+      routing_decision: "continue_descriptive",
     } as const;
 
     return {
@@ -235,29 +320,6 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
       is_causal: false,
       question_type: questionType,
       reason: "The request asks what happened or for a descriptive summary, not why an outcome changed.",
-      routing_decision: "continue_descriptive",
-    } as const;
-
-    return {
-      confidence: raw.confidence,
-      intentType: raw.intent_type,
-      isCausal: raw.is_causal,
-      proposedOutcomeLabel: suggestedLabels.proposedOutcomeLabel,
-      proposedTreatmentLabel: suggestedLabels.proposedTreatmentLabel,
-      questionType,
-      rawOutputJson: JSON.stringify(raw),
-      reason: raw.reason,
-      routingDecision: raw.routing_decision,
-    };
-  }
-
-  if (matchesAny(normalized, DIAGNOSTIC_PATTERNS)) {
-    const raw = {
-      confidence: 0.8,
-      intent_type: "diagnostic",
-      is_causal: false,
-      question_type: questionType,
-      reason: "The request asks for diagnostic or associative analysis rather than a causal effect estimate.",
       routing_decision: "continue_descriptive",
     } as const;
 
@@ -361,6 +423,7 @@ export function getCausalIntentClassifierMetadata() {
   return {
     descriptiveFallbackPath: DESCRIPTIVE_FALLBACK_PATH,
     modelName: CAUSAL_INTENT_MODEL_NAME,
+    predictiveFallbackPath: PREDICTIVE_FALLBACK_PATH,
     promptVersion: CAUSAL_INTENT_PROMPT_VERSION,
   };
 }

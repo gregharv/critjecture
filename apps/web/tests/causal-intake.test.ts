@@ -27,7 +27,7 @@ describe("causal intake", () => {
       expect(user).not.toBeNull();
 
       const response = await runCausalIntake({
-        message: "Why did conversion drop last week?",
+        message: "Did discount rate affect conversion?",
         user: user!,
       });
 
@@ -60,8 +60,9 @@ describe("causal intake", () => {
       expect(questions).toHaveLength(1);
       expect(questions[0]).toMatchObject({
         proposedOutcomeLabel: "conversion",
-        questionText: "Why did conversion drop last week?",
-        questionType: "cause_of_observed_change",
+        proposedTreatmentLabel: "discount rate",
+        questionText: "Did discount rate affect conversion?",
+        questionType: "intervention_effect",
         studyId: response.studyId,
       });
 
@@ -103,6 +104,58 @@ describe("causal intake", () => {
     }
   });
 
+  it("routes predictive requests to a separate predictive path and does not create a causal study", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const response = await runCausalIntake({
+        message: "What predicts conversion?",
+        user: user!,
+      });
+
+      expect(response).toMatchObject({
+        decision: "open_predictive_analysis",
+        nextPath: "/predictive",
+      });
+
+      const db = await getAppDatabase();
+      const studies = await db.select().from(causalStudies);
+
+      expect(studies).toHaveLength(0);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("routes diagnostic why-questions to the observational path first", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const response = await runCausalIntake({
+        message: "Why did conversion drop last week?",
+        user: user!,
+      });
+
+      expect(response).toMatchObject({
+        decision: "continue_descriptive",
+        nextPath: "/chat",
+      });
+
+      const db = await getAppDatabase();
+      const studies = await db.select().from(causalStudies);
+
+      expect(studies).toHaveLength(0);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
   it("reuses the requested study when a causal intake resumes existing work", async () => {
     const environment = await createTestAppEnvironment();
 
@@ -111,7 +164,7 @@ describe("causal intake", () => {
       expect(user).not.toBeNull();
 
       const first = await runCausalIntake({
-        message: "Why did activation fall after the pricing change?",
+        message: "Did the pricing change affect activation?",
         user: user!,
       });
       expect(first.decision).toBe("open_causal_study");

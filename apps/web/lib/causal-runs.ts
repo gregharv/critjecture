@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { resolveOrganizationStorageRoot, resolveRepositoryRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
@@ -47,10 +47,13 @@ type PythonExecutionResult = {
 };
 
 type RunnerCapabilities = {
+  catboost: boolean;
   dowhy: boolean;
+  econml: boolean;
   numpy: boolean;
   pandas: boolean;
   polars: boolean;
+  sklearn: boolean;
 };
 
 type ResolvedCausalRunner = {
@@ -96,7 +99,7 @@ async function getRunnerCapabilities(pythonPath: string) {
   const codeText = [
     "import importlib.util",
     "import json",
-    "mods = ['dowhy', 'numpy', 'pandas', 'polars']",
+    "mods = ['catboost', 'dowhy', 'econml', 'numpy', 'pandas', 'polars', 'sklearn']",
     "print(json.dumps({name: bool(importlib.util.find_spec(name)) for name in mods}))",
   ].join("\n");
   const { stdout } = await execFileAsync(pythonPath, ["-c", codeText], {
@@ -105,10 +108,13 @@ async function getRunnerCapabilities(pythonPath: string) {
   });
   const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>;
   const capabilities = {
+    catboost: parsed.catboost === true,
     dowhy: parsed.dowhy === true,
+    econml: parsed.econml === true,
     numpy: parsed.numpy === true,
     pandas: parsed.pandas === true,
     polars: parsed.polars === true,
+    sklearn: parsed.sklearn === true,
   } satisfies RunnerCapabilities;
   runnerCapabilityCache.set(pythonPath, capabilities);
   return capabilities;
@@ -176,53 +182,122 @@ function buildEstimationScript() {
     "config = json.loads(sys.argv[1])",
     "dataset_path = config['dataset_path']",
     "columns = [config['treatment_column'], config['outcome_column'], *config['adjustment_columns']]",
-    "suffix = pathlib.Path(dataset_path).suffix.lower()",
-    "if suffix == '.csv':",
-    "    frame = pl.scan_csv(dataset_path).select(columns).drop_nulls().collect()",
-    "elif suffix == '.tsv':",
-    "    frame = pl.scan_csv(dataset_path, separator='\t').select(columns).drop_nulls().collect()",
-    "elif suffix == '.parquet':",
-    "    frame = pl.scan_parquet(dataset_path).select(columns).drop_nulls().collect()",
-    "elif suffix in ('.json', '.ndjson'):",
-    "    frame = pl.scan_ndjson(dataset_path).select(columns).drop_nulls().collect()",
-    "else:",
-    "    raise ValueError(f'Unsupported dataset format: {suffix}')",
+    "preferred_method = config.get('method_name') or 'backdoor.econml.dml.DML'",
     "",
+    "def load_frame(dataset_path, columns):",
+    "    suffix = pathlib.Path(dataset_path).suffix.lower()",
+    "    if suffix == '.csv':",
+    "        frame = pl.scan_csv(dataset_path).select(columns).drop_nulls().collect()",
+    "    elif suffix == '.tsv':",
+    "        frame = pl.scan_csv(dataset_path, separator='\t').select(columns).drop_nulls().collect()",
+    "    elif suffix == '.parquet':",
+    "        frame = pl.scan_parquet(dataset_path).select(columns).drop_nulls().collect()",
+    "    elif suffix in ('.json', '.ndjson'):",
+    "        frame = pl.scan_ndjson(dataset_path).select(columns).drop_nulls().collect()",
+    "    else:",
+    "        raise ValueError(f'Unsupported dataset format: {suffix}')",
+    "    for column in columns:",
+    "        frame = frame.with_columns(pl.col(column).cast(pl.Float64, strict=False))",
+    "    frame = frame.drop_nulls()",
+    "    return frame",
+    "",
+    "def run_linear_fallback(frame, config, reason=None):",
+    "    y = frame[config['outcome_column']].to_numpy()",
+    "    t = frame[config['treatment_column']].to_numpy()",
+    "    adjustment_arrays = [frame[column].to_numpy() for column in config['adjustment_columns']]",
+    "    design_matrix = np.column_stack([np.ones(frame.height), t, *adjustment_arrays])",
+    "    beta, _, rank, _ = np.linalg.lstsq(design_matrix, y, rcond=None)",
+    "    residuals = y - design_matrix @ beta",
+    "    degrees_of_freedom = frame.height - design_matrix.shape[1]",
+    "    std_error = None",
+    "    ci_low = None",
+    "    ci_high = None",
+    "    if degrees_of_freedom > 0:",
+    "        sigma_squared = float((residuals.T @ residuals) / degrees_of_freedom)",
+    "        covariance = sigma_squared * np.linalg.pinv(design_matrix.T @ design_matrix)",
+    "        std_error = float(np.sqrt(max(covariance[1, 1], 0.0)))",
+    "        ci_low = float(beta[1] - 1.96 * std_error)",
+    "        ci_high = float(beta[1] + 1.96 * std_error)",
+    "    result = {",
+    "        'estimator_name': 'backdoor_linear_regression',",
+    "        'effect_name': 'treatment_coefficient',",
+    "        'estimate_value': float(beta[1]),",
+    "        'std_error': std_error,",
+    "        'confidence_interval_low': ci_low,",
+    "        'confidence_interval_high': ci_high,",
+    "        'p_value': None,",
+    "        'row_count': int(frame.height),",
+    "        'rank': int(rank),",
+    "        'status': 'completed',",
+    "        'method_requested': preferred_method,",
+    "        'method_used': 'linear_fallback',",
+    "    }",
+    "    if reason:",
+    "        result['fallback_reason'] = str(reason)",
+    "    return result",
+    "",
+    "frame = load_frame(dataset_path, columns)",
     "if frame.height < 3:",
     "    raise ValueError('At least three complete rows are required for estimation.')",
     "",
-    "for column in columns:",
-    "    frame = frame.with_columns(pl.col(column).cast(pl.Float64))",
+    "fallback_reason = None",
+    "if preferred_method == 'backdoor.econml.dml.DML' and frame.height >= max(20, len(columns) * 4):",
+    "    try:",
+    "        import pandas as pd",
+    "        from catboost import CatBoostClassifier, CatBoostRegressor",
+    "        from dowhy import CausalModel",
+    "        from sklearn.linear_model import LinearRegression",
+    "        from sklearn.preprocessing import PolynomialFeatures",
     "",
-    "y = frame[config['outcome_column']].to_numpy()",
-    "t = frame[config['treatment_column']].to_numpy()",
-    "adjustment_arrays = [frame[column].to_numpy() for column in config['adjustment_columns']]",
-    "design_matrix = np.column_stack([np.ones(frame.height), t, *adjustment_arrays])",
-    "beta, _, rank, _ = np.linalg.lstsq(design_matrix, y, rcond=None)",
-    "residuals = y - design_matrix @ beta",
-    "degrees_of_freedom = frame.height - design_matrix.shape[1]",
-    "std_error = None",
-    "ci_low = None",
-    "ci_high = None",
-    "if degrees_of_freedom > 0:",
-    "    sigma_squared = float((residuals.T @ residuals) / degrees_of_freedom)",
-    "    covariance = sigma_squared * np.linalg.inv(design_matrix.T @ design_matrix)",
-    "    std_error = float(np.sqrt(covariance[1, 1]))",
-    "    ci_low = float(beta[1] - 1.96 * std_error)",
-    "    ci_high = float(beta[1] + 1.96 * std_error)",
+    "        pandas_frame = frame.to_pandas()",
+    "        treatment_values = sorted({float(value) for value in pandas_frame[config['treatment_column']].tolist()})",
+    "        is_binary_treatment = treatment_values in ([0.0], [1.0], [0.0, 1.0])",
+    "        model_y = CatBoostRegressor(depth=6, iterations=200, learning_rate=0.05, loss_function='RMSE', random_seed=7, verbose=0)",
+    "        model_t = CatBoostClassifier(depth=6, iterations=200, learning_rate=0.05, loss_function='Logloss', random_seed=7, verbose=0) if is_binary_treatment else CatBoostRegressor(depth=6, iterations=200, learning_rate=0.05, loss_function='RMSE', random_seed=7, verbose=0)",
+    "        method_params = {",
+    "            'init_params': {",
+    "                'model_y': model_y,",
+    "                'model_t': model_t,",
+    "                'model_final': LinearRegression(),",
+    "                'featurizer': PolynomialFeatures(degree=1, include_bias=False),",
+    "                'discrete_treatment': is_binary_treatment,",
+    "                'random_state': 7,",
+    "            },",
+    "            'fit_params': {},",
+    "        }",
     "",
-    "result = {",
-    "    'estimator_name': 'backdoor_linear_regression',",
-    "    'effect_name': 'treatment_coefficient',",
-    "    'estimate_value': float(beta[1]),",
-    "    'std_error': std_error,",
-    "    'confidence_interval_low': ci_low,",
-    "    'confidence_interval_high': ci_high,",
-    "    'p_value': None,",
-    "    'row_count': int(frame.height),",
-    "    'rank': int(rank),",
-    "}",
-    "print(json.dumps(result))",
+    "        model = CausalModel(data=pandas_frame, treatment=config['treatment_column'], outcome=config['outcome_column'], graph=config['graph_dot'])",
+    "        identified_estimand = model.identify_effect(proceed_when_unidentifiable=False)",
+    "        estimate = model.estimate_effect(",
+    "            identified_estimand,",
+    "            method_name='backdoor.econml.dml.DML',",
+    "            confidence_intervals=False,",
+    "            method_params=method_params,",
+    "        )",
+    "        value = estimate.value",
+    "        if hasattr(value, 'item'):",
+    "            value = value.item()",
+    "        result = {",
+    "            'estimator_name': 'backdoor_econml_dml',",
+    "            'effect_name': 'average_treatment_effect',",
+    "            'estimate_value': float(value),",
+    "            'std_error': None,",
+    "            'confidence_interval_low': None,",
+    "            'confidence_interval_high': None,",
+    "            'p_value': None,",
+    "            'row_count': int(frame.height),",
+    "            'status': 'completed',",
+    "            'method_requested': preferred_method,",
+    "            'method_used': 'dowhy_econml_dml',",
+    "        }",
+    "        print(json.dumps(result))",
+    "        raise SystemExit(0)",
+    "    except Exception as exc:",
+    "        fallback_reason = f'DoWhy + EconML DML unavailable or failed: {exc}'",
+    "elif preferred_method == 'backdoor.econml.dml.DML':",
+    "    fallback_reason = 'DoWhy + EconML DML requires at least a modest sample; falling back to linear adjustment for the current data.'",
+    "",
+    "print(json.dumps(run_linear_fallback(frame, config, fallback_reason)))",
   ].join("\n");
 }
 
@@ -680,43 +755,7 @@ function buildDowhyGraphDot(input: {
 }
 
 function buildDowhyEstimationScript() {
-  return [
-    "import json",
-    "import pathlib",
-    "import sys",
-    "import pandas as pd",
-    "from dowhy import CausalModel",
-    "",
-    "config = json.loads(sys.argv[1])",
-    "dataset_path = config['dataset_path']",
-    "suffix = pathlib.Path(dataset_path).suffix.lower()",
-    "if suffix == '.csv':",
-    "    frame = pd.read_csv(dataset_path)",
-    "elif suffix == '.tsv':",
-    "    frame = pd.read_csv(dataset_path, sep='\t')",
-    "elif suffix == '.parquet':",
-    "    frame = pd.read_parquet(dataset_path)",
-    "elif suffix in ('.json', '.ndjson'):",
-    "    frame = pd.read_json(dataset_path, lines=True)",
-    "else:",
-    "    raise ValueError(f'Unsupported dataset format: {suffix}')",
-    "columns = [config['treatment_column'], config['outcome_column'], *config['adjustment_columns']]",
-    "frame = frame[columns].dropna()",
-    "model = CausalModel(data=frame, treatment=config['treatment_column'], outcome=config['outcome_column'], graph=config['graph_dot'])",
-    "identified_estimand = model.identify_effect(proceed_when_unidentifiable=False)",
-    "estimate = model.estimate_effect(identified_estimand, method_name=config['method_name'])",
-    "print(json.dumps({",
-    "    'estimator_name': config['method_name'].replace('.', '_'),",
-    "    'effect_name': 'average_treatment_effect',",
-    "    'estimate_value': float(estimate.value),",
-    "    'std_error': None,",
-    "    'confidence_interval_low': None,",
-    "    'confidence_interval_high': None,",
-    "    'p_value': None,",
-    "    'row_count': int(len(frame)),",
-    "    'status': 'completed',",
-    "}))",
-  ].join("\n");
+  return buildEstimationScript();
 }
 
 function buildDowhyRefutationScript() {
@@ -868,7 +907,8 @@ export async function createAndExecuteCausalRun(input: {
     approvalId: latestApproval?.id ?? null,
     metadataJson: JSON.stringify({
       dedicated_runner_path: runner.pythonPath,
-      execution_strategy: runner.runnerKind === "hybrid" ? "hybrid_numpy_polars_v2" : "dedicated_dowhy_runner_v1",
+      execution_strategy:
+        runner.runnerKind === "hybrid" ? "hybrid_dowhy_econml_with_linear_fallback_v3" : "dedicated_dowhy_econml_runner_v2",
       fallback_reason: runner.fallbackReason,
       requested_runner_kind: runner.requestedKind,
       runner_capabilities: runner.capabilities,
@@ -998,9 +1038,6 @@ export async function createAndExecuteCausalRun(input: {
     }
 
     const adjustmentNodes = graph.nodes.filter((node) => identificationPlan.adjustmentSetNodeKeys.includes(node.nodeKey));
-    const adjustmentColumnIds = adjustmentNodes
-      .map((node) => node.datasetColumnId)
-      .filter((value): value is string => typeof value === "string" && value.length > 0);
 
     const estimandId = randomUUID();
     await db.insert(causalEstimands).values({
@@ -1030,11 +1067,19 @@ export async function createAndExecuteCausalRun(input: {
         observedStatus: node.observedStatus,
       })),
     });
+    const preferredBackdoorMethod =
+      runner.capabilities.dowhy &&
+      runner.capabilities.econml &&
+      runner.capabilities.catboost &&
+      runner.capabilities.sklearn
+        ? "backdoor.econml.dml.DML"
+        : "backdoor.linear_regression";
+
     const estimationInput = {
       adjustment_columns: adjustmentNodes.map((node) => node.nodeKey),
       dataset_path: datasetPath,
       graph_dot: graphDot,
-      method_name: runner.runnerKind === "hybrid" ? undefined : "backdoor.linear_regression",
+      method_name: preferredBackdoorMethod,
       outcome_column: outcomeNode.nodeKey,
       treatment_column: treatmentNode.nodeKey,
     };
@@ -1047,7 +1092,14 @@ export async function createAndExecuteCausalRun(input: {
       inputManifestJson: jsonStringify({ datasetPath }),
       organizationId: input.runUser.organizationId,
       runId,
-      runner: runner.runnerKind === "hybrid" ? "numpy-polars-ols" : "dowhy-linear-regression",
+      runner:
+        preferredBackdoorMethod === "backdoor.econml.dml.DML"
+          ? runner.runnerKind === "hybrid"
+            ? "dowhy-econml-dml-hybrid"
+            : "dowhy-econml-dml"
+          : runner.runnerKind === "hybrid"
+            ? "linear-adjustment-fallback"
+            : "dowhy-linear-regression",
       studyId: study.id,
     });
     await markComputeRunRunning(estimationComputeRunId);
@@ -1302,11 +1354,104 @@ export async function listCausalRunsForStudy(input: {
   studyId: string;
 }) {
   const db = await getAppDatabase();
-  return db
+  const runs = await db
     .select()
     .from(causalRuns)
     .where(and(eq(causalRuns.organizationId, input.organizationId), eq(causalRuns.studyId, input.studyId)))
     .orderBy(desc(causalRuns.createdAt));
+
+  const runIds = runs.map((run) => run.id);
+
+  const [identifications, estimates, refutations, answers, artifacts] = runIds.length
+    ? await Promise.all([
+        db
+          .select()
+          .from(causalIdentifications)
+          .where(inArray(causalIdentifications.runId, runIds)),
+        db
+          .select()
+          .from(causalEstimates)
+          .where(inArray(causalEstimates.runId, runIds))
+          .orderBy(desc(causalEstimates.createdAt)),
+        db
+          .select()
+          .from(causalRefutations)
+          .where(inArray(causalRefutations.runId, runIds)),
+        db
+          .select()
+          .from(causalAnswers)
+          .where(inArray(causalAnswers.runId, runIds)),
+        db
+          .select()
+          .from(runArtifacts)
+          .where(inArray(runArtifacts.runId, runIds)),
+      ])
+    : [[], [], [], [], []];
+
+  const identificationByRunId = new Map(identifications.map((entry) => [entry.runId, entry]));
+  const estimateByRunId = new Map<string, (typeof estimates)[number]>();
+  for (const estimate of estimates) {
+    if (!estimateByRunId.has(estimate.runId)) {
+      estimateByRunId.set(estimate.runId, estimate);
+    }
+  }
+
+  const refutationCountByRunId = new Map<string, number>();
+  for (const refutation of refutations) {
+    refutationCountByRunId.set(refutation.runId, (refutationCountByRunId.get(refutation.runId) ?? 0) + 1);
+  }
+
+  const answerCountByRunId = new Map<string, number>();
+  for (const answer of answers) {
+    answerCountByRunId.set(answer.runId, (answerCountByRunId.get(answer.runId) ?? 0) + 1);
+  }
+
+  const artifactCountByRunId = new Map<string, number>();
+  for (const artifact of artifacts) {
+    if (!artifact.runId) {
+      continue;
+    }
+    artifactCountByRunId.set(artifact.runId, (artifactCountByRunId.get(artifact.runId) ?? 0) + 1);
+  }
+
+  return runs.map((run) => {
+    const identification = identificationByRunId.get(run.id) ?? null;
+    const estimate = estimateByRunId.get(run.id) ?? null;
+
+    return {
+      artifactCount: artifactCountByRunId.get(run.id) ?? 0,
+      answerCount: answerCountByRunId.get(run.id) ?? 0,
+      completedAt: run.completedAt,
+      createdAt: run.createdAt,
+      estimatorName: estimate?.estimatorName ?? null,
+      id: run.id,
+      identificationMethod: identification?.method ?? null,
+      identified: identification?.identified ?? null,
+      outcomeNodeKey: run.outcomeNodeKey,
+      primaryEstimateValue: estimate?.estimateValue ?? null,
+      refutationCount: refutationCountByRunId.get(run.id) ?? 0,
+      status: run.status,
+      treatmentNodeKey: run.treatmentNodeKey,
+    };
+  });
+}
+
+export async function getCausalArtifactDetail(input: {
+  artifactId: string;
+  organizationId: string;
+  runId: string;
+}) {
+  const db = await getAppDatabase();
+  const [artifact] = await db
+    .select()
+    .from(runArtifacts)
+    .where(and(eq(runArtifacts.id, input.artifactId), eq(runArtifacts.organizationId, input.organizationId)));
+
+  if (!artifact || artifact.runId !== input.runId) {
+    throw new Error("Causal artifact not found.");
+  }
+
+  return artifact;
 }
 
 export async function getCausalRunDetail(input: {
@@ -1327,18 +1472,53 @@ export async function getCausalRunDetail(input: {
     db.select().from(causalIdentifications).where(eq(causalIdentifications.runId, run.id)),
     db.select().from(causalEstimands).where(eq(causalEstimands.runId, run.id)),
     db.select().from(causalEstimates).where(eq(causalEstimates.runId, run.id)),
-    db.select().from(causalRefutations).where(eq(causalRefutations.runId, run.id)),
-    db.select().from(computeRuns).where(eq(computeRuns.runId, run.id)),
-    db.select().from(runArtifacts).where(eq(runArtifacts.runId, run.id)),
+    db.select().from(causalRefutations).where(eq(causalRefutations.runId, run.id)).orderBy(desc(causalRefutations.createdAt)),
+    db.select().from(computeRuns).where(eq(computeRuns.runId, run.id)).orderBy(desc(computeRuns.createdAt)),
+    db.select().from(runArtifacts).where(eq(runArtifacts.runId, run.id)).orderBy(desc(runArtifacts.createdAt)),
     db.select().from(causalAnswers).where(eq(causalAnswers.runId, run.id)).orderBy(desc(causalAnswers.createdAt)),
     getCausalRunPackage(run.id),
   ]);
 
   return {
-    answerPackage,
-    answers,
-    artifacts,
-    computeRuns: compute,
+    answerPackage: answerPackage
+      ? {
+          createdAt: answerPackage.createdAt,
+          id: answerPackage.id,
+          packageJson: answerPackage.packageJson,
+        }
+      : null,
+    answers: answers.map((answer) => ({
+      answerFormat: answer.answerFormat,
+      answerText: answer.answerText,
+      createdAt: answer.createdAt,
+      id: answer.id,
+      modelName: answer.modelName,
+      promptVersion: answer.promptVersion,
+    })),
+    artifacts: artifacts.map((artifact) => ({
+      artifactKind: artifact.artifactKind,
+      createdAt: artifact.createdAt,
+      downloadPath: `/api/causal/runs/${run.id}/artifacts/${artifact.id}`,
+      fileName: artifact.fileName,
+      id: artifact.id,
+      mimeType: artifact.mimeType,
+      storagePath: artifact.storagePath,
+    })),
+    computeRuns: compute.map((entry) => ({
+      backend: entry.backend,
+      completedAt: entry.completedAt,
+      computeKind: entry.computeKind,
+      createdAt: entry.createdAt,
+      failureReason: entry.failureReason,
+      id: entry.id,
+      inputManifestJson: entry.inputManifestJson,
+      metadataJson: entry.metadataJson,
+      runner: entry.runner,
+      startedAt: entry.startedAt,
+      status: entry.status,
+      stderrText: entry.stderrText,
+      stdoutText: entry.stdoutText,
+    })),
     estimates,
     estimands,
     identification: identification[0] ?? null,

@@ -183,7 +183,7 @@ describe("study dataset bindings", () => {
       expect(user).not.toBeNull();
 
       const intake = await runCausalIntake({
-        message: "Why did conversion drop after the pricing change?",
+        message: "Did the pricing change affect conversion?",
         user: user!,
       });
       expect(intake.decision).toBe("open_causal_study");
@@ -279,7 +279,7 @@ describe("study dataset bindings", () => {
       expect(user).not.toBeNull();
 
       const intake = await runCausalIntake({
-        message: "Why did activation change?",
+        message: "Did the onboarding change affect activation?",
         user: user!,
       });
       expect(intake.decision).toBe("open_causal_study");

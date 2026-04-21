@@ -44,7 +44,7 @@ export function CausalStudiesPageClient({
   const hasStudies = studies.length > 0;
   const helperText = useMemo(() => {
     if (!response) {
-      return "Causal routing happens before any dataset analysis. Ask a why/what-if question to open a causal study.";
+      return "Intent routing happens before any dataset analysis. Ask a what-if question to open a causal study, a predictive question to open the predictive path, or a descriptive question to stay observational.";
     }
 
     if (response.decision === "open_causal_study") {
@@ -53,6 +53,10 @@ export function CausalStudiesPageClient({
 
     if (response.decision === "continue_descriptive") {
       return `This request stays on the descriptive path at ${response.nextPath}.`;
+    }
+
+    if (response.decision === "open_predictive_analysis") {
+      return `This request opens the predictive path at ${response.nextPath}.`;
     }
 
     if (response.decision === "ask_clarification") {
@@ -133,7 +137,8 @@ export function CausalStudiesPageClient({
           <h2 className="causal-card__title">Start with intake</h2>
           <p className="causal-card__copy">
             Intake classifies intent before any dataset analysis. Causal questions open a study;
-            descriptive questions stay on a secondary path.
+            descriptive and diagnostic questions stay on an observational path; predictive questions
+            route to a separate predictive path.
           </p>
           <form className="causal-intake-form" onSubmit={handleSubmit}>
             <label className="causal-intake-form__label" htmlFor="causal-intake-message">
@@ -144,7 +149,7 @@ export function CausalStudiesPageClient({
               className="causal-intake-form__textarea"
               disabled={pending}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="Why did conversion drop last week?"
+              placeholder="Did discount rate affect conversion?"
               rows={5}
               value={message}
             />

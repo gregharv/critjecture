@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { CausalDagCanvas, getNodeAccent } from "@/components/causal-dag-canvas";
 
 import {
   CAUSAL_ASSUMPTION_STATUS_VALUES,
@@ -10,6 +12,8 @@ import {
   CAUSAL_DAG_NODE_OBSERVED_STATUS_VALUES,
   CAUSAL_DAG_NODE_TYPE_VALUES,
 } from "@/lib/causal-dag-values";
+import { evaluateDraftDagGuardrails } from "@/lib/causal-dag-draft-guardrails";
+import { analyzeDraftDagPaths } from "@/lib/causal-dag-path-assistance";
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
@@ -122,10 +126,19 @@ type CausalDagWorkspaceDetail = {
 };
 
 type CausalRunSummary = {
+  answerCount: number;
+  artifactCount: number;
   completedAt: number | null;
   createdAt: number;
+  estimatorName: string | null;
   id: string;
+  identificationMethod: string | null;
+  identified: boolean | null;
+  outcomeNodeKey: string;
+  primaryEstimateValue: number | null;
+  refutationCount: number;
   status: string;
+  treatmentNodeKey: string;
 };
 
 type CausalAnswerSummary = {
@@ -206,11 +219,33 @@ type DagDraft = {
   title: string;
 };
 
+type DagLayout = {
+  positions?: Record<string, { x: number; y: number }>;
+};
+
 const DEFAULT_APPROVAL_TEXT =
   "I confirm that this DAG reflects my current causal assumptions, including observed variables, unobserved variables, and any external data still needed.";
 
 function formatTimestamp(timestamp: number) {
   return DATE_TIME_FORMATTER.format(timestamp);
+}
+
+function formatLabel(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatNumber(value: number | null, digits = 4) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "not reported";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: digits,
+  }).format(value);
 }
 
 function getErrorMessage(value: unknown, fallbackMessage: string) {
@@ -268,6 +303,105 @@ function inferSuggestedNodeType(input: {
 
 function getDraftAutosaveKey(studyId: string) {
   return `critjecture:causal-draft:${studyId}`;
+}
+
+function parseDagLayout(layoutJson: string | null | undefined): DagLayout {
+  if (!layoutJson) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(layoutJson) as DagLayout;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function updateDagLayoutPosition(input: {
+  layoutJson: string;
+  nodeKey: string;
+  x: number;
+  y: number;
+}) {
+  const layout = parseDagLayout(input.layoutJson);
+  return JSON.stringify({
+    ...layout,
+    positions: {
+      ...(layout.positions ?? {}),
+      [input.nodeKey]: {
+        x: input.x,
+        y: input.y,
+      },
+    },
+  });
+}
+
+function removeDagLayoutPosition(layoutJson: string, nodeKey: string) {
+  const layout = parseDagLayout(layoutJson);
+
+  if (!layout.positions || !(nodeKey in layout.positions)) {
+    return layoutJson;
+  }
+
+  const nextPositions = { ...layout.positions };
+  delete nextPositions[nodeKey];
+
+  return JSON.stringify({
+    ...layout,
+    positions: nextPositions,
+  });
+}
+
+function sortObjectKeys<T extends Record<string, unknown>>(value: T): T {
+  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries) as T;
+}
+
+function canonicalizeDraft(draft: DagDraft | null) {
+  if (!draft) {
+    return null;
+  }
+
+  const parsedLayout = parseDagLayout(draft.layoutJson);
+  const sortedPositions = sortObjectKeys(parsedLayout.positions ?? {});
+
+  return {
+    assumptions: [...draft.assumptions].sort((left, right) =>
+      `${left.assumptionType}:${left.relatedNodeKey ?? ""}:${left.description}`.localeCompare(
+        `${right.assumptionType}:${right.relatedNodeKey ?? ""}:${right.description}`,
+      ),
+    ),
+    dataRequirements: [...draft.dataRequirements].sort((left, right) =>
+      `${left.variableLabel}:${left.relatedNodeKey ?? ""}:${left.reasonNeeded}`.localeCompare(
+        `${right.variableLabel}:${right.relatedNodeKey ?? ""}:${right.reasonNeeded}`,
+      ),
+    ),
+    description: draft.description.trim(),
+    edges: [...draft.edges]
+      .map((edge) => ({
+        ...edge,
+        note: edge.note.trim(),
+        relationshipLabel: edge.relationshipLabel.trim(),
+      }))
+      .sort((left, right) => left.edgeKey.localeCompare(right.edgeKey)),
+    layout: {
+      positions: sortedPositions,
+    },
+    nodes: [...draft.nodes]
+      .map((node) => ({
+        ...node,
+        description: node.description.trim(),
+        label: node.label.trim(),
+      }))
+      .sort((left, right) => left.nodeKey.localeCompare(right.nodeKey)),
+    primaryDatasetVersionId: draft.primaryDatasetVersionId,
+    title: draft.title.trim(),
+  };
+}
+
+function areDraftsEquivalent(left: DagDraft | null, right: DagDraft | null) {
+  return JSON.stringify(canonicalizeDraft(left)) === JSON.stringify(canonicalizeDraft(right));
 }
 
 function buildSeededDraft(
@@ -372,6 +506,11 @@ export function CausalStudyPageClient({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approvalText, setApprovalText] = useState(DEFAULT_APPROVAL_TEXT);
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
+  const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
+  const [comparisonBaseRunId, setComparisonBaseRunId] = useState<string>(initialRuns[0]?.id ?? "");
+  const [comparisonTargetRunId, setComparisonTargetRunId] = useState<string>(initialRuns[1]?.id ?? initialRuns[0]?.id ?? "");
+  const dagCanvasSectionRef = useRef<HTMLDivElement | null>(null);
   const [newCustomNode, setNewCustomNode] = useState({
     label: "",
     nodeKey: "",
@@ -424,6 +563,130 @@ export function CausalStudyPageClient({
     () => [...(dagDraft?.nodes ?? [])].sort((left, right) => left.nodeKey.localeCompare(right.nodeKey)),
     [dagDraft?.nodes],
   );
+  const dagNodePositions = useMemo(
+    () => parseDagLayout(dagDraft?.layoutJson).positions ?? {},
+    [dagDraft?.layoutJson],
+  );
+  const savedCurrentVersionDraft = useMemo(() => {
+    const seeded = buildSeededDraft(datasetBinding, dagWorkspace, currentQuestion, studyTitle);
+    return parseGraphJsonDraft(dagWorkspace, seeded);
+  }, [currentQuestion, dagWorkspace, datasetBinding, studyTitle]);
+  const draftGuardrails = useMemo(
+    () =>
+      dagDraft
+        ? evaluateDraftDagGuardrails({
+            datasetColumnIds: datasetBinding.seedContract?.columns.map((column) => column.id),
+            draft: dagDraft,
+            requirePinnedPrimaryDataset: true,
+          })
+        : null,
+    [dagDraft, datasetBinding.seedContract],
+  );
+  const draftPathAssistance = useMemo(
+    () =>
+      dagDraft
+        ? analyzeDraftDagPaths({
+            edges: dagDraft.edges,
+            nodes: dagDraft.nodes,
+          })
+        : null,
+    [dagDraft],
+  );
+  const hasUnsavedDagChanges = useMemo(
+    () => !areDraftsEquivalent(dagDraft, savedCurrentVersionDraft),
+    [dagDraft, savedCurrentVersionDraft],
+  );
+  const selectedDraftNode = useMemo(
+    () => dagDraft?.nodes.find((node) => node.nodeKey === selectedNodeKey) ?? null,
+    [dagDraft?.nodes, selectedNodeKey],
+  );
+  const selectedDraftEdge = useMemo(
+    () => dagDraft?.edges.find((edge) => edge.edgeKey === selectedEdgeKey) ?? null,
+    [dagDraft?.edges, selectedEdgeKey],
+  );
+  const treatmentNodes = useMemo(
+    () => (dagDraft?.nodes ?? []).filter((node) => node.nodeType === "treatment"),
+    [dagDraft?.nodes],
+  );
+  const outcomeNodes = useMemo(
+    () => (dagDraft?.nodes ?? []).filter((node) => node.nodeType === "outcome"),
+    [dagDraft?.nodes],
+  );
+  const errorNodeKeys = useMemo(
+    () =>
+      Object.entries(draftGuardrails?.nodeIssues ?? {})
+        .filter(([, issues]) => issues.some((issue) => issue.severity === "error"))
+        .map(([nodeKey]) => nodeKey),
+    [draftGuardrails?.nodeIssues],
+  );
+  const warningNodeKeys = useMemo(
+    () =>
+      Object.entries(draftGuardrails?.nodeIssues ?? {})
+        .filter(
+          ([, issues]) =>
+            !issues.some((issue) => issue.severity === "error") &&
+            issues.some((issue) => issue.severity === "warning"),
+        )
+        .map(([nodeKey]) => nodeKey),
+    [draftGuardrails?.nodeIssues],
+  );
+  const errorEdgeKeys = useMemo(
+    () =>
+      Object.entries(draftGuardrails?.edgeIssues ?? {})
+        .filter(([, issues]) => issues.some((issue) => issue.severity === "error"))
+        .map(([edgeKey]) => edgeKey),
+    [draftGuardrails?.edgeIssues],
+  );
+  const warningEdgeKeys = useMemo(
+    () =>
+      Object.entries(draftGuardrails?.edgeIssues ?? {})
+        .filter(
+          ([, issues]) =>
+            !issues.some((issue) => issue.severity === "error") &&
+            issues.some((issue) => issue.severity === "warning"),
+        )
+        .map(([edgeKey]) => edgeKey),
+    [draftGuardrails?.edgeIssues],
+  );
+  const comparisonBaseRun = useMemo(
+    () => runs.find((run) => run.id === comparisonBaseRunId) ?? null,
+    [comparisonBaseRunId, runs],
+  );
+  const comparisonTargetRun = useMemo(
+    () => runs.find((run) => run.id === comparisonTargetRunId) ?? null,
+    [comparisonTargetRunId, runs],
+  );
+  const nodeSuggestedEdgeActions = useMemo(() => {
+    const byNodeKey: Record<
+      string,
+      Array<{ actionKey: string; label: string; sourceNodeKey: string; targetNodeKey: string }>
+    > = {};
+
+    for (const suggestion of draftPathAssistance?.suggestions ?? []) {
+      if (!suggestion.sourceNodeKey || !suggestion.targetNodeKey) {
+        continue;
+      }
+
+      const edgeKey = `${suggestion.sourceNodeKey}->${suggestion.targetNodeKey}`;
+      const sourceAction = {
+        actionKey: `${edgeKey}:source`,
+        label: `+→ ${suggestion.targetNodeKey}`,
+        sourceNodeKey: suggestion.sourceNodeKey,
+        targetNodeKey: suggestion.targetNodeKey,
+      };
+      const targetAction = {
+        actionKey: `${edgeKey}:target`,
+        label: `+ ${suggestion.sourceNodeKey} →`,
+        sourceNodeKey: suggestion.sourceNodeKey,
+        targetNodeKey: suggestion.targetNodeKey,
+      };
+
+      byNodeKey[suggestion.sourceNodeKey] = [...(byNodeKey[suggestion.sourceNodeKey] ?? []), sourceAction];
+      byNodeKey[suggestion.targetNodeKey] = [...(byNodeKey[suggestion.targetNodeKey] ?? []), targetAction];
+    }
+
+    return byNodeKey;
+  }, [draftPathAssistance?.suggestions]);
 
   useEffect(() => {
     if (!dagDraft || typeof window === "undefined") {
@@ -432,6 +695,78 @@ export function CausalStudyPageClient({
 
     window.localStorage.setItem(getDraftAutosaveKey(study.id), JSON.stringify(dagDraft));
   }, [dagDraft, study.id]);
+
+  useEffect(() => {
+    if (selectedNodeKey && !dagDraft?.nodes.some((node) => node.nodeKey === selectedNodeKey)) {
+      setSelectedNodeKey(null);
+    }
+
+    if (selectedEdgeKey && !dagDraft?.edges.some((edge) => edge.edgeKey === selectedEdgeKey)) {
+      setSelectedEdgeKey(null);
+    }
+  }, [dagDraft?.edges, dagDraft?.nodes, selectedEdgeKey, selectedNodeKey]);
+
+  useEffect(() => {
+    if (runs.length === 0) {
+      setComparisonBaseRunId("");
+      setComparisonTargetRunId("");
+      return;
+    }
+
+    if (!runs.some((run) => run.id === comparisonBaseRunId)) {
+      setComparisonBaseRunId(runs[0]?.id ?? "");
+    }
+
+    if (!runs.some((run) => run.id === comparisonTargetRunId)) {
+      setComparisonTargetRunId(runs[1]?.id ?? runs[0]?.id ?? "");
+    }
+  }, [comparisonBaseRunId, comparisonTargetRunId, runs]);
+
+  function focusCanvasInspector() {
+    dagCanvasSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function focusNode(nodeKey: string | null) {
+    if (!nodeKey) {
+      focusCanvasInspector();
+      return;
+    }
+
+    setSelectedNodeKey(nodeKey);
+    setSelectedEdgeKey(null);
+    focusCanvasInspector();
+  }
+
+  function focusFirstDisconnectedNode() {
+    const nodeKey = draftPathAssistance?.disconnectedNodeKeys[0] ?? null;
+    focusNode(nodeKey);
+    return nodeKey;
+  }
+
+  function focusFirstDraftIssue(severity: "error" | "warning" = "error") {
+    const nodeEntry = Object.entries(draftGuardrails?.nodeIssues ?? {}).find(([, issues]) =>
+      issues.some((issue) => issue.severity === severity),
+    );
+
+    if (nodeEntry) {
+      focusNode(nodeEntry[0]);
+      return nodeEntry[0];
+    }
+
+    const edgeEntry = Object.entries(draftGuardrails?.edgeIssues ?? {}).find(([, issues]) =>
+      issues.some((issue) => issue.severity === severity),
+    );
+
+    if (edgeEntry) {
+      setSelectedNodeKey(null);
+      setSelectedEdgeKey(edgeEntry[0]);
+      focusCanvasInspector();
+      return edgeEntry[0];
+    }
+
+    focusCanvasInspector();
+    return null;
+  }
 
   async function refreshStudy(syncDraft = false) {
     const response = await fetch(`/api/causal/studies/${study.id}`, {
@@ -587,6 +922,98 @@ export function CausalStudyPageClient({
     });
   }
 
+  function updateDraftEdge(edgeKey: string, patch: Partial<DagDraftEdge>) {
+    if (!dagDraft) {
+      return;
+    }
+
+    setDagDraft({
+      ...dagDraft,
+      edges: dagDraft.edges.map((edge) => (edge.edgeKey === edgeKey ? { ...edge, ...patch } : edge)),
+    });
+  }
+
+  function removeDraftEdge(edgeKey: string) {
+    if (!dagDraft) {
+      return;
+    }
+
+    setDagDraft({
+      ...dagDraft,
+      edges: dagDraft.edges.filter((edge) => edge.edgeKey !== edgeKey),
+    });
+    setSelectedEdgeKey((current) => (current === edgeKey ? null : current));
+  }
+
+  function setExclusiveDraftNodeType(nodeKey: string, nodeType: "treatment" | "outcome") {
+    if (!dagDraft) {
+      return;
+    }
+
+    setDagDraft({
+      ...dagDraft,
+      nodes: dagDraft.nodes.map((node) => {
+        if (node.nodeKey === nodeKey) {
+          return {
+            ...node,
+            nodeType,
+          };
+        }
+
+        if (node.nodeType === nodeType) {
+          return {
+            ...node,
+            nodeType: "observed_feature",
+          };
+        }
+
+        return node;
+      }),
+    });
+    setSelectedNodeKey(nodeKey);
+    setSelectedEdgeKey(null);
+  }
+
+  function autoArrangeDraftNodes() {
+    if (!dagDraft) {
+      return;
+    }
+
+    const buckets: Array<{ match: (node: DagDraftNode) => boolean; x: number }> = [
+      { match: (node) => node.nodeType === "confounder" || node.nodeType === "instrument", x: 40 },
+      { match: (node) => node.nodeType === "treatment", x: 300 },
+      { match: (node) => node.nodeType === "mediator" || node.nodeType === "collider", x: 560 },
+      { match: (node) => node.nodeType === "outcome", x: 820 },
+      {
+        match: (node) =>
+          node.nodeType === "latent" ||
+          node.nodeType === "external_data_needed" ||
+          node.nodeType === "selection" ||
+          node.nodeType === "note",
+        x: 1080,
+      },
+    ];
+
+    const positions: Record<string, { x: number; y: number }> = {};
+    const rowCounts = new Map<number, number>();
+
+    for (const node of dagDraft.nodes) {
+      const bucket = buckets.find((candidate) => candidate.match(node));
+      const x = bucket?.x ?? 560;
+      const row = rowCounts.get(x) ?? 0;
+      rowCounts.set(x, row + 1);
+      positions[node.nodeKey] = {
+        x,
+        y: 40 + row * 150,
+      };
+    }
+
+    setDagDraft({
+      ...dagDraft,
+      layoutJson: JSON.stringify({ positions }),
+    });
+  }
+
   function removeDraftNode(nodeKey: string) {
     if (!dagDraft) {
       return;
@@ -603,7 +1030,15 @@ export function CausalStudyPageClient({
       edges: dagDraft.edges.filter(
         (edge) => edge.sourceNodeKey !== nodeKey && edge.targetNodeKey !== nodeKey,
       ),
+      layoutJson: removeDagLayoutPosition(dagDraft.layoutJson, nodeKey),
       nodes: dagDraft.nodes.filter((node) => node.nodeKey !== nodeKey),
+    });
+    setSelectedNodeKey((current) => (current === nodeKey ? null : current));
+    setSelectedEdgeKey((current) => {
+      const affected = dagDraft.edges.some(
+        (edge) => edge.edgeKey === current && (edge.sourceNodeKey === nodeKey || edge.targetNodeKey === nodeKey),
+      );
+      return affected ? null : current;
     });
   }
 
@@ -614,6 +1049,11 @@ export function CausalStudyPageClient({
 
     if (!newCustomNode.nodeKey.trim() || !newCustomNode.label.trim()) {
       setError("Custom nodes need both a node key and a label.");
+      return;
+    }
+
+    if (dagDraft.nodes.some((node) => node.nodeKey === newCustomNode.nodeKey.trim())) {
+      setError("That node key already exists in the draft DAG.");
       return;
     }
 
@@ -639,20 +1079,36 @@ export function CausalStudyPageClient({
       nodeType: "latent",
       observedStatus: "unobserved",
     });
+    setSelectedNodeKey(newCustomNode.nodeKey.trim());
+    setSelectedEdgeKey(null);
   }
 
-  function addEdge() {
+  function connectDraftEdge(input: {
+    relationshipLabel?: string;
+    sourceNodeKey: string;
+    targetNodeKey: string;
+  }) {
     if (!dagDraft) {
       return;
     }
 
-    if (!newEdge.sourceNodeKey || !newEdge.targetNodeKey) {
+    if (!input.sourceNodeKey || !input.targetNodeKey) {
       setError("Choose both a source and target node for each edge.");
       return;
     }
 
+    if (input.sourceNodeKey === input.targetNodeKey) {
+      setError("Edges cannot point from a node to itself.");
+      return;
+    }
+
+    const edgeKey = `${input.sourceNodeKey}->${input.targetNodeKey}`;
+    if (dagDraft.edges.some((edge) => edge.edgeKey === edgeKey)) {
+      setError("That edge already exists in the draft DAG.");
+      return;
+    }
+
     setError(null);
-    const edgeKey = `${newEdge.sourceNodeKey}->${newEdge.targetNodeKey}`;
     setDagDraft({
       ...dagDraft,
       edges: [
@@ -660,13 +1116,51 @@ export function CausalStudyPageClient({
         {
           edgeKey,
           note: "",
-          relationshipLabel: newEdge.relationshipLabel.trim() || "causes",
-          sourceNodeKey: newEdge.sourceNodeKey,
-          targetNodeKey: newEdge.targetNodeKey,
+          relationshipLabel: input.relationshipLabel?.trim() || "causes",
+          sourceNodeKey: input.sourceNodeKey,
+          targetNodeKey: input.targetNodeKey,
         },
       ],
     });
+    setSelectedNodeKey(null);
+    setSelectedEdgeKey(edgeKey);
+  }
+
+  function addEdge() {
+    connectDraftEdge(newEdge);
     setNewEdge({ relationshipLabel: "causes", sourceNodeKey: "", targetNodeKey: "" });
+  }
+
+  function applySuggestedBridge(input: { sourceNodeKey?: string; targetNodeKey?: string }) {
+    if (!input.sourceNodeKey || !input.targetNodeKey) {
+      setError("This suggestion does not include a concrete edge to apply.");
+      return;
+    }
+
+    connectDraftEdge({
+      relationshipLabel: newEdge.relationshipLabel || "causes",
+      sourceNodeKey: input.sourceNodeKey,
+      targetNodeKey: input.targetNodeKey,
+    });
+    setSelectedNodeKey(null);
+    setSelectedEdgeKey(`${input.sourceNodeKey}->${input.targetNodeKey}`);
+    focusCanvasInspector();
+  }
+
+  function updateDraftNodePosition(input: { nodeKey: string; x: number; y: number }) {
+    if (!dagDraft) {
+      return;
+    }
+
+    setDagDraft({
+      ...dagDraft,
+      layoutJson: updateDagLayoutPosition({
+        layoutJson: dagDraft.layoutJson,
+        nodeKey: input.nodeKey,
+        x: input.x,
+        y: input.y,
+      }),
+    });
   }
 
   function addAssumption() {
@@ -735,10 +1229,29 @@ export function CausalStudyPageClient({
     });
   }
 
+  function resetDraftToSavedVersion() {
+    setError(null);
+    setSelectedNodeKey(null);
+    setSelectedEdgeKey(null);
+    setDagDraft(savedCurrentVersionDraft);
+
+    if (typeof window !== "undefined") {
+      if (savedCurrentVersionDraft) {
+        window.localStorage.setItem(getDraftAutosaveKey(study.id), JSON.stringify(savedCurrentVersionDraft));
+      } else {
+        window.localStorage.removeItem(getDraftAutosaveKey(study.id));
+      }
+    }
+  }
+
   async function handleSaveDagVersion() {
     if (!dagDraft) {
       setError("Seed or build a draft DAG before saving a version.");
       return;
+    }
+
+    if ((draftGuardrails?.errors.length ?? 0) > 0) {
+      focusFirstDraftIssue("error");
     }
 
     setPending(true);
@@ -791,6 +1304,18 @@ export function CausalStudyPageClient({
   async function handleApproveDagVersion() {
     if (!dagWorkspace.dag?.id || !dagWorkspace.currentVersion?.id) {
       setError("Save a DAG version before approval.");
+      return;
+    }
+
+    if (hasUnsavedDagChanges) {
+      focusCanvasInspector();
+      setError("Save or reset the local draft before approving. Approval always applies to the saved DAG version.");
+      return;
+    }
+
+    if (dagWorkspace.currentVersion.validation.errors.length > 0) {
+      focusFirstDraftIssue("error");
+      setError("Resolve the blocking DAG guardrails before approval.");
       return;
     }
 
@@ -1002,13 +1527,56 @@ export function CausalStudyPageClient({
       <div className="causal-grid">
         <section className="causal-card">
           <div className="causal-card__header-row">
-            <h2 className="causal-card__title">DAG workspace</h2>
+            <div>
+              <h2 className="causal-card__title">DAG workspace</h2>
+              {dagDraft && draftGuardrails ? (
+                <>
+                  <p className="causal-card__meta">
+                    {draftGuardrails.errors.length > 0
+                      ? `${draftGuardrails.errors.length} blocking issue${draftGuardrails.errors.length === 1 ? "" : "s"} found before approval.`
+                      : "No blocking draft guardrails detected."}
+                    {draftGuardrails.warnings.length > 0
+                      ? ` ${draftGuardrails.warnings.length} warning${draftGuardrails.warnings.length === 1 ? "" : "s"} also flagged.`
+                      : ""}
+                  </p>
+                  <p className="causal-card__meta">
+                    {dagWorkspace.currentVersion
+                      ? hasUnsavedDagChanges
+                        ? `Local draft changes are newer than saved version v${dagWorkspace.currentVersion.versionNumber}. Approval still applies only to the saved version until you save again.`
+                        : `Local draft matches saved version v${dagWorkspace.currentVersion.versionNumber}.`
+                      : hasUnsavedDagChanges
+                        ? "This draft has local edits but no saved DAG version yet."
+                        : "No saved DAG version yet."}
+                  </p>
+                </>
+              ) : null}
+            </div>
             <div className="causal-inline-actions">
               <button className="causal-inline-button" onClick={handleSeedDraftFromDataset} type="button">
                 Seed from dataset
               </button>
+              {dagDraft && draftGuardrails?.errors.length ? (
+                <button className="causal-inline-button" onClick={() => focusFirstDraftIssue("error")} type="button">
+                  Review first blocking issue
+                </button>
+              ) : null}
+              {dagDraft && !draftGuardrails?.errors.length && draftGuardrails?.warnings.length ? (
+                <button className="causal-inline-button" onClick={() => focusFirstDraftIssue("warning")} type="button">
+                  Review first warning
+                </button>
+              ) : null}
+              {dagDraft && (draftPathAssistance?.disconnectedNodeKeys.length ?? 0) > 0 ? (
+                <button className="causal-inline-button" onClick={focusFirstDisconnectedNode} type="button">
+                  Review disconnected subgraph
+                </button>
+              ) : null}
+              {dagWorkspace.currentVersion && hasUnsavedDagChanges ? (
+                <button className="causal-inline-button" onClick={resetDraftToSavedVersion} type="button">
+                  Reset draft to saved version
+                </button>
+              ) : null}
               <button className="causal-inline-button" disabled={pending || !dagDraft} onClick={() => void handleSaveDagVersion()} type="button">
-                Save version
+                {dagDraft && (draftGuardrails?.errors.length ?? 0) > 0 ? "Save draft version" : "Save version"}
               </button>
             </div>
           </div>
@@ -1016,6 +1584,19 @@ export function CausalStudyPageClient({
             Drafts are stored as graph JSON and normalized rows. Missing and unobserved variables
             must remain explicit.
           </p>
+          {dagDraft ? (
+            <div className="causal-readiness">
+              <p className="causal-card__meta">
+                Draft status: {hasUnsavedDagChanges ? "unsaved local changes" : "in sync with saved version"}
+              </p>
+              <p className="causal-card__meta">
+                {dagWorkspace.currentVersion
+                  ? `Saved version available: v${dagWorkspace.currentVersion.versionNumber}.`
+                  : "No DAG version has been saved yet."}
+              </p>
+            </div>
+          ) : null}
+          {error ? <p className="causal-intake-form__error">{error}</p> : null}
           {dagDraft ? (
             <div className="causal-editor-stack">
               <label className="causal-intake-form__label" htmlFor="causal-dag-title">
@@ -1039,19 +1620,587 @@ export function CausalStudyPageClient({
                 value={dagDraft.description}
               />
 
+              <div ref={dagCanvasSectionRef} className="causal-editor-section">
+                <div className="causal-card__header-row">
+                  <h3 className="causal-card__title">Graph canvas</h3>
+                  <div className="causal-inline-actions">
+                    <button className="causal-inline-button" onClick={autoArrangeDraftNodes} type="button">
+                      Auto-arrange
+                    </button>
+                    <button
+                      className="causal-inline-button"
+                      onClick={() => {
+                        setSelectedNodeKey(null);
+                        setSelectedEdgeKey(null);
+                      }}
+                      type="button"
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                </div>
+                <p className="causal-card__meta">
+                  Drag nodes to arrange the DAG, click a node or edge to inspect it, connect nodes visually to create edges,
+                  and use the inline canvas controls to mark treatment/outcome roles or remove objects. Double-clicking an
+                  edge still removes it, and Delete key removal is also supported inside the canvas.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  {[
+                    "treatment",
+                    "outcome",
+                    "confounder",
+                    "mediator",
+                    "instrument",
+                    "latent",
+                  ].map((nodeType) => (
+                    <span
+                      key={nodeType}
+                      style={{
+                        alignItems: "center",
+                        background: "#ffffff",
+                        border: `1px solid ${getNodeAccent(nodeType)}`,
+                        borderRadius: 999,
+                        color: getNodeAccent(nodeType),
+                        display: "inline-flex",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        gap: 6,
+                        padding: "4px 10px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          background: getNodeAccent(nodeType),
+                          borderRadius: 999,
+                          display: "inline-block",
+                          height: 8,
+                          width: 8,
+                        }}
+                      />
+                      {nodeType}
+                    </span>
+                  ))}
+                  <span
+                    style={{
+                      alignItems: "center",
+                      background: "#eff6ff",
+                      border: "1px solid #0284c7",
+                      borderRadius: 999,
+                      color: "#0369a1",
+                      display: "inline-flex",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      gap: 6,
+                      padding: "4px 10px",
+                    }}
+                  >
+                    treatment→outcome path
+                  </span>
+                  <span
+                    style={{
+                      alignItems: "center",
+                      background: "#f8fafc",
+                      border: "1px dashed #64748b",
+                      borderRadius: 999,
+                      color: "#475569",
+                      display: "inline-flex",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      gap: 6,
+                      padding: "4px 10px",
+                    }}
+                  >
+                    disconnected subgraph
+                  </span>
+                  <span
+                    style={{
+                      alignItems: "center",
+                      background: "#fef2f2",
+                      border: "1px solid #dc2626",
+                      borderRadius: 999,
+                      color: "#b91c1c",
+                      display: "inline-flex",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      gap: 6,
+                      padding: "4px 10px",
+                    }}
+                  >
+                    blocking issue
+                  </span>
+                  <span
+                    style={{
+                      alignItems: "center",
+                      background: "#fffbeb",
+                      border: "1px solid #d97706",
+                      borderRadius: 999,
+                      color: "#b45309",
+                      display: "inline-flex",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      gap: 6,
+                      padding: "4px 10px",
+                    }}
+                  >
+                    warning
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 16,
+                    gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 340px)",
+                  }}
+                >
+                  <CausalDagCanvas
+                    disconnectedNodeKeys={draftPathAssistance?.disconnectedNodeKeys}
+                    edges={dagDraft.edges}
+                    errorEdgeKeys={errorEdgeKeys}
+                    errorNodeKeys={errorNodeKeys}
+                    nodeSuggestedEdgeActions={nodeSuggestedEdgeActions}
+                    nodes={dagDraft.nodes}
+                    pathEdgeKeys={draftPathAssistance?.pathEdgeKeys}
+                    pathNodeKeys={draftPathAssistance?.pathNodeKeys}
+                    onApplySuggestedEdge={applySuggestedBridge}
+                    onConnectEdge={({ sourceNodeKey, targetNodeKey }) =>
+                      connectDraftEdge({
+                        relationshipLabel: newEdge.relationshipLabel,
+                        sourceNodeKey,
+                        targetNodeKey,
+                      })
+                    }
+                    onMarkNodeAsOutcome={(nodeKey) => setExclusiveDraftNodeType(nodeKey, "outcome")}
+                    onMarkNodeAsTreatment={(nodeKey) => setExclusiveDraftNodeType(nodeKey, "treatment")}
+                    onRemoveEdge={removeDraftEdge}
+                    onRemoveNode={removeDraftNode}
+                    onSelectEdge={setSelectedEdgeKey}
+                    onSelectNode={setSelectedNodeKey}
+                    onUpdateEdgeLabel={({ edgeKey, relationshipLabel }) =>
+                      updateDraftEdge(edgeKey, { relationshipLabel })
+                    }
+                    onUpdateNodePosition={updateDraftNodePosition}
+                    positions={dagNodePositions}
+                    selectedEdgeKey={selectedEdgeKey}
+                    selectedNodeKey={selectedNodeKey}
+                    warningEdgeKeys={warningEdgeKeys}
+                    warningNodeKeys={warningNodeKeys}
+                  />
+                  <aside
+                    style={{
+                      background: "rgba(255, 255, 255, 0.9)",
+                      border: "1px solid rgba(148, 163, 184, 0.25)",
+                      borderRadius: 16,
+                      display: "grid",
+                      gap: 12,
+                      padding: 16,
+                    }}
+                  >
+                    {draftGuardrails?.errors.length ? (
+                      <div
+                        style={{
+                          background: "#fef2f2",
+                          border: "1px solid rgba(220, 38, 38, 0.22)",
+                          borderRadius: 12,
+                          padding: 12,
+                        }}
+                      >
+                        <h4 className="causal-card__title" style={{ color: "#b91c1c", fontSize: 15 }}>
+                          Blocking guardrails
+                        </h4>
+                        <ul className="causal-list" style={{ color: "#991b1b", marginTop: 8 }}>
+                          {draftGuardrails.errors.map((message) => (
+                            <li key={message}>{message}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {draftGuardrails?.warnings.length ? (
+                      <div
+                        style={{
+                          background: "#fffbeb",
+                          border: "1px solid rgba(217, 119, 6, 0.22)",
+                          borderRadius: 12,
+                          padding: 12,
+                        }}
+                      >
+                        <h4 className="causal-card__title" style={{ color: "#b45309", fontSize: 15 }}>
+                          Draft warnings
+                        </h4>
+                        <ul className="causal-list" style={{ color: "#92400e", marginTop: 8 }}>
+                          {draftGuardrails.warnings.map((message) => (
+                            <li key={message}>{message}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {draftPathAssistance ? (
+                      <div
+                        style={{
+                          background: "#eff6ff",
+                          border: "1px solid rgba(2, 132, 199, 0.2)",
+                          borderRadius: 12,
+                          padding: 12,
+                        }}
+                      >
+                        <h4 className="causal-card__title" style={{ color: "#0369a1", fontSize: 15 }}>
+                          Path assistance
+                        </h4>
+                        <p className="causal-card__meta" style={{ marginTop: 8 }}>
+                          {draftPathAssistance.treatmentNodeKey && draftPathAssistance.outcomeNodeKey
+                            ? draftPathAssistance.pathExists
+                              ? `Highlighted path: ${draftPathAssistance.pathNodeKeys.join(" → ")}`
+                              : `No directed path yet from ${draftPathAssistance.treatmentNodeKey} to ${draftPathAssistance.outcomeNodeKey}.`
+                            : "Pick exactly one treatment and one outcome to enable path assistance."}
+                        </p>
+                        <p className="causal-card__meta">
+                          {draftPathAssistance.disconnectedNodeKeys.length > 0
+                            ? `${draftPathAssistance.disconnectedNodeKeys.length} node${draftPathAssistance.disconnectedNodeKeys.length === 1 ? " is" : "s are"} disconnected from the study question.`
+                            : "No disconnected subgraphs detected around the study question."}
+                        </p>
+                        {draftPathAssistance.suggestions.length ? (
+                          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                            {draftPathAssistance.suggestions.map((suggestion) => {
+                              const suggestionKey = `${suggestion.sourceNodeKey ?? "none"}-${suggestion.targetNodeKey ?? "none"}-${suggestion.message}`;
+                              const canApply = Boolean(suggestion.sourceNodeKey && suggestion.targetNodeKey);
+
+                              return (
+                                <div
+                                  key={suggestionKey}
+                                  style={{
+                                    background: "rgba(255, 255, 255, 0.75)",
+                                    border: "1px solid rgba(2, 132, 199, 0.14)",
+                                    borderRadius: 12,
+                                    padding: 10,
+                                  }}
+                                >
+                                  <p className="causal-card__meta" style={{ margin: 0 }}>
+                                    {suggestion.message}
+                                  </p>
+                                  <div className="causal-inline-actions" style={{ marginTop: 8 }}>
+                                    {canApply ? (
+                                      <button
+                                        className="causal-inline-button"
+                                        onClick={() =>
+                                          applySuggestedBridge({
+                                            sourceNodeKey: suggestion.sourceNodeKey,
+                                            targetNodeKey: suggestion.targetNodeKey,
+                                          })
+                                        }
+                                        type="button"
+                                      >
+                                        Apply suggested edge
+                                      </button>
+                                    ) : null}
+                                    {suggestion.sourceNodeKey ? (
+                                      <button
+                                        className="causal-inline-button"
+                                        onClick={() => focusNode(suggestion.sourceNodeKey ?? null)}
+                                        type="button"
+                                      >
+                                        Focus source
+                                      </button>
+                                    ) : null}
+                                    {suggestion.targetNodeKey ? (
+                                      <button
+                                        className="causal-inline-button"
+                                        onClick={() => focusNode(suggestion.targetNodeKey ?? null)}
+                                        type="button"
+                                      >
+                                        Focus target
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                        {(draftPathAssistance.pathExists || draftPathAssistance.disconnectedNodeKeys.length > 0) ? (
+                          <div className="causal-inline-actions" style={{ marginTop: 8 }}>
+                            {draftPathAssistance.pathExists ? (
+                              <button
+                                className="causal-inline-button"
+                                onClick={() => focusNode(draftPathAssistance.pathNodeKeys[0] ?? null)}
+                                type="button"
+                              >
+                                Focus highlighted path
+                              </button>
+                            ) : null}
+                            {draftPathAssistance.disconnectedNodeKeys.length > 0 ? (
+                              <button className="causal-inline-button" onClick={focusFirstDisconnectedNode} type="button">
+                                Focus disconnected subgraph
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <h4 className="causal-card__title" style={{ fontSize: 16 }}>
+                        Draft status
+                      </h4>
+                      <p className="causal-card__meta">
+                        {dagDraft.nodes.length} nodes · {dagDraft.edges.length} edges · {dagDraft.assumptions.length} assumptions
+                      </p>
+                      <p className="causal-card__meta">
+                        {draftGuardrails?.errors.length ?? 0} blocking issues · {draftGuardrails?.warnings.length ?? 0} warnings
+                      </p>
+                      <p className="causal-card__meta">
+                        Treatment: {treatmentNodes.length === 1 ? treatmentNodes[0]?.nodeKey : `${treatmentNodes.length} selected`}
+                      </p>
+                      <p className="causal-card__meta">
+                        Outcome: {outcomeNodes.length === 1 ? outcomeNodes[0]?.nodeKey : `${outcomeNodes.length} selected`}
+                      </p>
+                      {treatmentNodes.length !== 1 || outcomeNodes.length !== 1 ? (
+                        <p className="causal-intake-form__error">
+                          Exactly one treatment node and one outcome node are required before approval.
+                        </p>
+                      ) : null}
+                    </div>
+
+                    {selectedDraftNode ? (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <div className="causal-card__header-row">
+                          <h4 className="causal-card__title" style={{ fontSize: 16 }}>
+                            Selected node
+                          </h4>
+                          <span className="causal-card__meta">{selectedDraftNode.nodeKey}</span>
+                        </div>
+                        <input
+                          className="causal-text-input"
+                          onChange={(event) => updateDraftNode(selectedDraftNode.nodeKey, { label: event.target.value })}
+                          value={selectedDraftNode.label}
+                        />
+                        <select
+                          className="causal-select"
+                          onChange={(event) =>
+                            updateDraftNode(selectedDraftNode.nodeKey, { nodeType: event.target.value })
+                          }
+                          value={selectedDraftNode.nodeType}
+                        >
+                          {CAUSAL_DAG_NODE_TYPE_VALUES.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="causal-select"
+                          onChange={(event) =>
+                            updateDraftNode(selectedDraftNode.nodeKey, { observedStatus: event.target.value })
+                          }
+                          value={selectedDraftNode.observedStatus}
+                        >
+                          {CAUSAL_DAG_NODE_OBSERVED_STATUS_VALUES.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                        <textarea
+                          className="causal-intake-form__textarea"
+                          onChange={(event) =>
+                            updateDraftNode(selectedDraftNode.nodeKey, { description: event.target.value })
+                          }
+                          placeholder="Optional note about why this node belongs in the DAG"
+                          rows={3}
+                          value={selectedDraftNode.description}
+                        />
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          <button
+                            className="causal-inline-button"
+                            onClick={() => setExclusiveDraftNodeType(selectedDraftNode.nodeKey, "treatment")}
+                            type="button"
+                          >
+                            Mark as treatment
+                          </button>
+                          <button
+                            className="causal-inline-button"
+                            onClick={() => setExclusiveDraftNodeType(selectedDraftNode.nodeKey, "outcome")}
+                            type="button"
+                          >
+                            Mark as outcome
+                          </button>
+                          <button
+                            className="causal-inline-button"
+                            onClick={() => removeDraftNode(selectedDraftNode.nodeKey)}
+                            type="button"
+                          >
+                            Remove node
+                          </button>
+                        </div>
+                        <p className="causal-card__meta">
+                          Source: {selectedDraftNode.sourceType}
+                          {selectedDraftNode.datasetColumnId ? ` · dataset column ${selectedDraftNode.datasetColumnId}` : ""}
+                        </p>
+                        {draftPathAssistance?.pathNodeKeys.includes(selectedDraftNode.nodeKey) ? (
+                          <p className="causal-card__meta">This node sits on the current highlighted treatment→outcome path.</p>
+                        ) : null}
+                        {draftPathAssistance?.disconnectedNodeKeys.includes(selectedDraftNode.nodeKey) ? (
+                          <p className="causal-card__meta">This node is currently disconnected from the main study-question subgraph.</p>
+                        ) : null}
+                        {(nodeSuggestedEdgeActions[selectedDraftNode.nodeKey]?.length ?? 0) > 0 ? (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <strong style={{ fontSize: 13 }}>Quick-add suggested links</strong>
+                            <div className="causal-inline-actions">
+                              {nodeSuggestedEdgeActions[selectedDraftNode.nodeKey]?.slice(0, 3).map((action) => (
+                                <button
+                                  key={action.actionKey}
+                                  className="causal-inline-button"
+                                  onClick={() =>
+                                    applySuggestedBridge({
+                                      sourceNodeKey: action.sourceNodeKey,
+                                      targetNodeKey: action.targetNodeKey,
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {(draftGuardrails?.nodeIssues[selectedDraftNode.nodeKey]?.length ?? 0) > 0 ? (
+                          <div
+                            style={{
+                              background: draftGuardrails?.nodeIssues[selectedDraftNode.nodeKey]?.some((issue) => issue.severity === "error")
+                                ? "#fef2f2"
+                                : "#fffbeb",
+                              border: draftGuardrails?.nodeIssues[selectedDraftNode.nodeKey]?.some((issue) => issue.severity === "error")
+                                ? "1px solid rgba(220, 38, 38, 0.22)"
+                                : "1px solid rgba(217, 119, 6, 0.22)",
+                              borderRadius: 12,
+                              padding: 10,
+                            }}
+                          >
+                            <strong style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Node issues</strong>
+                            <ul className="causal-list" style={{ margin: 0 }}>
+                              {draftGuardrails?.nodeIssues[selectedDraftNode.nodeKey]?.map((issue) => (
+                                <li key={`${issue.severity}-${issue.message}`}>{issue.message}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : selectedDraftEdge ? (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <div className="causal-card__header-row">
+                          <h4 className="causal-card__title" style={{ fontSize: 16 }}>
+                            Selected edge
+                          </h4>
+                          <span className="causal-card__meta">{selectedDraftEdge.sourceNodeKey} → {selectedDraftEdge.targetNodeKey}</span>
+                        </div>
+                        <input
+                          className="causal-text-input"
+                          onChange={(event) =>
+                            updateDraftEdge(selectedDraftEdge.edgeKey, { relationshipLabel: event.target.value })
+                          }
+                          value={selectedDraftEdge.relationshipLabel}
+                        />
+                        <textarea
+                          className="causal-intake-form__textarea"
+                          onChange={(event) => updateDraftEdge(selectedDraftEdge.edgeKey, { note: event.target.value })}
+                          placeholder="Optional note about the causal relationship"
+                          rows={3}
+                          value={selectedDraftEdge.note}
+                        />
+                        <button
+                          className="causal-inline-button"
+                          onClick={() => removeDraftEdge(selectedDraftEdge.edgeKey)}
+                          type="button"
+                        >
+                          Remove edge
+                        </button>
+                        {draftPathAssistance?.pathEdgeKeys.includes(selectedDraftEdge.edgeKey) ? (
+                          <p className="causal-card__meta">This edge is part of the current highlighted treatment→outcome path.</p>
+                        ) : null}
+                        {(draftGuardrails?.edgeIssues[selectedDraftEdge.edgeKey]?.length ?? 0) > 0 ? (
+                          <div
+                            style={{
+                              background: draftGuardrails?.edgeIssues[selectedDraftEdge.edgeKey]?.some((issue) => issue.severity === "error")
+                                ? "#fef2f2"
+                                : "#fffbeb",
+                              border: draftGuardrails?.edgeIssues[selectedDraftEdge.edgeKey]?.some((issue) => issue.severity === "error")
+                                ? "1px solid rgba(220, 38, 38, 0.22)"
+                                : "1px solid rgba(217, 119, 6, 0.22)",
+                              borderRadius: 12,
+                              padding: 10,
+                            }}
+                          >
+                            <strong style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Edge issues</strong>
+                            <ul className="causal-list" style={{ margin: 0 }}>
+                              {draftGuardrails?.edgeIssues[selectedDraftEdge.edgeKey]?.map((issue) => (
+                                <li key={`${issue.severity}-${issue.message}`}>{issue.message}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <h4 className="causal-card__title" style={{ fontSize: 16 }}>
+                          Canvas inspector
+                        </h4>
+                        <p className="causal-card__meta">
+                          Click a node to edit its role, status, and notes. Click an edge to edit the relationship label.
+                        </p>
+                        <label className="causal-intake-form__label" htmlFor="causal-default-edge-label">
+                          Default visual edge label
+                        </label>
+                        <input
+                          id="causal-default-edge-label"
+                          className="causal-text-input"
+                          onChange={(event) =>
+                            setNewEdge({
+                              ...newEdge,
+                              relationshipLabel: event.target.value,
+                            })
+                          }
+                          value={newEdge.relationshipLabel}
+                        />
+                        <p className="causal-card__meta">
+                          New canvas connections will use this label until you change it.
+                        </p>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              </div>
+
               <div className="causal-editor-section">
                 <h3 className="causal-card__title">Nodes</h3>
                 <div className="causal-table">
                   {dagDraft.nodes.map((node) => (
-                    <div key={node.nodeKey} className="causal-table__row">
+                    <div
+                      key={node.nodeKey}
+                      className="causal-table__row"
+                      style={{
+                        borderRadius: 12,
+                        outline:
+                          selectedNodeKey === node.nodeKey ? `2px solid ${getNodeAccent(node.nodeType)}` : undefined,
+                        padding: selectedNodeKey === node.nodeKey ? 6 : undefined,
+                      }}
+                    >
                       <input
                         className="causal-text-input"
                         onChange={(event) => updateDraftNode(node.nodeKey, { label: event.target.value })}
+                        onFocus={() => {
+                          setSelectedNodeKey(node.nodeKey);
+                          setSelectedEdgeKey(null);
+                        }}
                         value={node.label}
                       />
                       <select
                         className="causal-select"
                         onChange={(event) => updateDraftNode(node.nodeKey, { nodeType: event.target.value })}
+                        onFocus={() => {
+                          setSelectedNodeKey(node.nodeKey);
+                          setSelectedEdgeKey(null);
+                        }}
                         value={node.nodeType}
                       >
                         {CAUSAL_DAG_NODE_TYPE_VALUES.map((value) => (
@@ -1063,6 +2212,10 @@ export function CausalStudyPageClient({
                       <select
                         className="causal-select"
                         onChange={(event) => updateDraftNode(node.nodeKey, { observedStatus: event.target.value })}
+                        onFocus={() => {
+                          setSelectedNodeKey(node.nodeKey);
+                          setSelectedEdgeKey(null);
+                        }}
                         value={node.observedStatus}
                       >
                         {CAUSAL_DAG_NODE_OBSERVED_STATUS_VALUES.map((value) => (
@@ -1071,7 +2224,15 @@ export function CausalStudyPageClient({
                           </option>
                         ))}
                       </select>
-                      <button className="causal-inline-button" onClick={() => removeDraftNode(node.nodeKey)} type="button">
+                      <button
+                        className="causal-inline-button"
+                        onClick={() => {
+                          setSelectedNodeKey(node.nodeKey);
+                          setSelectedEdgeKey(null);
+                          removeDraftNode(node.nodeKey);
+                        }}
+                        type="button"
+                      >
                         Remove
                       </button>
                     </div>
@@ -1122,32 +2283,34 @@ export function CausalStudyPageClient({
                 <h3 className="causal-card__title">Edges</h3>
                 <div className="causal-table">
                   {dagDraft.edges.map((edge) => (
-                    <div key={edge.edgeKey} className="causal-table__row">
+                    <div
+                      key={edge.edgeKey}
+                      className="causal-table__row"
+                      style={{
+                        borderRadius: 12,
+                        outline: selectedEdgeKey === edge.edgeKey ? "2px solid #2563eb" : undefined,
+                        padding: selectedEdgeKey === edge.edgeKey ? 6 : undefined,
+                      }}
+                    >
                       <span className="causal-table__label">
                         {edge.sourceNodeKey} → {edge.targetNodeKey}
                       </span>
                       <input
                         className="causal-text-input"
-                        onChange={(event) =>
-                          setDagDraft({
-                            ...dagDraft,
-                            edges: dagDraft.edges.map((item) =>
-                              item.edgeKey === edge.edgeKey
-                                ? { ...item, relationshipLabel: event.target.value }
-                                : item,
-                            ),
-                          })
-                        }
+                        onChange={(event) => updateDraftEdge(edge.edgeKey, { relationshipLabel: event.target.value })}
+                        onFocus={() => {
+                          setSelectedEdgeKey(edge.edgeKey);
+                          setSelectedNodeKey(null);
+                        }}
                         value={edge.relationshipLabel}
                       />
                       <button
                         className="causal-inline-button"
-                        onClick={() =>
-                          setDagDraft({
-                            ...dagDraft,
-                            edges: dagDraft.edges.filter((item) => item.edgeKey !== edge.edgeKey),
-                          })
-                        }
+                        onClick={() => {
+                          setSelectedEdgeKey(edge.edgeKey);
+                          setSelectedNodeKey(null);
+                          removeDraftEdge(edge.edgeKey);
+                        }}
                         type="button"
                       >
                         Remove
@@ -1327,14 +2490,43 @@ export function CausalStudyPageClient({
               </p>
               <div className="causal-readiness">
                 {dagWorkspace.currentVersion.validation.errors.length ? (
-                  <ul className="causal-list">
-                    {dagWorkspace.currentVersion.validation.errors.map((errorMessage) => (
-                      <li key={errorMessage}>{errorMessage}</li>
-                    ))}
-                  </ul>
+                  <>
+                    <ul className="causal-list">
+                      {dagWorkspace.currentVersion.validation.errors.map((errorMessage) => (
+                        <li key={errorMessage}>{errorMessage}</li>
+                      ))}
+                    </ul>
+                    <button className="causal-inline-button" onClick={() => focusFirstDraftIssue("error")} type="button">
+                      Review first blocking issue in canvas
+                    </button>
+                  </>
                 ) : (
                   <p className="causal-card__meta">Current version passes stored validation checks.</p>
                 )}
+                {hasUnsavedDagChanges ? (
+                  <div
+                    style={{
+                      background: "#eff6ff",
+                      border: "1px solid rgba(37, 99, 235, 0.2)",
+                      borderRadius: 12,
+                      marginTop: 8,
+                      padding: 12,
+                    }}
+                  >
+                    <p className="causal-card__meta" style={{ color: "#1d4ed8" }}>
+                      Local draft edits are not part of saved version v{dagWorkspace.currentVersion.versionNumber} yet.
+                      Save a new version or reset the draft before approval.
+                    </p>
+                    <div className="causal-inline-actions" style={{ marginTop: 8 }}>
+                      <button className="causal-inline-button" onClick={() => void handleSaveDagVersion()} type="button">
+                        Save a new DAG version first
+                      </button>
+                      <button className="causal-inline-button" onClick={resetDraftToSavedVersion} type="button">
+                        Reset draft to saved version
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <label className="causal-intake-form__label" htmlFor="causal-approval-text">
                 Approval statement
@@ -1346,9 +2538,24 @@ export function CausalStudyPageClient({
                 rows={4}
                 value={approvalText}
               />
-              <button className="causal-intake-form__submit" disabled={pending} onClick={() => void handleApproveDagVersion()} type="button">
+              <button
+                className="causal-intake-form__submit"
+                disabled={pending || dagWorkspace.currentVersion.validation.errors.length > 0 || hasUnsavedDagChanges}
+                onClick={() => void handleApproveDagVersion()}
+                type="button"
+              >
                 {pending ? "Approving…" : "Approve current DAG version"}
               </button>
+              {dagWorkspace.currentVersion.validation.errors.length ? (
+                <p className="causal-card__meta">
+                  Approval is disabled until the saved DAG version has no blocking validation errors.
+                </p>
+              ) : null}
+              {hasUnsavedDagChanges ? (
+                <p className="causal-card__meta">
+                  Approval is also disabled while the local draft differs from the saved DAG version.
+                </p>
+              ) : null}
             </>
           ) : (
             <p className="causal-card__empty">No DAG version saved yet.</p>
@@ -1440,7 +2647,10 @@ export function CausalStudyPageClient({
 
         <section className="causal-card">
           <div className="causal-card__header-row">
-            <h2 className="causal-card__title">Causal runs</h2>
+            <div>
+              <h2 className="causal-card__title">Causal runs</h2>
+              <p className="causal-card__meta">{runs.length} stored run{runs.length === 1 ? "" : "s"}</p>
+            </div>
             <button
               className="causal-intake-form__submit"
               disabled={pending || !datasetBinding.readiness.canCreateRun || !dagWorkspace.approvals.length}
@@ -1454,6 +2664,102 @@ export function CausalStudyPageClient({
             Runs are pinned to the approved DAG version and primary dataset version. If identification
             fails, the result remains honestly not identifiable.
           </p>
+          {runs.length >= 2 ? (
+            <div
+              style={{
+                background: "#f8fafc",
+                border: "1px solid rgba(148, 163, 184, 0.22)",
+                borderRadius: 16,
+                display: "grid",
+                gap: 12,
+                marginBottom: 16,
+                padding: 16,
+              }}
+            >
+              <div className="causal-card__header-row">
+                <h3 className="causal-card__title" style={{ fontSize: 16 }}>Run comparison</h3>
+                <span className="causal-card__meta">Compare identification and estimate changes across runs</span>
+              </div>
+              <div className="causal-inline-form">
+                <select
+                  className="causal-select"
+                  onChange={(event) => setComparisonBaseRunId(event.target.value)}
+                  value={comparisonBaseRunId}
+                >
+                  {runs.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      Baseline · {run.id} · {formatLabel(run.status)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="causal-select"
+                  onChange={(event) => setComparisonTargetRunId(event.target.value)}
+                  value={comparisonTargetRunId}
+                >
+                  {runs.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      Comparison · {run.id} · {formatLabel(run.status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {comparisonBaseRun && comparisonTargetRun ? (
+                <div className="causal-grid" style={{ marginTop: 0 }}>
+                  {[comparisonBaseRun, comparisonTargetRun].map((run, index) => (
+                    <section key={run.id} className="causal-card">
+                      <div className="causal-card__header-row">
+                        <strong>{index === 0 ? "Baseline" : "Comparison"}</strong>
+                        <span className="causal-study-list__status">{formatLabel(run.status)}</span>
+                      </div>
+                      <p className="causal-card__meta">
+                        <Link className="causal-study-list__link" href={`/causal/studies/${study.id}/runs/${run.id}`}>
+                          {run.id}
+                        </Link>
+                      </p>
+                      <ul className="causal-list">
+                        <li>Identification: {run.identified == null ? "not recorded" : run.identified ? "identified" : "not identified"}</li>
+                        <li>Method: {run.identificationMethod ? formatLabel(run.identificationMethod) : "not recorded"}</li>
+                        <li>Estimator: {run.estimatorName ? formatLabel(run.estimatorName) : "not recorded"}</li>
+                        <li>Primary estimate: {formatNumber(run.primaryEstimateValue)}</li>
+                        <li>Refutations: {run.refutationCount}</li>
+                        <li>Answers: {run.answerCount}</li>
+                        <li>Artifacts: {run.artifactCount}</li>
+                      </ul>
+                    </section>
+                  ))}
+                  <section className="causal-card">
+                    <h3 className="causal-card__title">Delta summary</h3>
+                    <ul className="causal-list">
+                      <li>
+                        Identification changed: {String(comparisonBaseRun.identified !== comparisonTargetRun.identified)}
+                      </li>
+                      <li>
+                        Estimate delta: {typeof comparisonBaseRun.primaryEstimateValue === "number" && typeof comparisonTargetRun.primaryEstimateValue === "number"
+                          ? formatNumber(comparisonTargetRun.primaryEstimateValue - comparisonBaseRun.primaryEstimateValue)
+                          : "not computable"}
+                      </li>
+                      <li>
+                        Refutation delta: {comparisonTargetRun.refutationCount - comparisonBaseRun.refutationCount}
+                      </li>
+                      <li>
+                        Answer delta: {comparisonTargetRun.answerCount - comparisonBaseRun.answerCount}
+                      </li>
+                      <li>
+                        Artifact delta: {comparisonTargetRun.artifactCount - comparisonBaseRun.artifactCount}
+                      </li>
+                      <li>
+                        Treatment/outcome changed: {String(
+                          comparisonBaseRun.treatmentNodeKey !== comparisonTargetRun.treatmentNodeKey ||
+                            comparisonBaseRun.outcomeNodeKey !== comparisonTargetRun.outcomeNodeKey,
+                        )}
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {runs.length ? (
             <ul className="causal-study-list">
               {runs.map((run) => (
@@ -1469,6 +2775,19 @@ export function CausalStudyPageClient({
                   <p className="causal-study-list__meta">
                     Started {formatTimestamp(run.createdAt)}
                     {run.completedAt ? ` · completed ${formatTimestamp(run.completedAt)}` : ""}
+                  </p>
+                  <p className="causal-study-list__meta">
+                    {run.identified == null ? "Identification pending" : run.identified ? "Identified" : "Not identified"}
+                    {run.identificationMethod ? ` · ${formatLabel(run.identificationMethod)}` : ""}
+                    {run.primaryEstimateValue != null ? ` · estimate ${formatNumber(run.primaryEstimateValue)}` : ""}
+                  </p>
+                  <p className="causal-study-list__meta">
+                    {run.refutationCount} refutations · {run.answerCount} answers · {run.artifactCount} artifacts
+                  </p>
+                  <p className="causal-card__meta" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                    <a className="causal-study-list__link" href={`/api/causal/runs/${run.id}/export`}>
+                      Download export bundle
+                    </a>
                   </p>
                 </li>
               ))}

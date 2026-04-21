@@ -125,7 +125,7 @@ async function requireStudyOwnership(input: {
   return study;
 }
 
-async function listDatasetCatalogForOrganization(organizationId: string) {
+export async function listDatasetCatalogForOrganization(organizationId: string) {
   const db = await getAppDatabase();
   const datasetRows = await db
     .select()

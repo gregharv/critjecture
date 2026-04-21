@@ -15,9 +15,10 @@ export async function createComputeRun(input: {
   memoryLimitBytes?: number;
   metadataJson?: string;
   organizationId: string;
-  runId: string;
+  predictiveRunId?: string | null;
+  runId?: string | null;
   runner: string;
-  studyId: string;
+  studyId?: string | null;
   timeoutMs?: number;
 }) {
   const db = await getAppDatabase();
@@ -27,8 +28,9 @@ export async function createComputeRun(input: {
   await db.insert(computeRuns).values({
     id,
     organizationId: input.organizationId,
-    studyId: input.studyId,
-    runId: input.runId,
+    studyId: input.studyId ?? null,
+    runId: input.runId ?? null,
+    predictiveRunId: input.predictiveRunId ?? null,
     computeKind: input.computeKind,
     status: "queued",
     backend: input.backend,

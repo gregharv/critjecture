@@ -29,6 +29,7 @@
     "@mariozechner/pi-ai": "0.63.1",
     "@mariozechner/pi-web-ui": "0.63.1",
     "@types/better-sqlite3": "^7.6.13",
+    "@xyflow/react": "^12.10.2",
     "better-sqlite3": "^12.8.0",
     "drizzle-orm": "^0.45.2",
     "lit": "^3.3.1",

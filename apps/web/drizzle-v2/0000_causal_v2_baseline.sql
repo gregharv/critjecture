@@ -264,10 +264,10 @@ CREATE TABLE IF NOT EXISTS intent_classifications (
   classifier_prompt_version TEXT NOT NULL,
   raw_output_json TEXT NOT NULL,
   is_causal INTEGER NOT NULL,
-  intent_type TEXT NOT NULL CHECK (intent_type IN ('descriptive', 'diagnostic', 'causal', 'counterfactual', 'unclear')),
+  intent_type TEXT NOT NULL CHECK (intent_type IN ('descriptive', 'associational', 'predictive', 'diagnostic', 'causal', 'counterfactual', 'unclear')),
   confidence REAL NOT NULL,
   reason_text TEXT NOT NULL,
-  routing_decision TEXT NOT NULL CHECK (routing_decision IN ('continue_descriptive', 'open_causal_study', 'ask_clarification', 'blocked')),
+  routing_decision TEXT NOT NULL CHECK (routing_decision IN ('continue_descriptive', 'open_predictive_analysis', 'open_causal_study', 'ask_clarification', 'blocked')),
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS intent_classifications_question_created_at_idx ON intent_classifications(study_question_id, created_at);
@@ -537,7 +537,8 @@ CREATE TABLE IF NOT EXISTS compute_runs (
   organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL,
   study_id TEXT REFERENCES causal_studies(id) ON DELETE SET NULL,
   run_id TEXT REFERENCES causal_runs(id) ON DELETE SET NULL,
-  compute_kind TEXT NOT NULL CHECK (compute_kind IN ('causal_identification', 'causal_estimation', 'causal_refutation', 'dataset_profiling', 'document_chunking')),
+  predictive_run_id TEXT REFERENCES predictive_runs(id) ON DELETE SET NULL,
+  compute_kind TEXT NOT NULL CHECK (compute_kind IN ('causal_identification', 'causal_estimation', 'causal_refutation', 'predictive_analysis', 'dataset_profiling', 'document_chunking')),
   status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'starting', 'running', 'finalizing', 'completed', 'failed', 'timed_out', 'rejected', 'abandoned')),
   backend TEXT NOT NULL,
   runner TEXT NOT NULL,
@@ -559,10 +560,12 @@ CREATE TABLE IF NOT EXISTS compute_runs (
   created_at INTEGER NOT NULL,
   started_at INTEGER,
   completed_at INTEGER,
-  CHECK (run_id IS NOT NULL OR study_id IS NOT NULL),
-  CHECK (compute_kind NOT IN ('causal_identification', 'causal_estimation', 'causal_refutation') OR run_id IS NOT NULL)
+  CHECK (run_id IS NOT NULL OR study_id IS NOT NULL OR predictive_run_id IS NOT NULL),
+  CHECK (compute_kind NOT IN ('causal_identification', 'causal_estimation', 'causal_refutation') OR run_id IS NOT NULL),
+  CHECK (compute_kind != 'predictive_analysis' OR predictive_run_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS compute_runs_run_id_idx ON compute_runs(run_id);
+CREATE INDEX IF NOT EXISTS compute_runs_predictive_run_id_idx ON compute_runs(predictive_run_id);
 CREATE INDEX IF NOT EXISTS compute_runs_study_id_idx ON compute_runs(study_id);
 CREATE INDEX IF NOT EXISTS compute_runs_org_status_created_at_idx ON compute_runs(organization_id, status, created_at);
 CREATE INDEX IF NOT EXISTS compute_runs_status_lease_expires_at_idx ON compute_runs(status, lease_expires_at);
@@ -572,6 +575,7 @@ CREATE TABLE IF NOT EXISTS run_artifacts (
   organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   study_id TEXT REFERENCES causal_studies(id) ON DELETE SET NULL,
   run_id TEXT REFERENCES causal_runs(id) ON DELETE SET NULL,
+  predictive_run_id TEXT REFERENCES predictive_runs(id) ON DELETE SET NULL,
   compute_run_id TEXT REFERENCES compute_runs(id) ON DELETE SET NULL,
   artifact_kind TEXT NOT NULL CHECK (artifact_kind IN ('graph_json', 'graph_export_png', 'estimand_report', 'estimate_json', 'refutation_report', 'answer_package', 'stdout', 'stderr', 'misc')),
   storage_path TEXT NOT NULL,
@@ -584,6 +588,7 @@ CREATE TABLE IF NOT EXISTS run_artifacts (
   expires_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS run_artifacts_run_idx ON run_artifacts(run_id);
+CREATE INDEX IF NOT EXISTS run_artifacts_predictive_run_idx ON run_artifacts(predictive_run_id);
 CREATE INDEX IF NOT EXISTS run_artifacts_compute_run_idx ON run_artifacts(compute_run_id);
 CREATE INDEX IF NOT EXISTS run_artifacts_kind_created_at_idx ON run_artifacts(artifact_kind, created_at);
 CREATE INDEX IF NOT EXISTS run_artifacts_expires_at_idx ON run_artifacts(expires_at);
@@ -614,6 +619,72 @@ CREATE TABLE IF NOT EXISTS causal_answers (
 );
 CREATE INDEX IF NOT EXISTS causal_answers_run_idx ON causal_answers(run_id);
 CREATE INDEX IF NOT EXISTS causal_answers_study_created_at_idx ON causal_answers(study_id, created_at);
+
+CREATE TABLE IF NOT EXISTS predictive_runs (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  dataset_version_id TEXT NOT NULL REFERENCES dataset_versions(id) ON DELETE RESTRICT,
+  requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  task_kind TEXT NOT NULL CHECK (task_kind IN ('classification', 'regression')),
+  claim_label TEXT CHECK (claim_label IN ('associational', 'predictive')),
+  target_column_name TEXT NOT NULL,
+  feature_columns_json TEXT NOT NULL DEFAULT '[]',
+  summary_text TEXT,
+  model_name TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS predictive_runs_org_status_created_at_idx ON predictive_runs(organization_id, status, created_at);
+CREATE INDEX IF NOT EXISTS predictive_runs_dataset_version_created_at_idx ON predictive_runs(dataset_version_id, created_at);
+CREATE INDEX IF NOT EXISTS predictive_runs_requested_by_idx ON predictive_runs(requested_by_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS predictive_results (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES predictive_runs(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  claim_label TEXT NOT NULL CHECK (claim_label IN ('associational', 'predictive')),
+  task_kind TEXT NOT NULL CHECK (task_kind IN ('classification', 'regression')),
+  target_column_name TEXT NOT NULL,
+  feature_importance_json TEXT NOT NULL DEFAULT '{}',
+  metrics_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  summary_text TEXT NOT NULL,
+  row_count INTEGER,
+  model_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS predictive_results_run_idx ON predictive_results(run_id);
+CREATE INDEX IF NOT EXISTS predictive_results_claim_label_created_at_idx ON predictive_results(claim_label, created_at);
+
+CREATE TABLE IF NOT EXISTS predictive_answer_packages (
+  id TEXT PRIMARY KEY NOT NULL,
+  run_id TEXT NOT NULL REFERENCES predictive_runs(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  package_json TEXT NOT NULL,
+  package_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS predictive_answer_packages_run_idx ON predictive_answer_packages(run_id);
+CREATE INDEX IF NOT EXISTS predictive_answer_packages_created_at_idx ON predictive_answer_packages(created_at);
+
+CREATE TABLE IF NOT EXISTS predictive_answers (
+  id TEXT PRIMARY KEY NOT NULL,
+  run_id TEXT NOT NULL REFERENCES predictive_runs(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  answer_package_id TEXT NOT NULL REFERENCES predictive_answer_packages(id) ON DELETE CASCADE,
+  model_name TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  answer_text TEXT NOT NULL,
+  answer_format TEXT NOT NULL DEFAULT 'markdown',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS predictive_answers_run_idx ON predictive_answers(run_id);
+CREATE INDEX IF NOT EXISTS predictive_answers_created_at_idx ON predictive_answers(created_at);
 
 CREATE TABLE IF NOT EXISTS usage_events (
   id TEXT PRIMARY KEY NOT NULL,

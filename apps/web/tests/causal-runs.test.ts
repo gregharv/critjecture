@@ -7,7 +7,7 @@ import { getAppDatabase } from "@/lib/app-db";
 import { createGroundedCausalAnswer } from "@/lib/causal-answers";
 import { runCausalIntake } from "@/lib/causal-intake";
 import { approveCausalDagVersion, createCausalDagVersion, ensureStudyDag } from "@/lib/causal-dags";
-import { createAndExecuteCausalRun, getCausalRunDetail } from "@/lib/causal-runs";
+import { createAndExecuteCausalRun, getCausalRunDetail, listCausalRunsForStudy } from "@/lib/causal-runs";
 import {
   causalAnswerPackages,
   causalAnswers,
@@ -153,7 +153,7 @@ async function prepareApprovedStudy(input: {
   user: NonNullable<Awaited<ReturnType<typeof getAuthenticatedUserByEmail>>>;
 }) {
   const intake = await runCausalIntake({
-    message: "Why did conversion drop after the pricing change?",
+    message: "Did the pricing change affect conversion?",
     user: input.user,
   });
   expect(intake.decision).toBe("open_causal_study");
@@ -400,7 +400,7 @@ describe("causal runs", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
       const intake = await runCausalIntake({
-        message: "Why did conversion change?",
+        message: "Did discount rate affect conversion?",
         user: user!,
       });
       expect(intake.decision).toBe("open_causal_study");
@@ -561,6 +561,51 @@ describe("causal runs", () => {
 
       expect(answer?.answerText).toContain("not identified");
       expect(answer?.answerText).toContain("unobserved");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("returns run summaries with comparison-ready metrics", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const studyId = await prepareApprovedStudy({
+        datasetPath: path.join(environment.rootDir, "datasets", "summary.csv"),
+        organizationId: user!.organizationId,
+        user: user!,
+        userId: user!.id,
+      });
+
+      const created = await createAndExecuteCausalRun({
+        runUser: {
+          id: user!.id,
+          organizationId: user!.organizationId,
+          organizationSlug: user!.organizationSlug,
+        },
+        studyId,
+      });
+
+      await createGroundedCausalAnswer({
+        organizationId: user!.organizationId,
+        runId: created.run.id,
+      });
+
+      const summaries = await listCausalRunsForStudy({
+        organizationId: user!.organizationId,
+        studyId,
+      });
+
+      expect(summaries[0]?.id).toBe(created.run.id);
+      expect(summaries[0]?.identified).toBe(true);
+      expect(summaries[0]?.identificationMethod).toBeTruthy();
+      expect(summaries[0]?.primaryEstimateValue).not.toBeNull();
+      expect(summaries[0]?.refutationCount).toBeGreaterThanOrEqual(3);
+      expect(summaries[0]?.answerCount).toBeGreaterThanOrEqual(1);
+      expect(summaries[0]?.artifactCount).toBeGreaterThanOrEqual(3);
     } finally {
       await environment.cleanup();
     }

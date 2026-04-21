@@ -25,8 +25,10 @@ type RunDetail = {
   artifacts: Array<{
     artifactKind: string;
     createdAt: number;
+    downloadPath: string;
     fileName: string;
     id: string;
+    mimeType: string;
     storagePath: string;
   }>;
   computeRuns: Array<{
@@ -147,6 +149,14 @@ function formatNumber(value: number | null, digits = 4) {
   }).format(value);
 }
 
+function formatLabel(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function parseAnswerPackage(packageJson: string | null | undefined): ParsedAnswerPackage | null {
   if (!packageJson) {
     return null;
@@ -169,6 +179,61 @@ function parseAnswerPackage(packageJson: string | null | undefined): ParsedAnswe
   }
 }
 
+function parseStringArray(value: string | null | undefined) {
+  if (!value) {
+    return [] as string[];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function getStatusTone(status: string) {
+  const normalized = status.toLowerCase();
+
+  if (normalized.includes("failed") || normalized.includes("blocked") || normalized.includes("error")) {
+    return {
+      background: "#fef2f2",
+      border: "1px solid rgba(220, 38, 38, 0.18)",
+      color: "#b91c1c",
+    };
+  }
+
+  if (normalized.includes("completed") || normalized.includes("succeeded") || normalized.includes("accepted")) {
+    return {
+      background: "#f0fdf4",
+      border: "1px solid rgba(22, 163, 74, 0.18)",
+      color: "#15803d",
+    };
+  }
+
+  return {
+    background: "#eff6ff",
+    border: "1px solid rgba(37, 99, 235, 0.18)",
+    color: "#1d4ed8",
+  };
+}
+
+function describeEstimateDirection(value: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "No quantitative estimate was reported.";
+  }
+
+  if (value > 0) {
+    return `Estimated positive effect of ${formatNumber(value)}.`;
+  }
+
+  if (value < 0) {
+    return `Estimated negative effect of ${formatNumber(value)}.`;
+  }
+
+  return "Estimated effect is approximately zero.";
+}
+
 export function CausalRunPageClient({
   initialRunDetail,
   study,
@@ -182,18 +247,46 @@ export function CausalRunPageClient({
     [runDetail.answerPackage?.packageJson],
   );
   const latestAnswer = runDetail.answers[0] ?? null;
+  const primaryEstimate = runDetail.estimates[0] ?? null;
+  const identificationAdjustmentSet = useMemo(() => {
+    const fromPackage = parsedPackage?.identification?.adjustmentSet ?? [];
+    return fromPackage.length
+      ? fromPackage
+      : parseStringArray(runDetail.identification?.adjustmentSetJson);
+  }, [parsedPackage?.identification?.adjustmentSet, runDetail.identification?.adjustmentSetJson]);
+  const identificationBlockingReasons = useMemo(() => {
+    const fromPackage = parsedPackage?.identification?.blockingReasons ?? [];
+    return fromPackage.length
+      ? fromPackage
+      : parseStringArray(runDetail.identification?.blockingReasonsJson);
+  }, [parsedPackage?.identification?.blockingReasons, runDetail.identification?.blockingReasonsJson]);
+  const identified = parsedPackage?.identification?.identified ?? runDetail.identification?.identified ?? null;
+  const identificationMethod = parsedPackage?.identification?.method ?? runDetail.identification?.method ?? null;
+  const identificationStatusLabel =
+    parsedPackage?.identification?.statusLabel ??
+    (identified === true ? "identified" : identified === false ? "not identified" : "not recorded");
+  const latestComputeRun = runDetail.computeRuns[0] ?? null;
 
   async function refreshRun() {
-    const response = await fetch(`/api/causal/runs/${runDetail.run.id}`, {
-      cache: "no-store",
-    });
-    const json = (await response.json()) as unknown;
+    setPending(true);
+    setError(null);
 
-    if (!response.ok) {
-      throw new Error(getErrorMessage(json, "Failed to refresh causal run."));
+    try {
+      const response = await fetch(`/api/causal/runs/${runDetail.run.id}`, {
+        cache: "no-store",
+      });
+      const json = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(json, "Failed to refresh causal run."));
+      }
+
+      setRunDetail(json as RunDetail);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Failed to refresh causal run.");
+    } finally {
+      setPending(false);
     }
-
-    setRunDetail(json as RunDetail);
   }
 
   async function handleGenerateAnswer() {
@@ -230,54 +323,136 @@ export function CausalRunPageClient({
           {" · "}
           outcome {runDetail.run.outcomeNodeKey}
         </p>
-        <p className="causal-card__meta">
+        <p className="causal-card__meta" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
           <Link className="causal-study-list__link" href={`/causal/studies/${study.id}`}>
             ← Back to study workspace
           </Link>
+          <a className="causal-study-list__link" href={`/api/causal/runs/${runDetail.run.id}/export`}>
+            Download export bundle
+          </a>
         </p>
+      </div>
+
+      <div className="causal-grid">
+        {[
+          {
+            label: "Run status",
+            tone: getStatusTone(runDetail.run.status),
+            value: formatLabel(runDetail.run.status),
+          },
+          {
+            label: "Identification",
+            tone: getStatusTone(identificationStatusLabel),
+            value: formatLabel(identificationStatusLabel),
+          },
+          {
+            label: "Primary estimate",
+            tone: getStatusTone(primaryEstimate?.estimateValue == null ? "pending" : "completed"),
+            value: formatNumber(primaryEstimate?.estimateValue ?? null),
+          },
+          {
+            label: "Refutations",
+            tone: getStatusTone(runDetail.refutations.length ? "completed" : "pending"),
+            value: String(runDetail.refutations.length),
+          },
+        ].map((card) => (
+          <section key={card.label} className="causal-card">
+            <p className="causal-card__meta">{card.label}</p>
+            <div
+              style={{
+                ...card.tone,
+                borderRadius: 14,
+                display: "inline-flex",
+                fontSize: 20,
+                fontWeight: 700,
+                marginTop: 8,
+                padding: "10px 14px",
+              }}
+            >
+              {card.value}
+            </div>
+          </section>
+        ))}
       </div>
 
       <div className="causal-grid">
         <section className="causal-card">
           <div className="causal-card__header-row">
             <h2 className="causal-card__title">Grounded final answer</h2>
-            <button
-              className="causal-intake-form__submit"
-              disabled={pending || !runDetail.answerPackage}
-              onClick={() => void handleGenerateAnswer()}
-              type="button"
-            >
-              {pending ? "Generating…" : "Generate grounded answer"}
-            </button>
+            <div className="causal-inline-actions">
+              <button
+                className="causal-intake-form__submit"
+                disabled={pending}
+                onClick={() => void refreshRun()}
+                type="button"
+              >
+                {pending ? "Refreshing…" : "Refresh"}
+              </button>
+              <button
+                className="causal-intake-form__submit"
+                disabled={pending || !runDetail.answerPackage}
+                onClick={() => void handleGenerateAnswer()}
+                type="button"
+              >
+                {pending ? "Generating…" : "Generate grounded answer"}
+              </button>
+            </div>
           </div>
           <p className="causal-card__copy">
-            Final answers are rendered from the stored causal answer package only. No direct dataset
-            analysis is available on this path.
+            Final answers are rendered from the stored causal answer package only. This page is for
+            interpreting stored causal evidence, assumptions, and refutation outputs.
           </p>
           {error ? <p className="causal-intake-form__error">{error}</p> : null}
+
           {latestAnswer ? (
-            <article className="causal-answer-markdown">
-              <pre>{latestAnswer.answerText}</pre>
-            </article>
+            <>
+              <p className="causal-card__copy">
+                <strong>Topline:</strong> {describeEstimateDirection(primaryEstimate?.estimateValue ?? null)}
+              </p>
+              <ul className="causal-list">
+                <li>Latest answer model: {latestAnswer.modelName}</li>
+                <li>Prompt version: {latestAnswer.promptVersion}</li>
+                <li>Generated: {formatTimestamp(latestAnswer.createdAt)}</li>
+                {runDetail.answerPackage ? (
+                  <li>Answer package saved: {formatTimestamp(runDetail.answerPackage.createdAt)}</li>
+                ) : null}
+              </ul>
+              <details open>
+                <summary className="causal-card__meta">Latest grounded answer markdown</summary>
+                <div className="causal-answer-markdown">
+                  <pre>{latestAnswer.answerText}</pre>
+                </div>
+              </details>
+            </>
           ) : (
             <p className="causal-card__empty">
               No grounded answer generated yet. Create one after the run finishes packaging.
             </p>
           )}
+
           {runDetail.answers.length ? (
-            <ul className="causal-study-list">
-              {runDetail.answers.map((answer) => (
-                <li key={answer.id} className="causal-study-list__item">
-                  <div className="causal-study-list__header">
-                    <strong>{answer.id}</strong>
-                    <span className="causal-study-list__status">{answer.modelName}</span>
-                  </div>
-                  <p className="causal-study-list__meta">
-                    Generated {formatTimestamp(answer.createdAt)} · prompt {answer.promptVersion}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <>
+              <h3 className="causal-card__title">Answer history</h3>
+              <ul className="causal-study-list">
+                {runDetail.answers.map((answer, index) => (
+                  <li key={answer.id} className="causal-study-list__item">
+                    <div className="causal-study-list__header">
+                      <strong>{index === 0 ? "Latest grounded answer" : answer.id}</strong>
+                      <span className="causal-study-list__status">{answer.modelName}</span>
+                    </div>
+                    <p className="causal-study-list__meta">
+                      Generated {formatTimestamp(answer.createdAt)} · prompt {answer.promptVersion}
+                    </p>
+                    <details>
+                      <summary className="causal-card__meta">View stored markdown</summary>
+                      <div className="causal-answer-markdown">
+                        <pre>{answer.answerText}</pre>
+                      </div>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
         </section>
 
@@ -290,6 +465,7 @@ export function CausalRunPageClient({
             <li>Treatment: {runDetail.run.treatmentNodeKey}</li>
             <li>Outcome: {runDetail.run.outcomeNodeKey}</li>
             <li>Created: {formatTimestamp(runDetail.run.createdAt)}</li>
+            {runDetail.run.startedAt ? <li>Started: {formatTimestamp(runDetail.run.startedAt)}</li> : null}
             {runDetail.run.completedAt ? <li>Completed: {formatTimestamp(runDetail.run.completedAt)}</li> : null}
           </ul>
           {parsedPackage?.question ? (
@@ -298,37 +474,79 @@ export function CausalRunPageClient({
             </p>
           ) : null}
           {parsedPackage?.approval ? (
-            <p className="causal-card__meta">
-              Approved via {parsedPackage.approval.approvalKind} on{" "}
-              {parsedPackage.approval.createdAt
-                ? formatTimestamp(parsedPackage.approval.createdAt)
-                : "unknown time"}
-            </p>
+            <div
+              style={{
+                background: "#eff6ff",
+                border: "1px solid rgba(37, 99, 235, 0.18)",
+                borderRadius: 12,
+                marginTop: 12,
+                padding: 12,
+              }}
+            >
+              <p className="causal-card__meta">
+                Approved via {parsedPackage.approval.approvalKind ?? "unknown workflow"} on{" "}
+                {parsedPackage.approval.createdAt
+                  ? formatTimestamp(parsedPackage.approval.createdAt)
+                  : "unknown time"}
+              </p>
+              {parsedPackage.approval.approvalText ? (
+                <p className="causal-card__copy">{parsedPackage.approval.approvalText}</p>
+              ) : null}
+            </div>
           ) : null}
+          <details>
+            <summary className="causal-card__meta">Raw answer package JSON</summary>
+            <div className="causal-answer-markdown">
+              <pre>{runDetail.answerPackage?.packageJson ?? "No answer package stored."}</pre>
+            </div>
+          </details>
         </section>
       </div>
 
       <div className="causal-grid">
         <section className="causal-card">
-          <h2 className="causal-card__title">Identification and estimate</h2>
+          <h2 className="causal-card__title">Identification and estimates</h2>
           <p className="causal-card__copy">
-            Identification status: {parsedPackage?.identification?.statusLabel ?? "not recorded"}
-            {parsedPackage?.identification?.method ? ` · method ${parsedPackage.identification.method}` : ""}
+            Identification status: {identificationStatusLabel}
+            {identificationMethod ? ` · method ${identificationMethod}` : ""}
           </p>
+
+          {identificationBlockingReasons.length ? (
+            <div
+              style={{
+                background: "#fef2f2",
+                border: "1px solid rgba(220, 38, 38, 0.18)",
+                borderRadius: 12,
+                marginBottom: 12,
+                padding: 12,
+              }}
+            >
+              <h3 className="causal-card__title" style={{ color: "#b91c1c", fontSize: 16 }}>
+                Blocking reasons
+              </h3>
+              <ul className="causal-list">
+                {identificationBlockingReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {runDetail.estimates.length ? (
             <ul className="causal-study-list">
-              {runDetail.estimates.map((estimate) => (
+              {runDetail.estimates.map((estimate, index) => (
                 <li key={estimate.id} className="causal-study-list__item">
                   <div className="causal-study-list__header">
-                    <strong>{estimate.effectName}</strong>
+                    <strong>{index === 0 ? `${estimate.effectName} (primary)` : estimate.effectName}</strong>
                     <span className="causal-study-list__status">{estimate.estimatorName}</span>
                   </div>
                   <p className="causal-study-list__meta">
                     Estimate {formatNumber(estimate.estimateValue)} · std. error {formatNumber(estimate.stdError)}
                   </p>
                   <p className="causal-study-list__meta">
-                    95% interval {formatNumber(estimate.confidenceIntervalLow)} to{" "}
+                    95% interval {formatNumber(estimate.confidenceIntervalLow)} to {" "}
                     {formatNumber(estimate.confidenceIntervalHigh)}
+                    {estimate.pValue != null ? ` · p-value ${formatNumber(estimate.pValue)}` : ""}
                   </p>
                 </li>
               ))}
@@ -336,33 +554,69 @@ export function CausalRunPageClient({
           ) : (
             <p className="causal-card__empty">No causal estimate was stored for this run.</p>
           )}
-          {parsedPackage?.identification?.adjustmentSet?.length ? (
+
+          {runDetail.estimands.length ? (
+            <>
+              <h3 className="causal-card__title">Identified estimands</h3>
+              <ul className="causal-study-list">
+                {runDetail.estimands.map((estimand) => (
+                  <li key={estimand.id} className="causal-study-list__item">
+                    <div className="causal-study-list__header">
+                      <strong>{estimand.estimandLabel}</strong>
+                      <span className="causal-study-list__status">{estimand.estimandKind}</span>
+                    </div>
+                    <details>
+                      <summary className="causal-card__meta">View estimand expression</summary>
+                      <div className="causal-answer-markdown">
+                        <pre>{estimand.estimandExpression}</pre>
+                      </div>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {identificationAdjustmentSet.length ? (
             <>
               <h3 className="causal-card__title">Adjustment set</h3>
               <ul className="causal-list">
-                {parsedPackage.identification.adjustmentSet.map((variable) => (
+                {identificationAdjustmentSet.map((variable) => (
                   <li key={variable}>{variable}</li>
                 ))}
               </ul>
             </>
           ) : null}
+
+          <details>
+            <summary className="causal-card__meta">Raw identification record</summary>
+            <div className="causal-answer-markdown">
+              <pre>{JSON.stringify(runDetail.identification, null, 2)}</pre>
+            </div>
+          </details>
         </section>
 
         <section className="causal-card">
-          <h2 className="causal-card__title">Assumptions and limitations</h2>
+          <h2 className="causal-card__title">Assumptions, limitations, and next steps</h2>
           <h3 className="causal-card__title">Assumptions</h3>
           {parsedPackage?.assumptions.length ? (
-            <ul className="causal-list">
+            <ul className="causal-study-list">
               {parsedPackage.assumptions.map((assumption, index) => (
-                <li key={`${assumption.description ?? assumption.assumptionType ?? "assumption"}-${index}`}>
-                  {assumption.description ?? assumption.assumptionType ?? "Unnamed assumption"}
-                  {assumption.status ? ` (${assumption.status})` : ""}
+                <li key={`${assumption.description ?? assumption.assumptionType ?? "assumption"}-${index}`} className="causal-study-list__item">
+                  <div className="causal-study-list__header">
+                    <strong>{assumption.description ?? assumption.assumptionType ?? "Unnamed assumption"}</strong>
+                    <span className="causal-study-list__status">{assumption.status ?? "not labeled"}</span>
+                  </div>
+                  {assumption.assumptionType ? (
+                    <p className="causal-study-list__meta">Type {assumption.assumptionType}</p>
+                  ) : null}
                 </li>
               ))}
             </ul>
           ) : (
             <p className="causal-card__empty">No explicit assumptions were stored.</p>
           )}
+
           <h3 className="causal-card__title">Limitations</h3>
           {parsedPackage?.limitations.length ? (
             <ul className="causal-list">
@@ -373,6 +627,7 @@ export function CausalRunPageClient({
           ) : (
             <p className="causal-card__empty">No additional limitations were stored.</p>
           )}
+
           <h3 className="causal-card__title">Next steps</h3>
           {parsedPackage?.nextSteps.length ? (
             <ul className="causal-list">
@@ -398,6 +653,19 @@ export function CausalRunPageClient({
                     <span className="causal-study-list__status">{refutation.status}</span>
                   </div>
                   <p className="causal-study-list__meta">{refutation.summaryText}</p>
+                  <p className="causal-study-list__meta">Recorded {formatTimestamp(refutation.createdAt)}</p>
+                </li>
+              ))}
+            </ul>
+          ) : parsedPackage?.refutations.length ? (
+            <ul className="causal-study-list">
+              {parsedPackage.refutations.map((refutation, index) => (
+                <li key={`${refutation.refuterName ?? "refutation"}-${index}`} className="causal-study-list__item">
+                  <div className="causal-study-list__header">
+                    <strong>{refutation.refuterName ?? "Unnamed refuter"}</strong>
+                    <span className="causal-study-list__status">{refutation.status ?? "not labeled"}</span>
+                  </div>
+                  <p className="causal-study-list__meta">{refutation.summaryText ?? "No summary stored."}</p>
                 </li>
               ))}
             </ul>
@@ -408,6 +676,12 @@ export function CausalRunPageClient({
 
         <section className="causal-card">
           <h2 className="causal-card__title">Compute history and artifacts</h2>
+          {latestComputeRun ? (
+            <p className="causal-card__copy">
+              Latest compute run: {latestComputeRun.computeKind} via {latestComputeRun.runner} on {latestComputeRun.backend}
+              {latestComputeRun.completedAt ? ` · completed ${formatTimestamp(latestComputeRun.completedAt)}` : ""}
+            </p>
+          ) : null}
           {runDetail.computeRuns.length ? (
             <ul className="causal-study-list">
               {runDetail.computeRuns.map((computeRun) => (
@@ -418,6 +692,7 @@ export function CausalRunPageClient({
                   </div>
                   <p className="causal-study-list__meta">
                     {computeRun.runner} via {computeRun.backend} · created {formatTimestamp(computeRun.createdAt)}
+                    {computeRun.completedAt ? ` · completed ${formatTimestamp(computeRun.completedAt)}` : ""}
                   </p>
                 </li>
               ))}
@@ -425,18 +700,38 @@ export function CausalRunPageClient({
           ) : (
             <p className="causal-card__empty">No compute runs recorded.</p>
           )}
+
           {runDetail.artifacts.length ? (
             <>
               <h3 className="causal-card__title">Artifacts</h3>
-              <ul className="causal-list">
+              <ul className="causal-study-list">
                 {runDetail.artifacts.map((artifact) => (
-                  <li key={artifact.id}>
-                    {artifact.fileName} · {artifact.artifactKind}
+                  <li key={artifact.id} className="causal-study-list__item">
+                    <div className="causal-study-list__header">
+                      <strong>{artifact.fileName}</strong>
+                      <span className="causal-study-list__status">{artifact.artifactKind}</span>
+                    </div>
+                    <p className="causal-study-list__meta">
+                      Stored {formatTimestamp(artifact.createdAt)} · {artifact.mimeType}
+                    </p>
+                    <p className="causal-card__meta">
+                      <a className="causal-study-list__link" href={artifact.downloadPath}>
+                        Download artifact
+                      </a>
+                    </p>
+                    <details>
+                      <summary className="causal-card__meta">View storage path</summary>
+                      <div className="causal-answer-markdown">
+                        <pre>{artifact.storagePath}</pre>
+                      </div>
+                    </details>
                   </li>
                 ))}
               </ul>
             </>
-          ) : null}
+          ) : (
+            <p className="causal-card__empty">No artifacts were stored for this run.</p>
+          )}
         </section>
       </div>
     </section>

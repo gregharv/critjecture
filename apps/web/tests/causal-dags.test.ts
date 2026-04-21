@@ -125,7 +125,7 @@ describe("causal DAGs", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
       const intake = await runCausalIntake({
-        message: "Why did conversion drop after the pricing change?",
+        message: "Did the pricing change affect conversion?",
         user: user!,
       });
       expect(intake.decision).toBe("open_causal_study");
@@ -265,7 +265,7 @@ describe("causal DAGs", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
       const intake = await runCausalIntake({
-        message: "Why did conversion change?",
+        message: "Did discount rate affect conversion?",
         user: user!,
       });
       expect(intake.decision).toBe("open_causal_study");

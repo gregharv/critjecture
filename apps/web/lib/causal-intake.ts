@@ -7,6 +7,8 @@ import {
   type ContinueDescriptiveIntakeResponse,
   DESCRIPTIVE_FALLBACK_PATH,
   type OpenCausalStudyIntakeResponse,
+  type OpenPredictiveAnalysisIntakeResponse,
+  PREDICTIVE_FALLBACK_PATH,
 } from "@/lib/causal-intent-types";
 import { ensureCausalFoundationForUser } from "@/lib/causal-foundation-sync";
 import {
@@ -17,7 +19,7 @@ import {
 import type { AuthenticatedAppUser } from "@/lib/users";
 
 function buildClarificationQuestion() {
-  return "Do you want a descriptive summary of what changed, or a causal analysis of why it changed?";
+  return "Do you want a descriptive summary, an associational/predictive analysis, or a causal analysis?";
 }
 
 export async function runCausalIntake(input: {
@@ -37,6 +39,22 @@ export async function runCausalIntake(input: {
         reason: classification.reason,
       },
       nextPath: DESCRIPTIVE_FALLBACK_PATH,
+    };
+
+    return response;
+  }
+
+  if (classification.routingDecision === "open_predictive_analysis") {
+    const response: OpenPredictiveAnalysisIntakeResponse = {
+      decision: "open_predictive_analysis",
+      intent: {
+        confidence: classification.confidence,
+        intent_type:
+          classification.intentType === "associational" ? "associational" : "predictive",
+        is_causal: false,
+        reason: classification.reason,
+      },
+      nextPath: PREDICTIVE_FALLBACK_PATH,
     };
 
     return response;

@@ -80,9 +80,18 @@ const studyQuestionTypeValues = [
   "other",
 ] as const;
 const studyQuestionStatusValues = ["open", "clarifying", "ready", "closed", "archived"] as const;
-const intentTypeValues = ["descriptive", "diagnostic", "causal", "counterfactual", "unclear"] as const;
+const intentTypeValues = [
+  "descriptive",
+  "associational",
+  "predictive",
+  "diagnostic",
+  "causal",
+  "counterfactual",
+  "unclear",
+] as const;
 const routingDecisionValues = [
   "continue_descriptive",
+  "open_predictive_analysis",
   "open_causal_study",
   "ask_clarification",
   "blocked",
@@ -142,10 +151,14 @@ const causalRunStatusValues = [
 const causalIdentificationMethodValues = ["backdoor", "frontdoor", "iv", "mediation", "none"] as const;
 const causalEstimandKindValues = ["ate", "att", "atc", "nde", "nie", "late", "custom"] as const;
 const causalRefutationStatusValues = ["passed", "failed", "warning", "not_run"] as const;
+const predictiveRunStatusValues = ["queued", "running", "completed", "failed", "cancelled"] as const;
+const predictiveTaskKindValues = ["classification", "regression"] as const;
+const predictiveClaimLabelValues = ["associational", "predictive"] as const;
 const computeRunKindValues = [
   "causal_identification",
   "causal_estimation",
   "causal_refutation",
+  "predictive_analysis",
   "dataset_profiling",
   "document_chunking",
 ] as const;
@@ -1103,6 +1116,7 @@ export const computeRuns = sqliteTable(
     }),
     studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
     runId: text("run_id").references(() => causalRuns.id, { onDelete: "set null" }),
+    predictiveRunId: text("predictive_run_id").references(() => predictiveRuns.id, { onDelete: "set null" }),
     computeKind: text("compute_kind", { enum: computeRunKindValues }).notNull(),
     status: text("status", { enum: computeRunStatusValues }).notNull().default("queued"),
     backend: text("backend").notNull(),
@@ -1130,7 +1144,10 @@ export const computeRuns = sqliteTable(
     enumCheck("compute_runs_kind_check", table.computeKind, computeRunKindValues),
     enumCheck("compute_runs_status_check", table.status, computeRunStatusValues),
     check("compute_runs_cleanup_status_check", sql`${table.cleanupStatus} in ('pending', 'completed', 'failed', 'skipped')`),
-    check("compute_runs_owner_check", sql`(${table.runId} is not null or ${table.studyId} is not null)`),
+    check(
+      "compute_runs_owner_check",
+      sql`(${table.runId} is not null or ${table.studyId} is not null or ${table.predictiveRunId} is not null)`,
+    ),
     check(
       "compute_runs_causal_kinds_require_run_id_check",
       sql`(
@@ -1138,7 +1155,15 @@ export const computeRuns = sqliteTable(
         or ${table.runId} is not null
       )`,
     ),
+    check(
+      "compute_runs_predictive_kind_requires_predictive_run_id_check",
+      sql`(
+        ${table.computeKind} != 'predictive_analysis'
+        or ${table.predictiveRunId} is not null
+      )`,
+    ),
     index("compute_runs_run_id_idx").on(table.runId),
+    index("compute_runs_predictive_run_id_idx").on(table.predictiveRunId),
     index("compute_runs_study_id_idx").on(table.studyId),
     index("compute_runs_org_status_created_at_idx").on(table.organizationId, table.status, table.createdAt),
     index("compute_runs_status_lease_expires_at_idx").on(table.status, table.leaseExpiresAt),
@@ -1154,6 +1179,7 @@ export const runArtifacts = sqliteTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     studyId: text("study_id").references(() => causalStudies.id, { onDelete: "set null" }),
     runId: text("run_id").references(() => causalRuns.id, { onDelete: "set null" }),
+    predictiveRunId: text("predictive_run_id").references(() => predictiveRuns.id, { onDelete: "set null" }),
     computeRunId: text("compute_run_id").references(() => computeRuns.id, { onDelete: "set null" }),
     artifactKind: text("artifact_kind", { enum: runArtifactKindValues }).notNull(),
     storagePath: text("storage_path").notNull(),
@@ -1168,6 +1194,7 @@ export const runArtifacts = sqliteTable(
   (table) => [
     enumCheck("run_artifacts_kind_check", table.artifactKind, runArtifactKindValues),
     index("run_artifacts_run_idx").on(table.runId),
+    index("run_artifacts_predictive_run_idx").on(table.predictiveRunId),
     index("run_artifacts_compute_run_idx").on(table.computeRunId),
     index("run_artifacts_kind_created_at_idx").on(table.artifactKind, table.createdAt),
     index("run_artifacts_expires_at_idx").on(table.expiresAt),
@@ -1222,6 +1249,117 @@ export const causalAnswers = sqliteTable(
   (table) => [
     index("causal_answers_run_idx").on(table.runId),
     index("causal_answers_study_created_at_idx").on(table.studyId, table.createdAt),
+  ],
+);
+
+export const predictiveRuns = sqliteTable(
+  "predictive_runs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    datasetId: text("dataset_id")
+      .notNull()
+      .references(() => datasets.id, { onDelete: "cascade" }),
+    datasetVersionId: text("dataset_version_id")
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: "restrict" }),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    status: text("status", { enum: predictiveRunStatusValues }).notNull().default("queued"),
+    taskKind: text("task_kind", { enum: predictiveTaskKindValues }).notNull(),
+    claimLabel: text("claim_label", { enum: predictiveClaimLabelValues }),
+    targetColumnName: text("target_column_name").notNull(),
+    featureColumnsJson: text("feature_columns_json").notNull().default("[]"),
+    summaryText: text("summary_text"),
+    modelName: text("model_name"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    enumCheck("predictive_runs_status_check", table.status, predictiveRunStatusValues),
+    enumCheck("predictive_runs_task_kind_check", table.taskKind, predictiveTaskKindValues),
+    enumCheck("predictive_runs_claim_label_check", table.claimLabel, predictiveClaimLabelValues),
+    index("predictive_runs_org_status_created_at_idx").on(table.organizationId, table.status, table.createdAt),
+    index("predictive_runs_dataset_version_created_at_idx").on(table.datasetVersionId, table.createdAt),
+    index("predictive_runs_requested_by_idx").on(table.requestedByUserId, table.createdAt),
+  ],
+);
+
+export const predictiveResults = sqliteTable(
+  "predictive_results",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => predictiveRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    claimLabel: text("claim_label", { enum: predictiveClaimLabelValues }).notNull(),
+    taskKind: text("task_kind", { enum: predictiveTaskKindValues }).notNull(),
+    targetColumnName: text("target_column_name").notNull(),
+    featureImportanceJson: text("feature_importance_json").notNull().default("{}"),
+    metricsJson: text("metrics_json").notNull().default("{}"),
+    resultJson: text("result_json").notNull().default("{}"),
+    summaryText: text("summary_text").notNull(),
+    rowCount: integer("row_count"),
+    modelName: text("model_name").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    enumCheck("predictive_results_claim_label_check", table.claimLabel, predictiveClaimLabelValues),
+    enumCheck("predictive_results_task_kind_check", table.taskKind, predictiveTaskKindValues),
+    uniqueIndex("predictive_results_run_idx").on(table.runId),
+    index("predictive_results_claim_label_created_at_idx").on(table.claimLabel, table.createdAt),
+  ],
+);
+
+export const predictiveAnswerPackages = sqliteTable(
+  "predictive_answer_packages",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => predictiveRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    packageJson: text("package_json").notNull(),
+    packageHash: text("package_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("predictive_answer_packages_run_idx").on(table.runId),
+    index("predictive_answer_packages_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export const predictiveAnswers = sqliteTable(
+  "predictive_answers",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => predictiveRuns.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    answerPackageId: text("answer_package_id")
+      .notNull()
+      .references(() => predictiveAnswerPackages.id, { onDelete: "cascade" }),
+    modelName: text("model_name").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    answerText: text("answer_text").notNull(),
+    answerFormat: text("answer_format").notNull().default("markdown"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("predictive_answers_run_idx").on(table.runId),
+    index("predictive_answers_created_at_idx").on(table.createdAt),
   ],
 );
 

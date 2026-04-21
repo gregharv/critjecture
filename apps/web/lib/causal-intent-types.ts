@@ -1,9 +1,12 @@
-export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v1";
-export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-heuristic-v1";
+export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v2";
+export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-heuristic-v2";
 export const DESCRIPTIVE_FALLBACK_PATH = "/chat";
+export const PREDICTIVE_FALLBACK_PATH = "/predictive";
 
 export const INTENT_TYPES = [
   "descriptive",
+  "associational",
+  "predictive",
   "diagnostic",
   "causal",
   "counterfactual",
@@ -12,6 +15,7 @@ export const INTENT_TYPES = [
 
 export const ROUTING_DECISIONS = [
   "continue_descriptive",
+  "open_predictive_analysis",
   "open_causal_study",
   "ask_clarification",
   "blocked",
@@ -69,6 +73,17 @@ export type ContinueDescriptiveIntakeResponse = {
   nextPath: string;
 };
 
+export type OpenPredictiveAnalysisIntakeResponse = {
+  decision: "open_predictive_analysis";
+  intent: {
+    confidence: number;
+    intent_type: "associational" | "predictive";
+    is_causal: false;
+    reason: string;
+  };
+  nextPath: string;
+};
+
 export type OpenCausalStudyIntakeResponse = {
   decision: "open_causal_study";
   intent: {
@@ -109,6 +124,7 @@ export type BlockedIntakeResponse = {
 
 export type CausalIntakeResponse =
   | ContinueDescriptiveIntakeResponse
+  | OpenPredictiveAnalysisIntakeResponse
   | OpenCausalStudyIntakeResponse
   | AskClarificationIntakeResponse
   | BlockedIntakeResponse;

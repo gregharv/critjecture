@@ -5,7 +5,13 @@ description = "Isolated Python runtime for Critjecture data analysis tools"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "catboost>=1.2.8",
+    "dowhy>=0.12",
+    "econml>=0.16.0",
     "matplotlib>=3.10.8",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
     "polars>=1.39.3",
     "reportlab>=4.4.10",
+    "scikit-learn>=1.6",
 ]

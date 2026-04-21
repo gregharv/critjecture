@@ -42,6 +42,10 @@ describe("causal V2 schema baseline", () => {
       expect(tableNames.has("causal_dag_versions")).toBe(true);
       expect(tableNames.has("causal_runs")).toBe(true);
       expect(tableNames.has("causal_answer_packages")).toBe(true);
+      expect(tableNames.has("predictive_runs")).toBe(true);
+      expect(tableNames.has("predictive_results")).toBe(true);
+      expect(tableNames.has("predictive_answer_packages")).toBe(true);
+      expect(tableNames.has("predictive_answers")).toBe(true);
 
       expect(tableNames.has("conversations")).toBe(false);
       expect(tableNames.has("chat_turns")).toBe(false);
@@ -49,6 +53,8 @@ describe("causal V2 schema baseline", () => {
       expect(tableNames.has("analysis_results")).toBe(false);
 
       expect(indexNames.has("study_dataset_bindings_one_active_primary_idx")).toBe(true);
+      expect(indexNames.has("compute_runs_predictive_run_id_idx")).toBe(true);
+      expect(indexNames.has("predictive_answer_packages_run_idx")).toBe(true);
     } finally {
       await environment.cleanup();
     }
