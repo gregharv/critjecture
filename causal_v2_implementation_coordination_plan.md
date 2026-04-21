@@ -276,6 +276,7 @@ Freeze the implementation contract before coding starts.
 - `causal_studies` is the top-level product object
 - routing contract is fixed:
   - `continue_descriptive`
+  - `open_predictive_analysis`
   - `open_causal_study`
   - `ask_clarification`
   - `blocked`
@@ -284,7 +285,8 @@ Freeze the implementation contract before coding starts.
 - reference-document module is optional for first ship
 
 ### Deliverables
-- reviewed and approved versions of the three docs:
+- reviewed and approved versions of the four docs:
+  - `analysis_routing_decision_tree.md`
   - `causal_guardrail_implementation_plan.md`
   - `causal_v2_db_schema_spec.md`
   - `causal_v2_implementation_coordination_plan.md`
@@ -328,10 +330,10 @@ Do not build routes against temporary schema names. Get canonical table names st
 
 ---
 
-## Phase 2: causal intake and study creation
+## Phase 2: analysis intake, routing, and causal study creation
 
 ### Goal
-Make causal intake the entrypoint to the new system.
+Make intent routing the entrypoint to the new system, with causal study creation reserved for causal and counterfactual paths.
 
 ### Workstreams active
 - A (support)
@@ -340,16 +342,22 @@ Make causal intake the entrypoint to the new system.
 ### Tasks
 - implement classifier contract and JSON validation
 - implement `/api/causal/intake`
-- create `causal_studies`, `study_questions`, `intent_classifications`
+- route descriptive requests to the descriptive path
+- route associational / predictive requests to a separate predictive path
+- route diagnostic requests through the observational diagnostic protocol with causal escalation only when warranted
+- create `causal_studies`, `study_questions`, and `intent_classifications` only for causal / counterfactual study flows
 - define study resume vs create behavior
 - define how descriptive requests are returned to a secondary path
+- define the predictive route contract and CatBoost-based workflow boundary
 - add initial V2 workspace landing page for studies
 
 ### Coordination notes
 The intake route should not depend on old chat routes.
 
 ### Exit criteria
-- a causal question creates or resumes a study
+- a causal or counterfactual question creates or resumes a study
+- associational / predictive questions are routed to the predictive path without causal wording
+- diagnostic questions stop observationally unless escalated to causal mode
 - the system persists classification results before analysis begins
 - routing contract is stable and used by frontend consumers
 

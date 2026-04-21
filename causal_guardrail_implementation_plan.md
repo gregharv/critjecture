@@ -5,6 +5,7 @@
 This document is the **implementation-ready product and execution plan** for Critjecture’s causal-first rebuild.
 
 It is aligned to:
+- `analysis_routing_decision_tree.md` as the **canonical question-routing and claim-label authority**
 - `causal_v2_db_schema_spec.md` as the **canonical database and entity-model authority**
 
 This document intentionally assumes:
@@ -28,15 +29,18 @@ This rebuild exists to prevent **inductive errors**, especially:
 - implying counterfactual effects without a causal graph and identification strategy
 - hiding missing confounders or unobserved variables inside freeform prose
 
-The product’s causal promise is:
+The product’s routing and causal promise is:
 
-1. classify the question before dataset analysis begins
-2. if the request is causal, create or resume a **causal study**
-3. bind the study to an explicit dataset version
-4. require a DAG with explicit observed, unobserved, and missing variables
-5. require sign-off on assumptions
-6. run PyWhy / DoWhy on the approved graph and pinned data
-7. generate the final answer only from the causal result package
+1. classify the question before dataset analysis begins using the standardized decision tree
+2. if the request is descriptive, keep it in descriptive mode and label the claim `DESCRIPTIVE`
+3. if the request is associational or predictive, route it to a separate predictive analysis path and label the claim `ASSOCIATIONAL` or `PREDICTIVE`
+4. if the request is diagnostic, start with observational decomposition and escalate to causal mode only when the user asks for a counterfactual or intervention answer
+5. if the request is causal or counterfactual, create or resume a **causal study**
+6. bind the causal study to an explicit dataset version
+7. require a DAG with explicit observed, unobserved, and missing variables
+8. require sign-off on assumptions
+9. run DoWhy on the approved graph and pinned data, using EconML DML for the primary backdoor estimation path
+10. generate the final causal answer only from the causal result package
 
 ---
 
@@ -127,6 +131,7 @@ Those are legacy concepts and should not be the center of implementation.
 Use this routing contract everywhere in V2:
 
 - `continue_descriptive`
+- `open_predictive_analysis`
 - `open_causal_study`
 - `ask_clarification`
 - `blocked`
@@ -135,7 +140,7 @@ Do **not** use legacy routing labels such as:
 - `continue_normal_chat`
 - `open_causal_workflow`
 
-The routing contract must be consistent with `intent_classifications.routing_decision` in `causal_v2_db_schema_spec.md`.
+The routing contract must be consistent with `intent_classifications.routing_decision` in `causal_v2_db_schema_spec.md` and the branch logic defined in `analysis_routing_decision_tree.md`.
 
 ---
 
@@ -181,14 +186,44 @@ User asks:
 
 System behavior:
 
-1. user submits the question to causal intake
-2. backend classifies intent
+1. user submits the question to intake
+2. backend classifies intent as `descriptive`
 3. routing decision is `continue_descriptive`
-4. descriptive-mode handling can continue through a separate path if the product keeps one
+4. descriptive-mode handling continues on a separate non-causal path
+5. returned claim label is `DESCRIPTIVE`
 
 Important:
 - the causal-first rebuild does **not** need to preserve the legacy chat-first implementation for descriptive handling
 - descriptive handling is secondary and must not dictate the causal architecture
+
+## Flow D: associational / predictive question
+
+User asks:
+
+> What predicts conversion?
+
+System behavior:
+
+1. user submits the question to intake
+2. backend classifies intent as `associational` or `predictive`
+3. routing decision is `open_predictive_analysis`
+4. the predictive path runs CatBoost-based statistical / ML analysis
+5. returned claim label is `ASSOCIATIONAL` or `PREDICTIVE`
+6. the answer must not use causal wording unless it is explicitly qualified as non-causal
+
+## Flow E: explanation / diagnostic question
+
+User asks:
+
+> Why did churn spike in March?
+
+System behavior:
+
+1. user submits the question to intake
+2. backend classifies intent as `diagnostic`
+3. routing decision starts on the observational analysis path
+4. the system decomposes the change descriptively where possible and may build dependency or path analysis for likely root causes
+5. if the user escalates to a counterfactual or intervention question, the request is reframed and routed into `open_causal_study`
 
 ---
 
@@ -346,6 +381,8 @@ Do not make `/api/chat/preflight` the primary causal entrypoint in V2.
 
 ### Allowed `intent_type` values
 - `descriptive`
+- `associational`
+- `predictive`
 - `diagnostic`
 - `causal`
 - `counterfactual`
@@ -353,11 +390,14 @@ Do not make `/api/chat/preflight` the primary causal entrypoint in V2.
 
 ### Recommended routing policy
 
+- `descriptive` -> `continue_descriptive`
+- `associational` -> `open_predictive_analysis`
+- `predictive` -> `open_predictive_analysis`
+- `diagnostic` -> start on the observational analysis path and escalate to `open_causal_study` only when the user wants a counterfactual or intervention answer
 - `causal` -> `open_causal_study`
 - `counterfactual` -> `open_causal_study`
 - `unclear` with intervention language -> `open_causal_study`
 - `unclear` without intervention language -> `ask_clarification`
-- `descriptive` or `diagnostic` -> `continue_descriptive`
 
 ### Fallback behavior
 
@@ -496,11 +536,10 @@ A `causal_run` may only be created if:
 
 ### Estimator policy
 
-Support a narrow set first:
-- backdoor linear regression adjustment
-- backdoor propensity-score adjustment
-- doubly robust estimation if stable
-- IV or frontdoor only after explicit validation and tests
+Use a narrow but explicit causal stack first:
+- DoWhy for graph-aware causal orchestration, identification, and refutation
+- EconML DML for the default backdoor estimation path
+- IV, frontdoor, diff-in-diff, panel methods, RDD, and other quasi-experimental paths only after explicit validation and tests
 
 Do not start with a broad automatic-estimator strategy.
 
@@ -510,7 +549,8 @@ Run where possible:
 - placebo treatment test
 - random common cause check
 - subset / bootstrap robustness
-- sensitivity notes for unobserved confounding where supported
+- sensitivity to hidden confounding where supported
+- negative controls where supported
 
 ---
 
@@ -598,12 +638,26 @@ The final answer must:
 }
 ```
 
+### Response: predictive
+
+```json
+{
+  "decision": "open_predictive_analysis",
+  "intent": {
+    "is_causal": false,
+    "intent_type": "predictive",
+    "reason": "The user asks for predictors or a forecast rather than an intervention effect.",
+    "confidence": 0.94
+  }
+}
+```
+
 ### Response: clarification needed
 
 ```json
 {
   "decision": "ask_clarification",
-  "question": "Do you want a descriptive summary of what changed, or a causal analysis of why it changed?"
+  "question": "Do you want a descriptive summary, a predictive/associational analysis, or a causal analysis?"
 }
 ```
 
@@ -719,7 +773,8 @@ Final answers cite assumptions, estimands, limitations, and refutations, and avo
 
 ### Intent classification
 - “what happened?” -> `continue_descriptive`
-- “why did it happen?” -> `open_causal_study`
+- “what predicts conversion?” -> `open_predictive_analysis`
+- “why did churn spike?” -> diagnostic path with observational decomposition first
 - “what happens if we change X?” -> `open_causal_study`
 - malformed classifier output -> safe fallback
 
@@ -740,10 +795,14 @@ Final answers cite assumptions, estimands, limitations, and refutations, and avo
 
 ## Integration tests
 
-- intake creates `causal_study`, `study_question`, and `intent_classification`
-- causal intake does not invoke descriptive analysis tools
+- intake routes descriptive requests to `continue_descriptive`
+- intake routes associational / predictive requests to `open_predictive_analysis`
+- diagnostic requests stop at observational explanations unless the user asks for a counterfactual answer
+- intake creates `causal_study`, `study_question`, and `intent_classification` only for causal / counterfactual escalation paths
+- causal intake does not invoke descriptive analysis tools as the primary answer path
 - DAG approval stores exact versioned graph state
 - causal run uses the exact approved DAG version and dataset version
+- causal estimation uses DoWhy orchestration with an EconML DML backdoor estimator by default
 - final answer generation uses only the causal result package
 
 ## E2E tests
@@ -769,7 +828,7 @@ This plan is ready to implement when all of the following are true:
 
 1. the primary product object is `causal_studies`
 2. causal intake creates study/question/classification records
-3. no causal question reaches descriptive analysis tooling before routing
+3. no causal question reaches descriptive analysis tooling before routing, and no predictive question is mislabeled as causal
 4. studies must bind an exact primary dataset version before approval and run creation
 5. DAGs are versioned and stored both as graph JSON and normalized rows
 6. missing and unobserved variables remain explicit

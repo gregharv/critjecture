@@ -88,6 +88,7 @@ The old chat/workflow model is legacy-only. It may be archived, but it should no
 
 Use only:
 - `continue_descriptive`
+- `open_predictive_analysis`
 - `open_causal_study`
 - `ask_clarification`
 - `blocked`
@@ -398,6 +399,8 @@ These enums should be centralized in TypeScript and mirrored in SQL check constr
 
 ### `intent_classifications.intent_type`
 - `descriptive`
+- `associational`
+- `predictive`
 - `diagnostic`
 - `causal`
 - `counterfactual`
@@ -405,6 +408,7 @@ These enums should be centralized in TypeScript and mirrored in SQL check constr
 
 ### `intent_classifications.routing_decision`
 - `continue_descriptive`
+- `open_predictive_analysis`
 - `open_causal_study`
 - `ask_clarification`
 - `blocked`
