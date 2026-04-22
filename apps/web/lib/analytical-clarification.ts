@@ -4,6 +4,9 @@ function normalizeText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+const MONTH_NAME_PATTERN =
+  "january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec";
+
 function hashText(value: string) {
   let hash = 0;
 
@@ -149,7 +152,21 @@ export function buildEffectiveAnalyticalPrompt(
 
 export function extractAnalyticalTimeWindow(message: string) {
   const match = message.match(
-    /\b(last month|last week|last quarter|last year|this month|this week|this quarter|this year|next month|next week|next quarter|next year|yesterday|today|in \w+|during \w+ \d{4}|during \w+|for \w+ \d{4})\b/i,
+    new RegExp(
+      [
+        "\\b(?:last month|last week|last quarter|last year|this month|this week|this quarter|this year|next month|next week|next quarter|next year|yesterday|today)\\b",
+        `\\bin (?:${MONTH_NAME_PATTERN})(?: \\d{4})?\\b`,
+        `\\bduring (?:${MONTH_NAME_PATTERN})(?: \\d{4})?\\b`,
+        `\\bfor (?:${MONTH_NAME_PATTERN}) \\d{4}\\b`,
+        "\\bin q[1-4]\\b",
+        "\\bduring q[1-4](?: \\d{4})?\\b",
+        "\\bfor q[1-4] \\d{4}\\b",
+        "\\bin \\d{4}\\b",
+        "\\bduring \\d{4}\\b",
+        "\\bfor \\d{4}\\b",
+      ].join("|"),
+      "i",
+    ),
   );
 
   return match?.[0]?.trim() ?? null;
@@ -377,86 +394,6 @@ export function buildAnalyticalClarificationBannerEyebrow(posture: EpistemicPost
   ]);
 }
 
-export function buildAnalyticalClarificationBannerLabels(
-  posture: EpistemicPosture,
-  message: string,
-) {
-  const seed = normalizeText(message);
-
-  if (posture === "causal_risk") {
-    return {
-      questionLabel: chooseVariant(`${seed}:banner-label:causal-risk:question`, [
-        "Framing check",
-        "Causal check",
-        "Assumption check",
-      ]),
-      userLabel: chooseVariant(`${seed}:banner-label:causal-risk:user`, [
-        "Observed pattern",
-        "Claim to examine",
-        "Question in view",
-      ]),
-    };
-  }
-
-  if (posture === "predictive") {
-    return {
-      questionLabel: chooseVariant(`${seed}:banner-label:predictive:question`, [
-        "Predictive framing check",
-        "Prediction target",
-        "Clarification",
-      ]),
-      userLabel: chooseVariant(`${seed}:banner-label:predictive:user`, [
-        "Question in view",
-        "Outcome in focus",
-        "Current question",
-      ]),
-    };
-  }
-
-  if (posture === "data_limited") {
-    return {
-      questionLabel: chooseVariant(`${seed}:banner-label:data-limited:question`, [
-        "What I need pinned down",
-        "Data-fit check",
-        "Clarification",
-      ]),
-      userLabel: chooseVariant(`${seed}:banner-label:data-limited:user`, [
-        "Question in view",
-        "Current question",
-        "Starting point",
-      ]),
-    };
-  }
-
-  if (posture === "diagnostic") {
-    return {
-      questionLabel: chooseVariant(`${seed}:banner-label:diagnostic:question`, [
-        "What I need clarified",
-        "Explanation check",
-        "Clarification",
-      ]),
-      userLabel: chooseVariant(`${seed}:banner-label:diagnostic:user`, [
-        "What you're trying to explain",
-        "Question in view",
-        "Current question",
-      ]),
-    };
-  }
-
-  return {
-    questionLabel: chooseVariant(`${seed}:banner-label:exploratory:question`, [
-      "Clarification",
-      "What I need clarified",
-      "Next question",
-    ]),
-    userLabel: chooseVariant(`${seed}:banner-label:exploratory:user`, [
-      "Your question",
-      "Question in view",
-      "Starting point",
-    ]),
-  };
-}
-
 export function buildAnalyticalClarificationBannerLead(
   posture: EpistemicPosture,
   message: string,
@@ -542,24 +479,78 @@ function buildConversationalContextLead(input: {
   return "";
 }
 
-export function buildConversationalClarificationQuestion(
+export type ClarificationKind =
+  | "goal_disambiguation"
+  | "metric_needed"
+  | "time_window_needed"
+  | "grouping_needed"
+  | "data_source_needed"
+  | "loaded_causal_reframe"
+  | "next_detail";
+
+export type ClarificationIntent = {
+  classification: CausalIntentClassification;
+  clarificationKind: ClarificationKind;
+  epistemicPosture: EpistemicPosture;
+  goal: AnalyticalGoal;
+  grouping: string | null;
+  hasData: boolean;
+  loadedQuestionFraming: boolean;
+  message: string;
+  metric: string | null;
+  previousPosture?: EpistemicPosture | null;
+  risk: EpistemicRisk;
+  seed: string;
+  timeWindow: string | null;
+};
+
+function resolveClarificationKind(input: {
+  goal: AnalyticalGoal;
+  grouping: string | null;
+  hasData: boolean;
+  loadedQuestionFraming: boolean;
+  metric: string | null;
+  posture: EpistemicPosture;
+  timeWindow: string | null;
+}) {
+  if (input.posture === "causal_risk" && input.loadedQuestionFraming) {
+    return "loaded_causal_reframe" as const;
+  }
+
+  if (!input.goal) {
+    return "goal_disambiguation" as const;
+  }
+
+  if (!input.metric) {
+    return "metric_needed" as const;
+  }
+
+  if (!input.timeWindow) {
+    return "time_window_needed" as const;
+  }
+
+  if (!input.grouping) {
+    return "grouping_needed" as const;
+  }
+
+  if (!input.hasData) {
+    return "data_source_needed" as const;
+  }
+
+  return "next_detail" as const;
+}
+
+export function buildClarificationIntent(
   message: string,
   classification: CausalIntentClassification,
   previousPosture?: EpistemicPosture | null,
-) {
+): ClarificationIntent {
   const metric = classification.proposedOutcomeLabel ?? null;
   const timeWindow = extractAnalyticalTimeWindow(message);
   const grouping = extractAnalyticalGrouping(message);
   const hasData = analyticalMessageMentionsData(message);
   const goal = inferAnalyticalGoal(message);
   const seed = normalizeText(message);
-  const lead = buildConversationalContextLead({
-    metric,
-    timeWindow,
-    grouping,
-    hasData,
-    seed,
-  });
   const risk = detectEpistemicRisk({
     classification,
     goal,
@@ -572,20 +563,55 @@ export function buildConversationalClarificationQuestion(
     risk,
     goal,
   });
-  const riskLead = buildEpistemicRiskLead({
-    posture,
+  const loadedQuestionFraming = hasLoadedQuestionFraming(message);
+
+  return {
+    classification,
+    clarificationKind: resolveClarificationKind({
+      goal,
+      grouping,
+      hasData,
+      loadedQuestionFraming,
+      metric,
+      posture,
+      timeWindow,
+    }),
+    epistemicPosture: posture,
+    goal,
+    grouping,
+    hasData,
+    loadedQuestionFraming,
+    message,
+    metric,
+    previousPosture,
+    risk,
     seed,
+    timeWindow,
+  };
+}
+
+export function buildDeterministicClarificationQuestion(intent: ClarificationIntent) {
+  const lead = buildConversationalContextLead({
+    grouping: intent.grouping,
+    hasData: intent.hasData,
+    metric: intent.metric,
+    seed: intent.seed,
+    timeWindow: intent.timeWindow,
+  });
+  const riskLead = buildEpistemicRiskLead({
+    posture: intent.epistemicPosture,
+    seed: intent.seed,
   });
 
   const withLead = (question: string) => [lead, riskLead, question].filter(Boolean).join(" ");
   const result = (question: string) => ({
-    epistemicPosture: posture,
+    epistemicPosture: intent.epistemicPosture,
     question: withLead(question),
   });
 
-  if (posture === "causal_risk" && hasLoadedQuestionFraming(message)) {
+  if (intent.clarificationKind === "loaded_causal_reframe") {
     return result(
-      chooseVariant(`${seed}:loaded-question`, [
+      chooseVariant(`${intent.seed}:loaded-question`, [
         "Do you want to first test whether this relationship could be explained by a shared driver or confounding pattern, or are you only asking for plausible mechanism hypotheses?",
         "Would it be more useful to first challenge the direct-causation framing and check for alternative explanations, or should I only outline mechanism hypotheses as conjectures?",
         "Before we assume a direct pathway, do you want to first check whether the pattern could reflect omitted context or a common driver, or are you asking only for possible mechanisms?",
@@ -593,39 +619,39 @@ export function buildConversationalClarificationQuestion(
     );
   }
 
-  if (!goal) {
-    if (metric && timeWindow && grouping) {
+  if (intent.clarificationKind === "goal_disambiguation") {
+    if (intent.metric && intent.timeWindow && intent.grouping) {
       return result(
-        chooseVariant(`${seed}:unclear:metric-time-grouping`, [
-          `Are you mainly trying to explain why ${metric} changed, or would it be more useful to first see what changed by ${grouping}?`,
-          `Would it help more to explain why ${metric} moved, or to first map what changed by ${grouping}?`,
-          `Do you want to get into why ${metric} changed, or start by seeing how it shifted by ${grouping}?`,
+        chooseVariant(`${intent.seed}:unclear:metric-time-grouping`, [
+          `Are you mainly trying to explain why ${intent.metric} changed, or would it be more useful to first see what changed by ${intent.grouping}?`,
+          `Would it help more to explain why ${intent.metric} moved, or to first map what changed by ${intent.grouping}?`,
+          `Do you want to get into why ${intent.metric} changed, or start by seeing how it shifted by ${intent.grouping}?`,
         ]),
       );
     }
 
-    if (metric && timeWindow) {
+    if (intent.metric && intent.timeWindow) {
       return result(
-        chooseVariant(`${seed}:unclear:metric-time`, [
-          `Are you trying to explain why ${metric} changed in ${timeWindow}, or do you want a quick picture of what changed first?`,
-          `Do you want to understand why ${metric} moved in ${timeWindow}, or would a quick view of what changed be more useful first?`,
-          `Should we start with why ${metric} changed in ${timeWindow}, or first get a quick read on what changed?`,
+        chooseVariant(`${intent.seed}:unclear:metric-time`, [
+          `Are you trying to explain why ${intent.metric} changed in ${intent.timeWindow}, or do you want a quick picture of what changed first?`,
+          `Do you want to understand why ${intent.metric} moved in ${intent.timeWindow}, or would a quick view of what changed be more useful first?`,
+          `Should we start with why ${intent.metric} changed in ${intent.timeWindow}, or first get a quick read on what changed?`,
         ]),
       );
     }
 
-    if (metric) {
+    if (intent.metric) {
       return result(
-        chooseVariant(`${seed}:unclear:metric`, [
-          `Are you trying to explain a change in ${metric}, get a quick summary of it, figure out what predicts it, or test whether something caused it?`,
-          `Would you like a quick summary of ${metric}, an explanation for a change in it, a look at what predicts it, or a causal read on whether something drove it?`,
-          `Are you mostly after a summary of ${metric}, an explanation for it, a predictive view of it, or a causal answer about what changed it?`,
+        chooseVariant(`${intent.seed}:unclear:metric`, [
+          `Are you trying to explain a change in ${intent.metric}, get a quick summary of it, figure out what predicts it, or test whether something caused it?`,
+          `Would you like a quick summary of ${intent.metric}, an explanation for a change in it, a look at what predicts it, or a causal read on whether something drove it?`,
+          `Are you mostly after a summary of ${intent.metric}, an explanation for it, a predictive view of it, or a causal answer about what changed it?`,
         ]),
       );
     }
 
     return result(
-      chooseVariant(`${seed}:unclear:general`, [
+      chooseVariant(`${intent.seed}:unclear:general`, [
         "What are you most trying to understand here—what changed, what might explain a pattern, what predicts something, or whether something caused it?",
         "What would be most useful here: a quick summary of what changed, an explanation for a pattern, a predictive read, or a causal answer?",
         "Are you trying to figure out what happened, what might explain it, what predicts it, or whether something actually caused it?",
@@ -633,10 +659,10 @@ export function buildConversationalClarificationQuestion(
     );
   }
 
-  if (!metric) {
-    if (goal === "predictive") {
+  if (intent.clarificationKind === "metric_needed") {
+    if (intent.goal === "predictive") {
       return result(
-        chooseVariant(`${seed}:predictive:metric`, [
+        chooseVariant(`${intent.seed}:predictive:metric`, [
           "What are you trying to predict?",
           "What outcome are you trying to predict?",
           "Which metric are you trying to forecast or predict?",
@@ -644,9 +670,9 @@ export function buildConversationalClarificationQuestion(
       );
     }
 
-    if (goal === "causal") {
+    if (intent.goal === "causal") {
       return result(
-        chooseVariant(`${seed}:causal:metric`, [
+        chooseVariant(`${intent.seed}:causal:metric`, [
           "What outcome are you asking about, and what change or intervention do you want to evaluate?",
           "What outcome do you care about here, and what change or intervention are you trying to assess?",
           "Which outcome matters here, and what action or intervention do you want to test against it?",
@@ -654,9 +680,9 @@ export function buildConversationalClarificationQuestion(
       );
     }
 
-    if (goal === "explanation") {
+    if (intent.goal === "explanation") {
       return result(
-        chooseVariant(`${seed}:explanation:metric`, [
+        chooseVariant(`${intent.seed}:explanation:metric`, [
           "What outcome or metric are you trying to explain?",
           "Which metric are you trying to make sense of?",
           "What outcome should we focus on explaining?",
@@ -665,7 +691,7 @@ export function buildConversationalClarificationQuestion(
     }
 
     return result(
-      chooseVariant(`${seed}:summary:metric`, [
+      chooseVariant(`${intent.seed}:summary:metric`, [
         "Which metric or outcome should we focus on?",
         "What metric should we center this on?",
         "Which outcome do you want to focus on first?",
@@ -673,59 +699,59 @@ export function buildConversationalClarificationQuestion(
     );
   }
 
-  if (!timeWindow) {
-    if (goal === "predictive") {
+  if (intent.clarificationKind === "time_window_needed") {
+    if (intent.goal === "predictive") {
       return result(
-        chooseVariant(`${seed}:predictive:time`, [
-          `What prediction horizon or time period matters most for ${metric}?`,
-          `What forecast horizon should we use for ${metric}?`,
-          `What time period matters most for predicting ${metric}?`,
+        chooseVariant(`${intent.seed}:predictive:time`, [
+          `What prediction horizon or time period matters most for ${intent.metric}?`,
+          `What forecast horizon should we use for ${intent.metric}?`,
+          `What time period matters most for predicting ${intent.metric}?`,
         ]),
       );
     }
 
-    if (goal === "causal") {
+    if (intent.goal === "causal") {
       return result(
-        chooseVariant(`${seed}:causal:time`, [
-          `What time window should we use to evaluate the effect on ${metric}?`,
-          `Over what time period do you want to evaluate the effect on ${metric}?`,
-          `What window should we use for judging any effect on ${metric}?`,
+        chooseVariant(`${intent.seed}:causal:time`, [
+          `What time window should we use to evaluate the effect on ${intent.metric}?`,
+          `Over what time period do you want to evaluate the effect on ${intent.metric}?`,
+          `What window should we use for judging any effect on ${intent.metric}?`,
         ]),
       );
     }
 
-    if (goal === "explanation") {
+    if (intent.goal === "explanation") {
       return result(
-        chooseVariant(`${seed}:explanation:time`, [
-          `What time period or event window matters for understanding ${metric}?`,
-          `What time window should we focus on to make sense of ${metric}?`,
-          `Is there a particular period or event window that matters for ${metric}?`,
+        chooseVariant(`${intent.seed}:explanation:time`, [
+          `What time period or event window matters for understanding ${intent.metric}?`,
+          `What time window should we focus on to make sense of ${intent.metric}?`,
+          `Is there a particular period or event window that matters for ${intent.metric}?`,
         ]),
       );
     }
 
     return result(
-      chooseVariant(`${seed}:summary:time`, [
-        `What time period should we focus on for ${metric}?`,
-        `What window do you want to look at for ${metric}?`,
-        `Which time period matters most for ${metric}?`,
+      chooseVariant(`${intent.seed}:summary:time`, [
+        `What time period should we focus on for ${intent.metric}?`,
+        `What window do you want to look at for ${intent.metric}?`,
+        `Which time period matters most for ${intent.metric}?`,
       ]),
     );
   }
 
-  if (!grouping) {
-    if (goal === "predictive") {
+  if (intent.clarificationKind === "grouping_needed") {
+    if (intent.goal === "predictive") {
       return result(
-        chooseVariant(`${seed}:predictive:grouping`, [
-          `Do you want to predict ${metric} overall, or broken out by something like region, segment, or customer type?`,
-          `Should the prediction for ${metric} stay at the overall level, or be broken out by something like region, segment, or customer type?`,
-          `Do you want one overall prediction for ${metric}, or separate predictions by something like region, segment, or customer type?`,
+        chooseVariant(`${intent.seed}:predictive:grouping`, [
+          `Do you want to predict ${intent.metric} overall, or broken out by something like region, segment, or customer type?`,
+          `Should the prediction for ${intent.metric} stay at the overall level, or be broken out by something like region, segment, or customer type?`,
+          `Do you want one overall prediction for ${intent.metric}, or separate predictions by something like region, segment, or customer type?`,
         ]),
       );
     }
 
     return result(
-      chooseVariant(`${seed}:summary:grouping`, [
+      chooseVariant(`${intent.seed}:summary:grouping`, [
         `Do you want the answer at the overall level, or broken out by something like region, segment, or customer type?`,
         `Should we keep this at the overall level, or split it out by something like region, segment, or customer type?`,
         `Do you want the first pass overall, or broken out by something like region, segment, or customer type?`,
@@ -733,9 +759,9 @@ export function buildConversationalClarificationQuestion(
     );
   }
 
-  if (!hasData) {
+  if (intent.clarificationKind === "data_source_needed") {
     return result(
-      chooseVariant(`${seed}:data`, [
+      chooseVariant(`${intent.seed}:data`, [
         "Do you already have a dataset or file in mind for this, or should we first figure out what data would actually let us answer it?",
         "Do you already know which dataset or file you want to use, or should we first sort out what data would let us answer this well?",
         "Do you already have a file or dataset for this, or do you want to first pin down what data we would need?",
@@ -744,10 +770,20 @@ export function buildConversationalClarificationQuestion(
   }
 
   return result(
-    chooseVariant(`${seed}:final`, [
+    chooseVariant(`${intent.seed}:final`, [
       "What feels like the next most important thing to pin down before we analyze this?",
       "Before we dig in, what feels like the next detail we should settle?",
       "What would help most to pin down next before we analyze it?",
     ]),
+  );
+}
+
+export function buildConversationalClarificationQuestion(
+  message: string,
+  classification: CausalIntentClassification,
+  previousPosture?: EpistemicPosture | null,
+) {
+  return buildDeterministicClarificationQuestion(
+    buildClarificationIntent(message, classification, previousPosture),
   );
 }

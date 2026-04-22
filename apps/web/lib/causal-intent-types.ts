@@ -124,6 +124,10 @@ export type AskClarificationIntakeResponse = {
     reason: string;
   };
   question: string;
+  ui?: {
+    eyebrow?: string | null;
+    lead?: string | null;
+  } | null;
 };
 
 export type BlockedIntakeResponse = {

@@ -88,17 +88,8 @@ test("chat triggers clarification questions and carries clarification state acro
   await expect(page.locator(".chat-clarification-banner__lead")).toContainText(
     /shaping it around what the data can support|the question fits the data we likely have|the available data can actually answer/,
   );
-  await expect(page.locator(".chat-clarification-banner__label").first()).toContainText(
-    /Question in view|Current question|Starting point/,
-  );
-  await expect(page.locator(".chat-clarification-banner__label").nth(1)).toContainText(
-    /What I need pinned down|Data-fit check|Clarification/,
-  );
   await expect(
-    page.locator(".chat-clarification-banner").getByText("Can you help me understand conversion?"),
-  ).toBeVisible();
-  await expect(
-    page.locator(".chat-clarification-banner").getByText(
+    page.locator(".chat-clarification-banner__question").getByText(
       "Understood — you're focused on conversion. Do you want the first pass overall, or broken out by something like region, segment, or customer type?",
     ),
   ).toBeVisible();
@@ -109,10 +100,9 @@ test("chat triggers clarification questions and carries clarification state acro
   await sendChatMessage(page, "overall first");
 
   await expect.poll(() => capturedBodies.length).toBe(2);
-  await expect(page.locator(".chat-clarification-banner").getByText("overall first")).toBeVisible();
   await expect(
     page
-      .locator(".chat-clarification-banner")
+      .locator(".chat-clarification-banner__question")
       .getByText("Got it — we'll start at the overall level. What time period should we focus on for conversion?"),
   ).toBeVisible();
   await expect
@@ -166,14 +156,8 @@ In our municipal infrastructure dataset, we have identified a robust, statistica
   await expect(page.locator(".chat-clarification-banner__lead")).toContainText(
     /pressure-test the causal framing|check the causal framing before we run with it|not jumping from a pattern to a causal story too quickly/,
   );
-  await expect(page.locator(".chat-clarification-banner__label").first()).toContainText(
-    /Observed pattern|Claim to examine|Question in view/,
-  );
-  await expect(page.locator(".chat-clarification-banner__label").nth(1)).toContainText(
-    /Framing check|Causal check|Assumption check/,
-  );
   await expect(
-    page.locator(".chat-clarification-banner").getByText(/waterpressure\.csv/),
+    page.locator(".chat-toolbar__title").getByText(/waterpressure\.csv/),
   ).toBeVisible();
   await expect
     .poll(() => JSON.stringify(savedConversationSnapshots.at(-1) ?? {}), { timeout: 10_000 })

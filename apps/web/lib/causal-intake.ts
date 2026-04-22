@@ -2,6 +2,13 @@ import "server-only";
 
 import { classifyCausalIntent } from "@/lib/causal-intent";
 import {
+  buildAnalyticalClarificationBannerEyebrow,
+  buildAnalyticalClarificationBannerLead,
+  buildClarificationIntent,
+  buildDeterministicClarificationQuestion,
+  type ClarificationIntent,
+} from "@/lib/analytical-clarification";
+import {
   type AskClarificationIntakeResponse,
   type CausalIntakeResponse,
   type ContinueDescriptiveIntakeResponse,
@@ -11,7 +18,7 @@ import {
   type OpenPredictiveAnalysisIntakeResponse,
   PREDICTIVE_FALLBACK_PATH,
 } from "@/lib/causal-intent-types";
-import { buildConversationalClarificationQuestion } from "@/lib/analytical-clarification";
+import { generateClarificationWording } from "@/lib/clarification-wording";
 import { ensureCausalFoundationForUser } from "@/lib/causal-foundation-sync";
 import {
   createStudyQuestion,
@@ -19,6 +26,17 @@ import {
   recordIntentClassification,
 } from "@/lib/causal-studies";
 import type { AuthenticatedAppUser } from "@/lib/users";
+
+function buildClarificationUi(intent: ClarificationIntent, override?: { eyebrow?: string | null; lead?: string | null } | null) {
+  return {
+    eyebrow:
+      override?.eyebrow?.trim() ||
+      buildAnalyticalClarificationBannerEyebrow(intent.epistemicPosture, intent.message),
+    lead:
+      override?.lead?.trim() ||
+      buildAnalyticalClarificationBannerLead(intent.epistemicPosture, intent.message),
+  };
+}
 
 export async function runCausalIntake(input: {
   clarificationState?: {
@@ -62,14 +80,16 @@ export async function runCausalIntake(input: {
   }
 
   if (classification.routingDecision === "ask_clarification") {
-    const clarification = buildConversationalClarificationQuestion(
+    const clarificationIntent = buildClarificationIntent(
       message,
       classification,
       input.clarificationState?.epistemicPosture ?? null,
     );
+    const fallbackClarification = buildDeterministicClarificationQuestion(clarificationIntent);
+    const llmClarification = await generateClarificationWording(clarificationIntent);
     const response: AskClarificationIntakeResponse = {
       clarificationState: {
-        epistemicPosture: clarification.epistemicPosture,
+        epistemicPosture: fallbackClarification.epistemicPosture,
       },
       decision: "ask_clarification",
       intent: {
@@ -78,7 +98,8 @@ export async function runCausalIntake(input: {
         is_causal: false,
         reason: classification.reason,
       },
-      question: clarification.question,
+      question: llmClarification?.question?.trim() || fallbackClarification.question,
+      ui: buildClarificationUi(clarificationIntent, llmClarification),
     };
 
     return response;

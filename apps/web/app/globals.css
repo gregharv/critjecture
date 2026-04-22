@@ -685,56 +685,43 @@ html.crit-chat-history-collapsed .chat-history-sidebar {
 
 .chat-clarification-banner {
   width: min(100% - 48px, 720px);
-  margin: 0 auto 14px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent 22%);
-  border-radius: 16px;
-  background: color-mix(in oklab, var(--card) 97%, transparent 3%);
-  box-shadow: 0 18px 40px -30px rgb(15 23 42 / 0.8);
+  margin: 0 auto 6px;
+  padding: 0 4px;
+}
+
+.chat-clarification-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--muted-foreground);
 }
 
 .chat-clarification-banner__eyebrow {
-  margin-bottom: 6px;
-  color: var(--muted-foreground);
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 700;
   letter-spacing: 0.08em;
+  opacity: 0.82;
   text-transform: uppercase;
 }
 
 .chat-clarification-banner__lead {
-  margin: 0 0 12px;
-  color: var(--muted-foreground);
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.chat-clarification-banner__user-question,
-.chat-clarification-banner__question {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--secondary) 58%, transparent 42%);
+  color: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  opacity: 0.9;
 }
 
 .chat-clarification-banner__question {
-  margin-top: 10px;
-  background: color-mix(in oklab, var(--primary) 9%, var(--card) 91%);
+  margin-top: 0;
 }
 
-.chat-clarification-banner__label {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted-foreground);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.chat-clarification-banner__user-question p,
 .chat-clarification-banner__question p {
   margin: 0;
-  line-height: 1.5;
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.55;
 }
 
 .workflow-builder-backdrop {

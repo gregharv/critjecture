@@ -269,6 +269,8 @@ describe("causal intake", () => {
       ).toBe(true);
       expect(response.question).not.toContain("To make this analysis useful, can you clarify");
       expect(response.question).not.toContain("which metric or outcome to focus on");
+      expect(response.ui?.eyebrow).toBeTruthy();
+      expect(response.ui?.lead).toBeTruthy();
     } finally {
       await environment.cleanup();
     }
@@ -352,6 +354,8 @@ describe("causal intake", () => {
           "omitted context or a common driver",
         ].some((option) => response.question.includes(option)),
       ).toBe(true);
+      expect(response.ui?.eyebrow).toBeTruthy();
+      expect(response.ui?.lead).toBeTruthy();
     } finally {
       await environment.cleanup();
     }

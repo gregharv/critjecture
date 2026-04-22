@@ -68,7 +68,6 @@ import {
 } from "@/lib/chat-file-mentions";
 import {
   buildAnalyticalClarificationBannerEyebrow,
-  buildAnalyticalClarificationBannerLabels,
   buildAnalyticalClarificationBannerLead,
   buildEffectiveAnalyticalPrompt,
 } from "@/lib/analytical-clarification";
@@ -140,9 +139,6 @@ type AnalyticalClarificationBannerState = {
   eyebrow: string;
   lead: string;
   question: string;
-  questionLabel: string;
-  userLabel: string;
-  userPromptText: string;
 };
 
 type ConversationBootstrapState = {
@@ -1959,24 +1955,21 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: data.question,
                 text: effectivePromptText,
               };
-              const bannerLabels = buildAnalyticalClarificationBannerLabels(
-                data.clarificationState.epistemicPosture,
-                effectivePromptText,
-              );
               setAnalyticalClarificationBanner({
                 conversationId: conversationIdRef.current,
-                eyebrow: buildAnalyticalClarificationBannerEyebrow(
-                  data.clarificationState.epistemicPosture,
-                  effectivePromptText,
-                ),
-                lead: buildAnalyticalClarificationBannerLead(
-                  data.clarificationState.epistemicPosture,
-                  effectivePromptText,
-                ),
+                eyebrow:
+                  data.ui?.eyebrow?.trim() ||
+                  buildAnalyticalClarificationBannerEyebrow(
+                    data.clarificationState.epistemicPosture,
+                    effectivePromptText,
+                  ),
+                lead:
+                  data.ui?.lead?.trim() ||
+                  buildAnalyticalClarificationBannerLead(
+                    data.clarificationState.epistemicPosture,
+                    effectivePromptText,
+                  ),
                 question: data.question,
-                questionLabel: bannerLabels.questionLabel,
-                userLabel: bannerLabels.userLabel,
-                userPromptText,
               });
               appendUserTextMessage(userPromptText);
               appendAssistantTextMessage(data.question);
@@ -3385,22 +3378,15 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         ) : null}
         {analyticalClarificationBanner?.conversationId === conversationIdRef.current ? (
           <section aria-live="polite" className="chat-clarification-banner">
-            <div className="chat-clarification-banner__eyebrow">
-              {analyticalClarificationBanner.eyebrow}
-            </div>
-            <p className="chat-clarification-banner__lead">
-              {analyticalClarificationBanner.lead}
-            </p>
-            <div className="chat-clarification-banner__user-question">
-              <span className="chat-clarification-banner__label">
-                {analyticalClarificationBanner.userLabel}
+            <div className="chat-clarification-banner__meta">
+              <span className="chat-clarification-banner__eyebrow">
+                {analyticalClarificationBanner.eyebrow}
               </span>
-              <p>{analyticalClarificationBanner.userPromptText}</p>
+              <span className="chat-clarification-banner__lead">
+                {analyticalClarificationBanner.lead}
+              </span>
             </div>
             <div className="chat-clarification-banner__question">
-              <span className="chat-clarification-banner__label">
-                {analyticalClarificationBanner.questionLabel}
-              </span>
               <p>{analyticalClarificationBanner.question}</p>
             </div>
           </section>

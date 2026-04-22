@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAnalyticalClarificationBannerEyebrow,
-  buildAnalyticalClarificationBannerLabels,
   buildAnalyticalClarificationBannerLead,
+  buildClarificationIntent,
   buildConversationalClarificationQuestion,
   buildEffectiveAnalyticalPrompt,
+  extractAnalyticalTimeWindow,
   looksLikeStandaloneAnalyticalRequest,
 } from "@/lib/analytical-clarification";
 
@@ -65,6 +66,15 @@ describe("analytical clarification helpers", () => {
     expect(looksLikeStandaloneAnalyticalRequest("last month by region")).toBe(false);
   });
 
+  it("does not mistake sentence openers like 'In our' for a time window", () => {
+    expect(
+      extractAnalyticalTimeWindow(
+        "In our municipal infrastructure dataset, we identified a strong correlation between pressure and load.",
+      ),
+    ).toBeNull();
+    expect(extractAnalyticalTimeWindow("conversion in January 2024")).toBe("in January 2024");
+  });
+
   it("builds posture-aware banner eyebrow copy for clarification UI", () => {
     expectOneOf(
       buildAnalyticalClarificationBannerEyebrow("data_limited", "Can you help me understand conversion?"),
@@ -88,38 +98,6 @@ describe("analytical clarification helpers", () => {
     );
   });
 
-  it("builds posture-aware banner section labels for clarification UI", () => {
-    const dataLimitedLabels = buildAnalyticalClarificationBannerLabels(
-      "data_limited",
-      "Can you help me understand conversion?",
-    );
-    expectOneOf(dataLimitedLabels.userLabel, [
-      "Question in view",
-      "Current question",
-      "Starting point",
-    ]);
-    expectOneOf(dataLimitedLabels.questionLabel, [
-      "What I need pinned down",
-      "Data-fit check",
-      "Clarification",
-    ]);
-
-    const causalRiskLabels = buildAnalyticalClarificationBannerLabels(
-      "causal_risk",
-      "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
-    );
-    expectOneOf(causalRiskLabels.userLabel, [
-      "Observed pattern",
-      "Claim to examine",
-      "Question in view",
-    ]);
-    expectOneOf(causalRiskLabels.questionLabel, [
-      "Framing check",
-      "Causal check",
-      "Assumption check",
-    ]);
-  });
-
   it("builds posture-aware banner lead copy for clarification UI", () => {
     expectOneOf(
       buildAnalyticalClarificationBannerLead("data_limited", "Can you help me understand conversion?"),
@@ -141,6 +119,27 @@ describe("analytical clarification helpers", () => {
         "Before I analyze this, I want to make sure we are not jumping from a pattern to a causal story too quickly.",
       ],
     );
+  });
+
+  it("builds structured clarification intent before wording the question", () => {
+    const clarificationIntent = buildClarificationIntent(
+      "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?",
+      {
+        confidence: 0.6,
+        intentType: "unclear",
+        isCausal: false,
+        proposedOutcomeLabel: null,
+        proposedTreatmentLabel: null,
+        questionType: "other",
+        rawOutputJson: "{}",
+        reason: "test",
+        routingDecision: "ask_clarification",
+      },
+    );
+
+    expect(clarificationIntent.epistemicPosture).toBe("causal_risk");
+    expect(clarificationIntent.clarificationKind).toBe("loaded_causal_reframe");
+    expect(clarificationIntent.loadedQuestionFraming).toBe(true);
   });
 
   it("builds conversational clarification questions instead of checklist prompts", () => {
