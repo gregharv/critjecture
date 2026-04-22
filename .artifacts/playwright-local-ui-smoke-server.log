@@ -9,61 +9,70 @@
 ▲ Next.js 16.2.1 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.1.241:3000
-✓ Ready in 206ms
+✓ Ready in 448ms
 
- GET / 307 in 411ms (next.js: 123ms, application-code: 287ms)
- GET / 307 in 34ms (next.js: 1649µs, application-code: 33ms)
- GET /login 200 in 50ms (next.js: 20ms, application-code: 30ms)
- GET /causal 200 in 133ms (next.js: 21ms, application-code: 112ms)
- POST /login 303 in 365ms (next.js: 2ms, application-code: 362ms)
-  └─ ƒ loginAction({"error":null}, {}) in 216ms app/auth-actions.ts
- GET /causal 200 in 159ms (next.js: 1318µs, application-code: 158ms)
- POST /causal 303 in 170ms (next.js: 1656µs, application-code: 168ms)
-  └─ ƒ setThemePreferenceAction({}) in 2ms app/theme-actions.ts
- POST /api/causal/intake 201 in 294ms (next.js: 220ms, application-code: 74ms)
- GET /api/causal/studies 200 in 116ms (next.js: 105ms, application-code: 11ms)
- GET /chat 200 in 39ms (next.js: 12ms, application-code: 28ms)
+ GET / 307 in 451ms (next.js: 253ms, application-code: 198ms)
+ GET / 307 in 91ms (next.js: 2ms, application-code: 89ms)
+ GET /login 200 in 60ms (next.js: 22ms, application-code: 39ms)
+ GET /chat 200 in 140ms (next.js: 21ms, application-code: 120ms)
+ POST /login 303 in 432ms (next.js: 1930µs, application-code: 430ms)
+  └─ ƒ loginAction({"error":null}, {}) in 274ms app/auth-actions.ts
 [browser] Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
- GET /api/conversations 200 in 44ms (next.js: 24ms, application-code: 20ms)
- GET /knowledge 200 in 36ms (next.js: 11ms, application-code: 25ms)
- GET /api/knowledge/files 200 in 166ms (next.js: 71ms, application-code: 95ms)
- GET /api/knowledge/import-jobs 200 in 167ms (next.js: 125ms, application-code: 43ms)
- GET /api/knowledge/files 200 in 30ms (next.js: 6ms, application-code: 25ms)
- GET /api/knowledge/import-jobs 200 in 30ms (next.js: 7ms, application-code: 22ms)
- GET /api/knowledge/files 200 in 11ms (next.js: 1178µs, application-code: 10ms)
- GET /api/knowledge/import-jobs 200 in 15ms (next.js: 3ms, application-code: 12ms)
- GET /workflows 200 in 348ms (next.js: 324ms, application-code: 24ms)
-{"method":"GET","requestId":"41b6c359-d115-4841-8d7f-1c85ae4711a8","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"workflow","routeKey":"workflow.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:08.118Z"}
-{"durationMs":9,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"workflow","routeKey":"workflow.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"41b6c359-d115-4841-8d7f-1c85ae4711a8","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:08.128Z"}
- GET /api/workflows 200 in 186ms (next.js: 148ms, application-code: 38ms)
-{"method":"GET","requestId":"71bcdef1-40bc-4cf3-869a-7af148e5ef0c","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"workflow","routeKey":"workflow.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:08.136Z"}
-{"durationMs":1,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"workflow","routeKey":"workflow.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"71bcdef1-40bc-4cf3-869a-7af148e5ef0c","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:08.138Z"}
- GET /api/workflows 200 in 195ms (next.js: 152ms, application-code: 42ms)
- GET /admin/operations 200 in 274ms (next.js: 249ms, application-code: 25ms)
-{"method":"GET","requestId":"cc2f9e0e-be43-42ba-8795-4c274aa71130","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:08.449Z"}
-{"method":"GET","requestId":"cb48a048-5763-400e-868b-4db399e22e58","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:08.481Z"}
-{"durationMs":48,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"cc2f9e0e-be43-42ba-8795-4c274aa71130","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:08.498Z"}
- GET /api/admin/operations/summary?window=24h 200 in 189ms (next.js: 124ms, application-code: 65ms)
-{"durationMs":24,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"cb48a048-5763-400e-868b-4db399e22e58","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:08.505Z"}
- GET /api/admin/operations/summary?window=24h 200 in 197ms (next.js: 128ms, application-code: 69ms)
- GET /admin/logs 200 in 435ms (next.js: 397ms, application-code: 39ms)
-{"method":"GET","requestId":"ea80f697-9f16-41d9-bfe4-20d7c0dd3805","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.logs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:08.996Z"}
-{"durationMs":0,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.logs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"ea80f697-9f16-41d9-bfe4-20d7c0dd3805","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:08.997Z"}
- GET /api/admin/logs 200 in 161ms (next.js: 136ms, application-code: 25ms)
-{"method":"GET","requestId":"2d1f00c8-1758-4e14-ab4b-7f0e6e9714ca","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.logs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:09.004Z"}
-{"durationMs":1,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"admin","routeKey":"admin.logs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"2d1f00c8-1758-4e14-ab4b-7f0e6e9714ca","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:09.005Z"}
- GET /api/admin/logs 200 in 169ms (next.js: 138ms, application-code: 30ms)
- GET /admin/settings 200 in 280ms (next.js: 253ms, application-code: 27ms)
- GET /api/admin/organization 200 in 226ms (next.js: 120ms, application-code: 106ms)
-{"method":"GET","requestId":"16629ad7-b495-4238-9a72-272e6f3691d3","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:09.457Z"}
-{"durationMs":0,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"16629ad7-b495-4238-9a72-272e6f3691d3","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:09.458Z"}
- GET /api/admin/governance-jobs 200 in 232ms (next.js: 147ms, application-code: 85ms)
- GET /api/admin/compliance-settings 200 in 235ms (next.js: 169ms, application-code: 66ms)
- GET /api/admin/members 200 in 238ms (next.js: 202ms, application-code: 36ms)
- GET /api/admin/organization 200 in 241ms (next.js: 205ms, application-code: 35ms)
- GET /api/admin/members 200 in 238ms (next.js: 210ms, application-code: 28ms)
- GET /api/admin/compliance-settings 200 in 12ms (next.js: 1193µs, application-code: 11ms)
-{"method":"GET","requestId":"7cdcd479-1f1a-46f3-bfe6-f93a26bb3dcb","organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","event":"operations.request_start","timestamp":"2026-04-21T18:14:09.483Z"}
-{"durationMs":1,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"7b71ed2e-3c71-48d5-a5f1-ea3c71485437","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"ebd06af9-617c-4b65-9458-186f3833d455","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"7cdcd479-1f1a-46f3-bfe6-f93a26bb3dcb","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-21T18:14:09.485Z"}
- GET /api/admin/governance-jobs 200 in 18ms (next.js: 3ms, application-code: 15ms)
- GET /predictive 200 in 436ms (next.js: 239ms, application-code: 198ms)
+ GET /api/conversations 200 in 265ms (next.js: 136ms, application-code: 129ms)
+ GET /chat 200 in 56ms (next.js: 1747µs, application-code: 54ms)
+ POST /chat 303 in 66ms (next.js: 1933µs, application-code: 64ms)
+  └─ ƒ setThemePreferenceAction({}) in 2ms app/theme-actions.ts
+ GET /api/conversations 200 in 21ms (next.js: 3ms, application-code: 18ms)
+ GET /causal 200 in 129ms (next.js: 23ms, application-code: 106ms)
+ GET /knowledge 200 in 74ms (next.js: 12ms, application-code: 62ms)
+ GET /api/knowledge/files 200 in 219ms (next.js: 111ms, application-code: 108ms)
+ GET /api/knowledge/import-jobs 200 in 114ms (next.js: 57ms, application-code: 56ms)
+ GET /api/knowledge/files 200 in 127ms (next.js: 62ms, application-code: 64ms)
+ GET /api/knowledge/import-jobs 200 in 132ms (next.js: 63ms, application-code: 69ms)
+ GET /api/knowledge/files 200 in 30ms (next.js: 4ms, application-code: 26ms)
+ GET /api/knowledge/import-jobs 200 in 32ms (next.js: 10ms, application-code: 22ms)
+ GET /workflows 200 in 40ms (next.js: 15ms, application-code: 25ms)
+{"method":"GET","requestId":"2e71fc9a-826e-4e07-94f5-df50c56440c3","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"workflow","routeKey":"workflow.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:42.944Z"}
+{"durationMs":10,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"workflow","routeKey":"workflow.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"2e71fc9a-826e-4e07-94f5-df50c56440c3","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:42.954Z"}
+ GET /api/workflows 200 in 68ms (next.js: 36ms, application-code: 33ms)
+{"method":"GET","requestId":"3151d265-5145-4007-ba7e-b881d78157a0","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"workflow","routeKey":"workflow.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:42.960Z"}
+{"durationMs":2,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"workflow","routeKey":"workflow.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"3151d265-5145-4007-ba7e-b881d78157a0","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:42.963Z"}
+ GET /api/workflows 200 in 76ms (next.js: 37ms, application-code: 39ms)
+ GET /admin/operations 200 in 48ms (next.js: 13ms, application-code: 35ms)
+{"method":"GET","requestId":"cb663c4f-16d6-4885-9a3f-630968cce12c","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.090Z"}
+{"method":"GET","requestId":"6d70d2c8-6547-489a-9125-ebe7b431f99d","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.118Z"}
+ GET /admin/logs 200 in 51ms (next.js: 14ms, application-code: 37ms)
+{"durationMs":106,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"cb663c4f-16d6-4885-9a3f-630968cce12c","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.197Z"}
+ GET /api/admin/operations/summary?window=24h 200 in 154ms (next.js: 28ms, application-code: 126ms)
+{"durationMs":86,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.operations.summary","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"6d70d2c8-6547-489a-9125-ebe7b431f99d","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.205Z"}
+ GET /api/admin/operations/summary?window=24h 200 in 160ms (next.js: 31ms, application-code: 129ms)
+{"method":"GET","requestId":"5d5e59b0-1de9-424b-a0df-e11c48109816","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.logs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.251Z"}
+{"durationMs":1,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.logs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"5d5e59b0-1de9-424b-a0df-e11c48109816","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.253Z"}
+ GET /api/admin/logs 200 in 44ms (next.js: 26ms, application-code: 18ms)
+{"method":"GET","requestId":"ba9032bd-e937-4a2f-b86f-3d7e675580c8","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.logs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.260Z"}
+{"durationMs":0,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"admin","routeKey":"admin.logs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"ba9032bd-e937-4a2f-b86f-3d7e675580c8","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.261Z"}
+ GET /api/admin/logs 200 in 53ms (next.js: 29ms, application-code: 24ms)
+ GET /admin/settings 200 in 39ms (next.js: 13ms, application-code: 26ms)
+ GET /api/admin/members 200 in 188ms (next.js: 73ms, application-code: 115ms)
+ GET /api/admin/organization 200 in 195ms (next.js: 31ms, application-code: 164ms)
+ GET /api/admin/compliance-settings 200 in 201ms (next.js: 114ms, application-code: 87ms)
+{"method":"GET","requestId":"587be5c8-3b92-4a2f-8457-cb8a8ba7b323","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.572Z"}
+{"durationMs":1,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"587be5c8-3b92-4a2f-8457-cb8a8ba7b323","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.573Z"}
+ GET /api/admin/governance-jobs 200 in 214ms (next.js: 150ms, application-code: 64ms)
+ GET /api/admin/organization 200 in 139ms (next.js: 73ms, application-code: 66ms)
+ GET /api/admin/members 200 in 74ms (next.js: 7ms, application-code: 66ms)
+ GET /api/admin/compliance-settings 200 in 112ms (next.js: 13ms, application-code: 98ms)
+{"method":"GET","requestId":"43f2aca4-5217-4c39-a680-2432cac2b8a9","organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","event":"operations.request_start","timestamp":"2026-04-22T14:53:43.698Z"}
+{"durationMs":2,"errorCode":null,"method":"GET","modelName":null,"outcome":"ok","statusCode":200,"toolName":null,"totalCostUsd":null,"totalTokens":null,"organizationId":"b617825f-b79e-4bdd-a5a1-d3f894d9b50f","routeGroup":"governance","routeKey":"governance.jobs.list","userId":"95178581-dcb5-4757-ac79-0616c662913e","governanceJobId":null,"knowledgeImportJobId":null,"requestId":"43f2aca4-5217-4c39-a680-2432cac2b8a9","runtimeToolCallId":null,"sandboxRunId":null,"turnId":null,"event":"operations.request_finish","timestamp":"2026-04-22T14:53:43.700Z"}
+ GET /api/admin/governance-jobs 200 in 121ms (next.js: 16ms, application-code: 105ms)
+ GET /predictive 200 in 111ms (next.js: 28ms, application-code: 83ms)
+ GET /predictive 200 in 261ms (next.js: 2ms, application-code: 259ms)
+ GET /predictive?datasetVersionId=smoke-dataset-version-1&targetColumn=bookings&taskKind=regression&preset=forecast&timeColumn=event_date&forecastHorizonValue=14&forecastHorizonUnit=days&planningNote=Smoke+test+predictive+planning+handoff&returnToChat=%2Fchat&featureColumn=discount_rate&featureColumn=seasonality 200 in 72ms (next.js: 3ms, application-code: 69ms)
+ GET /chat?predictiveChatStatus=workspace_ready&predictiveForecastHorizonUnit=days&predictiveForecastHorizonValue=14&predictivePlanningNote=Smoke+test+predictive+planning+handoff&predictivePreset=forecast&predictiveTaskKind=regression&predictiveWorkspaceHref=%2Fpredictive%3FtaskKind%3Dregression%26preset%3Dforecast%26forecastHorizonValue%3D14%26forecastHorizonUnit%3Ddays%26planningNote%3DSmoke%2Btest%2Bpredictive%2Bplanning%2Bhandoff%26returnToChat%3D%252Fchat 200 in 34ms (next.js: 3ms, application-code: 32ms)
+[browser] Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+ PUT /api/conversations/7be2ce30-943e-4440-80ef-42a1e88ed73b 200 in 179ms
+ GET /api/conversations 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ GET /chat?predictiveChatStatus=run_completed&predictiveDatasetVersionId=smoke-dataset-version-1&predictiveTargetColumn=bookings&predictiveTaskKind=regression&predictivePreset=forecast&predictiveTimeColumn=event_date&predictiveForecastHorizonValue=14&predictiveForecastHorizonUnit=days&predictivePlanningNote=Smoke+test+predictive+planning+handoff&predictiveWorkspaceHref=%2Fpredictive%3FdatasetVersionId%3Dsmoke-dataset-version-1%26targetColumn%3Dbookings%26taskKind%3Dregression%26preset%3Dforecast%26timeColumn%3Devent_date%26forecastHorizonValue%3D14%26forecastHorizonUnit%3Ddays%26planningNote%3DSmoke%2Btest%2Bpredictive%2Bplanning%2Bhandoff%26returnToChat%3D%252Fchat%26featureColumn%3Ddiscount_rate%26featureColumn%3Dseasonality&predictiveFeatureColumn=discount_rate&predictiveFeatureColumn=seasonality&predictiveClaimLabel=INSTRUMENTAL+%2F+HEURISTIC+PREDICTION&predictiveRunId=smoke-predictive-run-1&predictiveSummary=Bookings+are+most+sensitive+to+discounting+and+seasonal+demand.&predictiveMetric=mape%3A+0.1120&predictiveMetric=rmse%3A+21.4000 200 in 109ms (next.js: 3ms, application-code: 106ms)
+[browser] Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+ PUT /api/conversations/301780f8-54c3-4577-bc64-4ae299592c8b 200 in 56ms

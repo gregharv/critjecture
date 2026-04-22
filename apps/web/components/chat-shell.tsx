@@ -12,6 +12,8 @@ import type {
   CompanyKnowledgeCandidateFile,
   CompanyKnowledgeMatch,
 } from "@/lib/company-knowledge-types";
+import { createInformationAndDecisionTools } from "@/lib/chat-information-tools";
+import { createSandboxTools } from "@/lib/chat-sandbox-tools";
 import {
   createAskUserSelectionMessage,
   markAskUserSelectionSubmitted,
@@ -72,6 +74,12 @@ import type {
   KnowledgeFileRecord,
   ListKnowledgeFilesResponse,
 } from "@/lib/knowledge-types";
+import {
+  applyPredictiveChatReturnFromUrl,
+  createPredictiveChatTools,
+} from "@/lib/predictive-chat";
+import { registerPredictivePlanningMessageRenderers } from "@/lib/predictive-planning-messages";
+import { registerPredictiveWorkspaceStatusMessageRenderers } from "@/lib/predictive-workspace-status-messages";
 import type { UserRole } from "@/lib/roles";
 
 type ChatShellState = {
@@ -106,63 +114,7 @@ type FileMentionPreviewState = {
 
 const FILE_MENTION_PREVIEW_HIDE_DELAY_MS = 300;
 
-type SearchToolResponse = {
-  candidateFiles: CompanyKnowledgeCandidateFile[];
-  matches: CompanyKnowledgeMatch[];
-  recommendedFiles: string[];
-  role: UserRole;
-  selectedFiles: string[];
-  selectionReason:
-    | "single-candidate"
-    | "unique-year-match"
-    | "multiple-candidates"
-    | "no-match";
-  selectionRequired: boolean;
-  scopeDescription: string;
-  summary: string;
-};
 
-type BraveSearchToolResponse = {
-  count: number;
-  country: string;
-  fetchContent: boolean;
-  format: "one_line" | "raw_json" | "short";
-  freshness?: "pd" | "pm" | "pw" | "py";
-  query: string;
-  results: Array<{
-    age?: string;
-    content?: string;
-    contentFilePath?: string;
-    snippet: string;
-    title: string;
-    url: string;
-  }>;
-  text: string;
-};
-
-type BraveGroundingToolResponse = {
-  answer: string;
-  citations: Array<{
-    label: string;
-    url: string;
-  }>;
-  enableCitations: boolean;
-  enableEntities: boolean;
-  enableResearch: boolean;
-  maxAnswerChars: number;
-  question: string;
-  text: string;
-  usage: unknown;
-};
-
-type AskUserToolResponse = {
-  answer: string | null;
-  cancelled: boolean;
-  context?: string;
-  options: AskUserOption[];
-  question: string;
-  wasCustom?: boolean;
-};
 
 type PendingChatTurn = {
   userPromptText: string;
@@ -394,30 +346,6 @@ function getDataAnalysisReasoning(
   }
 
   return THINKING_LEVELS[targetIndex] as "high" | "low" | "medium";
-}
-
-type AskUserOptionInput = AskUserOption | string;
-
-function normalizeAskUserOptions(options: AskUserOptionInput[]) {
-  return options
-    .map((option) => {
-      if (typeof option === "string") {
-        const title = option.trim();
-
-        return title ? { title } : null;
-      }
-
-      if (typeof option !== "object" || option === null) {
-        return null;
-      }
-
-      const title = typeof option.title === "string" ? option.title.trim() : "";
-      const description =
-        typeof option.description === "string" ? option.description.trim() : undefined;
-
-      return title ? { description, title } : null;
-    })
-    .filter((option): option is AskUserOption => option !== null);
 }
 
 function createPlannerSelectionMessage(searches: PendingPlannerSearch[]) {
@@ -1711,6 +1639,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         registerCritjectureToolRenderers(webUi);
         registerCritjectureMessageRenderers(webUi);
         registerAskUserMessageRenderers(webUi);
+        registerPredictivePlanningMessageRenderers(webUi);
+        registerPredictiveWorkspaceStatusMessageRenderers(webUi);
 
         const postAuditJson = async <TResponse,>(
           url: string,
@@ -1870,6 +1800,31 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           scheduleConversationSave(true);
         };
 
+        const getConversationReturnToChatHref = () =>
+          conversationIdRef.current
+            ? `/chat?conversation=${encodeURIComponent(conversationIdRef.current)}`
+            : "/chat";
+
+        const applyPendingPredictiveChatReturn = () => {
+          if (!agent) {
+            return;
+          }
+
+          const currentAgent = agent;
+
+          applyPredictiveChatReturnFromUrl({
+            getCurrentUrl: () => new URL(window.location.href),
+            getMessages: () => currentAgent.state.messages as AgentMessage[],
+            replaceHistoryUrl: (url) => {
+              window.history.replaceState({}, "", url.toString());
+            },
+            replaceMessages: (messages) => {
+              currentAgent.replaceMessages(messages);
+            },
+            scheduleConversationSave,
+          });
+        };
+
         const routePromptIfNeeded = async (
           input: string | AgentMessage | AgentMessage[],
           synthetic: boolean,
@@ -1904,8 +1859,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             }
 
             if (data.decision === "open_predictive_analysis") {
-              window.location.assign(data.nextPath);
-              return false;
+              return true;
             }
 
             if (data.decision === "ask_clarification") {
@@ -2116,538 +2070,44 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           });
         };
 
-        const sandboxToolParameters = Type.Object({
-          code: Type.String({
-            description:
-                "The Python code to execute inside the sandbox. Read staged company files from inputs/<company_data-relative-path> for the current organization. inputs/ is read-only; never write or overwrite files there. Use Polars for staged CSV inputs and use pl.scan_csv(...).collect(). Always print the final answer to stdout. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a short summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you are preparing reusable chart-ready data instead of saving a PNG, print exactly one JSON object under a chart key, preferably via json.dumps(...). Multi-series charts may use chart.series with items shaped like {name, x, y}.",
-            minLength: 1,
-          }),
-          inputFiles: Type.Optional(
-            Type.Array(
-              Type.String({
-                description:
-                  "A company_data-relative file path for the current organization discovered via search_company_knowledge, such as admin/quarterly_report_2026.csv.",
-                minLength: 1,
-              }),
-            ),
-          ),
+        const {
+          askUserTool,
+          braveGroundingTool,
+          braveSearchTool,
+          searchCompanyKnowledgeTool,
+        } = createInformationAndDecisionTools({
+          Type,
+          getErrorMessage,
+          pushPlannerSearch,
+          requestAskUserInput,
         });
-
-        const generateVisualGraphParameters = Type.Object({
-          analysisResultId: Type.Optional(
-            Type.String({
-              description:
-                "Optional analysisResultId returned by run_data_analysis for chart-ready data. Use this only when the same already-computed data still answers the current chart request. If the follow-up adds a new year, date range, metric, group, comparison, or file, omit this and gather fresh inputFiles instead.",
-              minLength: 1,
-            }),
-          ),
-          chartType: Type.Optional(
-            Type.Union([
-              Type.Literal("bar"),
-              Type.Literal("line"),
-              Type.Literal("scatter"),
-            ]),
-          ),
-          code: Type.Optional(
-            Type.String({
-              description:
-                "Python plotting code to execute inside the sandbox. This may read staged company CSV files from inputs/<same-relative-path> or render a manual/synthetic chart. Save exactly one PNG to outputs/chart.png and print a short summary.",
-              minLength: 1,
-            }),
-          ),
-          inputFiles: Type.Optional(
-            Type.Array(
-              Type.String({
-                description:
-                  "Optional company_data-relative paths to stage for plotting code, such as admin/quarterly_report_2026.csv. If code or inputFiles are provided, the server runs fresh plotting against those files instead of reusing stored analysisResultId.",
-                minLength: 1,
-              }),
-            ),
-          ),
-          title: Type.Optional(Type.String({ minLength: 1 })),
-          xLabel: Type.Optional(Type.String({ minLength: 1 })),
-          yLabel: Type.Optional(Type.String({ minLength: 1 })),
-        });
-
-        const createSandboxTool = <
-          TParams extends Record<string, unknown>,
-          TResponse extends SandboxToolResponse,
-        >(
-          options: {
-            attachDataAnalysisTextOutput?: boolean;
-            attachGraphImageForReview?: boolean;
-            buildRequestBody: (runtimeToolCallId: string, params: TParams) => Record<string, unknown>;
-            description: string;
-            label: string;
-            name: string;
-            parameters: unknown;
-            route: string;
-          },
-        ) => ({
-          name: options.name,
-          label: options.label,
-          description: options.description,
-          parameters: options.parameters,
-          async execute(
-            runtimeToolCallId: string,
-            params: TParams,
-            signal?: AbortSignal,
-          ) {
-            if (awaitingFileSelectionRef.current || hasPendingPlannerSelection()) {
-              throw new Error(
-                "File selection is pending. Wait for the user to confirm the multi-select picker before using a Python sandbox tool.",
-              );
-            }
-
-            const response = await fetch(options.route, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                ...options.buildRequestBody(runtimeToolCallId, params),
-                turnId: activeTurnIdRef.current,
-              }),
-              signal,
-            });
-
-            const data = (await response.json()) as TResponse | { error: string };
-
-            if (!response.ok) {
-              throw createToolRouteError(data, `${options.label} request failed.`);
-            }
-
-            const result = data as TResponse;
-            const content: Array<
-              | {
-                  text: string;
-                  type: "text";
-                }
-              | {
-                  data: string;
-                  mimeType: string;
-                  type: "image";
-                }
-            > = [
-              {
-                type: "text",
-                text: result.summary,
-              },
-            ];
-
-            if (options.attachDataAnalysisTextOutput) {
-              const textAssetContent = await buildDataAnalysisTextAssetContent(result, signal);
-
-              if (textAssetContent) {
-                content.push(textAssetContent);
+        const { openPredictiveWorkspaceTool, updatePredictivePlanTool } =
+          createPredictiveChatTools({
+            Type,
+            getConversationReturnToChatHref,
+            getMessages: () => (agent ? (agent.state.messages as AgentMessage[]) : []),
+            replaceMessages: (messages) => {
+              if (!agent) {
+                return;
               }
-            }
 
-            if (options.attachGraphImageForReview) {
-              const imageContent = await buildGraphReviewImageContent(result, signal);
-
-              if (imageContent) {
-                content.push(imageContent);
-              }
-            }
-
-            return {
-              content,
-              details: result,
-            };
-          },
-        });
-
-        const searchCompanyKnowledgeTool = {
-          name: "search_company_knowledge",
-          label: "Search Company Knowledge",
-          description:
-            "Search the current organization's company_data using short keywords, filenames, or years. The tool may auto-select files or trigger a planner-level multi-select picker when multiple files are relevant.",
-          parameters: Type.Object({
-            query: Type.String({
-              description:
-                "A short keyword, filename, or year such as revenue, operations, quarterly_report.csv, or 2026.",
-              minLength: 1,
-            }),
-          }),
-          async execute(
-            _runtimeToolCallId: string,
-            params: { query: string },
-            signal?: AbortSignal,
-          ) {
-            const response = await fetch("/api/company-knowledge/search", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                query: params.query,
-              }),
-              signal,
-            });
-
-            const data = (await response.json()) as SearchToolResponse | { error: string };
-
-            if (!response.ok) {
-              throw new Error("error" in data ? data.error : "Search request failed.");
-            }
-
-            const result = data as SearchToolResponse;
-
-            if (
-              result.candidateFiles.length > 0 &&
-              (result.selectionRequired ||
-                result.selectedFiles.length > 0 ||
-                result.recommendedFiles.length > 0)
-            ) {
-              pushPlannerSearch({
-                candidateFiles: result.candidateFiles,
-                query: params.query,
-                recommendedFiles: result.recommendedFiles,
-                selectedFiles: result.selectedFiles,
-                selectionRequired: result.selectionRequired,
-              });
-            }
-
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: result.summary,
-                },
-              ],
-              details: result,
-            };
-          },
-        };
-
-        const braveSearchTool = {
-          name: "brave_search",
-          label: "Web Search",
-          description:
-            "Web search via Brave Search API. Returns snippets and can optionally fetch page content.",
-          parameters: Type.Object({
-            query: Type.String({
-              description: "Search query.",
-              minLength: 1,
-            }),
-            count: Type.Optional(
-              Type.Integer({
-                description: "Number of results (1-20).",
-                maximum: 20,
-                minimum: 1,
-              }),
-            ),
-            country: Type.Optional(
-              Type.String({
-                description: "Country code, for example US.",
-                minLength: 2,
-              }),
-            ),
-            freshness: Type.Optional(
-              Type.Union([
-                Type.Literal("pd"),
-                Type.Literal("pw"),
-                Type.Literal("pm"),
-                Type.Literal("py"),
-              ]),
-            ),
-            fetchContent: Type.Optional(Type.Boolean()),
-            format: Type.Optional(
-              Type.Union([
-                Type.Literal("one_line"),
-                Type.Literal("short"),
-                Type.Literal("raw_json"),
-              ]),
-            ),
-          }),
-          async execute(
-            _runtimeToolCallId: string,
-            params: {
-              count?: number;
-              country?: string;
-              fetchContent?: boolean;
-              format?: "one_line" | "raw_json" | "short";
-              freshness?: "pd" | "pm" | "pw" | "py";
-              query: string;
+              agent.replaceMessages(messages);
             },
-            signal?: AbortSignal,
-          ) {
-            const response = await fetch("/api/brave/search", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(params),
-              signal,
-            });
-            const data = (await response.json()) as BraveSearchToolResponse | { error: string };
+            scheduleConversationSave,
+          });
 
-            if (!response.ok) {
-              throw new Error(getErrorMessage(data, "Brave search failed."));
-            }
-
-            const result = data as BraveSearchToolResponse;
-
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: result.text,
-                },
-              ],
-              details: result,
-            };
-          },
-        };
-
-        const braveGroundingTool = {
-          name: "brave_grounding",
-          label: "Brave Grounding",
-          description: "Grounded answer from Brave Search with optional citations.",
-          parameters: Type.Object({
-            question: Type.String({
-              description: "Question to answer.",
-              minLength: 1,
-            }),
-            enableResearch: Type.Optional(Type.Boolean()),
-            enableCitations: Type.Optional(Type.Boolean()),
-            enableEntities: Type.Optional(Type.Boolean()),
-            maxAnswerChars: Type.Optional(
-              Type.Integer({
-                maximum: 10_000,
-                minimum: 200,
-              }),
-            ),
-          }),
-          async execute(
-            _runtimeToolCallId: string,
-            params: {
-              enableCitations?: boolean;
-              enableEntities?: boolean;
-              enableResearch?: boolean;
-              maxAnswerChars?: number;
-              question: string;
-            },
-            signal?: AbortSignal,
-          ) {
-            const response = await fetch("/api/brave/grounding", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(params),
-              signal,
-            });
-            const data = (await response.json()) as BraveGroundingToolResponse | { error: string };
-
-            if (!response.ok) {
-              throw new Error(getErrorMessage(data, "Brave grounding failed."));
-            }
-
-            const result = data as BraveGroundingToolResponse;
-
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: result.text,
-                },
-              ],
-              details: result,
-            };
-          },
-        };
-
-        const askUserTool = {
-          name: "ask_user",
-          label: "Ask User",
-          description:
-            "Ask the user a question with optional multiple-choice options to resolve ambiguity.",
-          parameters: Type.Object({
-            question: Type.String({
-              description: "The question to ask the user.",
-              minLength: 1,
-            }),
-            context: Type.Optional(
-              Type.String({
-                description: "Relevant context summary to show before the question.",
-              }),
-            ),
-            options: Type.Optional(
-              Type.Array(
-                Type.Union([
-                  Type.String(),
-                  Type.Object({
-                    title: Type.String(),
-                    description: Type.Optional(Type.String()),
-                  }),
-                ]),
-              ),
-            ),
-            allowMultiple: Type.Optional(Type.Boolean()),
-            allowFreeform: Type.Optional(Type.Boolean()),
-            timeout: Type.Optional(Type.Number()),
-          }),
-          async execute(
-            _runtimeToolCallId: string,
-            params: {
-              allowFreeform?: boolean;
-              allowMultiple?: boolean;
-              context?: string;
-              options?: AskUserOptionInput[];
-              question: string;
-              timeout?: number;
-            },
-            signal?: AbortSignal,
-          ) {
-            const question = typeof params.question === "string" ? params.question.trim() : "";
-            const context = typeof params.context === "string" ? params.context.trim() : "";
-            const options = normalizeAskUserOptions(Array.isArray(params.options) ? params.options : []);
-            const allowMultiple = Boolean(params.allowMultiple ?? false);
-            const allowFreeform = Boolean(params.allowFreeform ?? true);
-            const timeout =
-              typeof params.timeout === "number" && Number.isFinite(params.timeout)
-                ? Math.max(0, Math.trunc(params.timeout))
-                : undefined;
-
-            if (!question) {
-              return {
-                content: [{ type: "text" as const, text: "Error: question is required." }],
-                details: {
-                  answer: null,
-                  cancelled: true,
-                  context: context || undefined,
-                  options,
-                  question,
-                } satisfies AskUserToolResponse,
-                isError: true,
-              };
-            }
-
-            if (options.length === 0 && !allowFreeform) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: "ask_user requires options or allowFreeform=true.",
-                  },
-                ],
-                details: {
-                  answer: null,
-                  cancelled: true,
-                  context: context || undefined,
-                  options,
-                  question,
-                } satisfies AskUserToolResponse,
-                isError: true,
-              };
-            }
-
-            const selection = await requestAskUserInput(
-              {
-                allowFreeform,
-                allowMultiple,
-                context: context || undefined,
-                options,
-                question,
-                timeout,
-              },
-              signal,
-            );
-            const answer = selection.answer?.trim() ?? "";
-
-            if (!answer) {
-              return {
-                content: [{ type: "text" as const, text: "User cancelled the question." }],
-                details: {
-                  answer: null,
-                  cancelled: true,
-                  context: context || undefined,
-                  options,
-                  question,
-                } satisfies AskUserToolResponse,
-              };
-            }
-
-            return {
-              content: [{ type: "text" as const, text: `User answered: ${answer}` }],
-              details: {
-                answer,
-                cancelled: false,
-                context: context || undefined,
-                options,
-                question,
-                wasCustom: selection.wasCustom,
-              } satisfies AskUserToolResponse,
-            };
-          },
-        };
-
-        const runDataAnalysisTool = createSandboxTool<
-          { code: string; inputFiles?: string[] },
-          DataAnalysisToolResponse
-        >({
-          buildRequestBody: (runtimeToolCallId, params) => ({
-            code: params.code,
-            inputFiles: params.inputFiles ?? [],
-            runtimeToolCallId,
-          }),
-          name: "run_data_analysis",
-          label: "Run Data Analysis",
-          description:
-            "Execute short Python snippets in the isolated sandbox. Use this for calculations, Polars analysis, and deterministic computed answers. inputs/ is read-only staged data; never write there. Do not rely on print(df) for full tables because Polars display truncates; save full tabular output to outputs/result.csv (or outputs/result.json / outputs/result.txt) and print a compact summary. Save at most one structured file and only at outputs/result.csv, outputs/result.json, or outputs/result.txt. If you want reusable chart-ready data instead of a PNG, print exactly one JSON object under chart, using json.dumps(...) and chart.series for multi-line or grouped charts when needed.",
-          parameters: sandboxToolParameters,
-          route: "/api/data-analysis/run",
-          attachDataAnalysisTextOutput: true,
-        });
-
-        const generateVisualGraphTool = createSandboxTool<
-          {
-            analysisResultId?: string;
-            chartType?: "bar" | "line" | "scatter";
-            code?: string;
-            inputFiles?: string[];
-            title?: string;
-            xLabel?: string;
-            yLabel?: string;
-          },
-          GeneratedAssetToolResponse
-        >({
-          buildRequestBody: (runtimeToolCallId, params) => ({
-            analysisResultId: params.analysisResultId,
-            chartType: params.chartType,
-            code: params.code,
-            inputFiles: params.inputFiles ?? [],
-            runtimeToolCallId,
-            title: params.title,
-            xLabel: params.xLabel,
-            yLabel: params.yLabel,
-          }),
-          name: "generate_visual_graph",
-          label: "Generate Visual Graph",
-          description:
-            "Generate exactly one PNG chart inside outputs/. Use analysisResultId only for same-scope restyling of already-computed chart data. When a follow-up needs new years, files, groups, metrics, or comparisons, pass fresh code and inputFiles instead.",
-          parameters: generateVisualGraphParameters,
-          route: "/api/visual-graph/run",
-          attachGraphImageForReview: true,
-        });
-
-        const generateDocumentTool = createSandboxTool<
-          { code: string; inputFiles?: string[] },
-          GeneratedAssetToolResponse
-        >({
-          buildRequestBody: (runtimeToolCallId, params) => ({
-            code: params.code,
-            inputFiles: params.inputFiles ?? [],
-            runtimeToolCallId,
-          }),
-          name: "generate_document",
-          label: "Generate Document",
-          description:
-            "Execute Python in the isolated sandbox to generate exactly one PDF document inside outputs/. Use reportlab and print a one-line summary after writing the file.",
-          parameters: sandboxToolParameters,
-          route: "/api/document/generate",
+        const {
+          generateDocumentTool,
+          generateVisualGraphTool,
+          runDataAnalysisTool,
+        } = createSandboxTools({
+          Type,
+          buildDataAnalysisTextAssetContent,
+          buildGraphReviewImageContent,
+          createToolRouteError,
+          getActiveTurnId: () => activeTurnIdRef.current,
+          hasPendingFileSelection: () =>
+            awaitingFileSelectionRef.current || hasPendingPlannerSelection(),
         });
 
         agent = new Agent({
@@ -2665,6 +2125,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               braveSearchTool,
               braveGroundingTool,
               askUserTool,
+              updatePredictivePlanTool,
+              openPredictiveWorkspaceTool,
               runDataAnalysisTool,
               generateVisualGraphTool,
               generateDocumentTool,
@@ -3168,10 +2630,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           braveSearchTool,
           braveGroundingTool,
           askUserTool,
+          updatePredictivePlanTool,
+          openPredictiveWorkspaceTool,
           runDataAnalysisTool,
           generateVisualGraphTool,
           generateDocumentTool,
         ]);
+        applyPendingPredictiveChatReturn();
         hostRef.current.replaceChildren(element);
         cleanup = () => {
           window.removeEventListener(

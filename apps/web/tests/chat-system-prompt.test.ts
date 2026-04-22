@@ -85,4 +85,23 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("Use DESCRIPTIVE for observational summaries");
     expect(prompt).toContain("UNTESTED HYPOTHESES for observational diagnostic decomposition");
   });
+
+  it("keeps predictive planning in chat before sending users to the predictive workspace", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("keep the interaction in chat first");
+    expect(prompt).toContain("help the user define the target, prediction horizon");
+    expect(prompt).toContain("before recommending that they run the dedicated predictive workspace");
+    expect(prompt).toContain("use update_predictive_plan");
+    expect(prompt).toContain("use open_predictive_workspace");
+    expect(prompt).toContain("Prefer opening the predictive workspace in a new tab");
+    expect(prompt).toContain("give a short business-readable handoff summary");
+    expect(prompt).toContain("Objective, Target, Horizon, Candidate Drivers, Constraints, Success Metric, and Ready for Predictive Workspace");
+    expect(prompt).toContain("Do not force business users to speak in modeling jargon");
+    expect(prompt).toContain("end with the clearest next planning question");
+    expect(prompt).toContain("Refresh update_predictive_plan whenever the target, horizon, candidate drivers, constraints, success metric, or readiness status changes");
+    expect(prompt).toContain("If a predictive workspace update returns to chat, explain what the run means in business terms, recommend the next step based on signal quality");
+    expect(prompt).toContain("instrumental / heuristic rather than causal");
+    expect(prompt).toContain("asking what would happen if they changed a policy, treatment, price, or intervention");
+  });
 });

@@ -438,6 +438,15 @@ function getBooleanValue(source: unknown, key: string) {
   return Boolean(source[key]);
 }
 
+function getPositiveIntegerValue(source: unknown, key: string) {
+  if (!isRecord(source)) {
+    return null;
+  }
+
+  const value = source[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
 function getStringArrayValue(source: unknown, key: string) {
   if (!isRecord(source) || !Array.isArray(source[key])) {
     return [] as string[];
@@ -695,6 +704,224 @@ function renderAskUserToolCard(
   };
 }
 
+function renderUpdatePredictivePlanToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  if (result?.isError) {
+    return renderCollapsedToolError("Predictive Planning", result);
+  }
+
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const objective = getStringValue(details, "objective") || getStringValue(parsedParams, "objective");
+  const targetColumn =
+    getStringValue(details, "targetColumn") || getStringValue(parsedParams, "targetColumn");
+  const successMetric =
+    getStringValue(details, "successMetric") || getStringValue(parsedParams, "successMetric");
+  const nextQuestion =
+    getStringValue(details, "nextQuestion") || getStringValue(parsedParams, "nextQuestion");
+  const readyForPredictiveWorkspace =
+    isRecord(details) && "readyForPredictiveWorkspace" in details
+      ? getBooleanValue(details, "readyForPredictiveWorkspace")
+      : getBooleanValue(parsedParams, "readyForPredictiveWorkspace");
+  const candidateDrivers = [
+    ...new Set([
+      ...getStringArrayValue(details, "candidateDrivers"),
+      ...getStringArrayValue(parsedParams, "candidateDrivers"),
+      ...getStringArrayValue(details, "featureColumns"),
+      ...getStringArrayValue(parsedParams, "featureColumns"),
+    ]),
+  ];
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">Predictive Planning Panel</span>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? readyForPredictiveWorkspace
+                ? "Ready"
+                : "Updated"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Updating"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${objective || targetColumn || successMetric
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Planning Summary</div>
+              <div class="crit-tool__meta">
+                ${objective ? html`<span><strong>Objective:</strong> ${objective}</span>` : nothing}
+                ${targetColumn ? html`<span><strong>Target:</strong> ${targetColumn}</span>` : nothing}
+                ${successMetric
+                  ? html`<span><strong>Success metric:</strong> ${successMetric}</span>`
+                  : nothing}
+              </div>
+            </section>`
+          : nothing}
+
+        ${candidateDrivers.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Candidate Drivers</div>
+              <p class="crit-tool__summary">${candidateDrivers.join(", ")}</p>
+            </section>`
+          : nothing}
+
+        ${nextQuestion && !readyForPredictiveWorkspace
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Next Question</div>
+              <p class="crit-tool__summary">${nextQuestion}</p>
+            </section>`
+          : nothing}
+
+        <div class="crit-tool__empty">
+          ${readyForPredictiveWorkspace
+            ? "The chat-side predictive planning panel is ready for handoff."
+            : "The chat-side predictive planning panel was updated so planning can continue here."}
+        </div>
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
+function renderOpenPredictiveWorkspaceToolCard(
+  params: unknown,
+  result: ToolRendererResult | undefined,
+  isStreaming?: boolean,
+) {
+  if (result?.isError) {
+    return renderCollapsedToolError("Predictive Handoff", result);
+  }
+
+  const parsedParams = parseToolParams(params);
+  const details = getToolDetails(result);
+  const state = getToolState(result, isStreaming);
+  const href = getStringValue(details, "href") || getStringValue(parsedParams, "href");
+  const returnToChat =
+    getStringValue(details, "returnToChat") || getStringValue(parsedParams, "returnToChat");
+  const datasetVersionId =
+    getStringValue(details, "datasetVersionId") || getStringValue(parsedParams, "datasetVersionId");
+  const targetColumn =
+    getStringValue(details, "targetColumn") || getStringValue(parsedParams, "targetColumn");
+  const taskKind = getStringValue(details, "taskKind") || getStringValue(parsedParams, "taskKind");
+  const preset = getStringValue(details, "preset") || getStringValue(parsedParams, "preset");
+  const timeColumn =
+    getStringValue(details, "timeColumn") || getStringValue(parsedParams, "timeColumn");
+  const planningNote =
+    getStringValue(details, "planningNote") || getStringValue(parsedParams, "planningNote");
+  const forecastHorizonValue =
+    getPositiveIntegerValue(details, "forecastHorizonValue") ??
+    getPositiveIntegerValue(parsedParams, "forecastHorizonValue");
+  const forecastHorizonUnit =
+    getStringValue(details, "forecastHorizonUnit") ||
+    getStringValue(parsedParams, "forecastHorizonUnit");
+  const featureColumns = [
+    ...new Set([
+      ...getStringArrayValue(details, "featureColumns"),
+      ...getStringArrayValue(parsedParams, "featureColumns"),
+    ]),
+  ];
+  const openInNewTab =
+    isRecord(details) && "openInNewTab" in details
+      ? getBooleanValue(details, "openInNewTab")
+      : getBooleanValue(parsedParams, "openInNewTab");
+  const horizon =
+    forecastHorizonValue && forecastHorizonUnit
+      ? `${forecastHorizonValue} ${forecastHorizonUnit}`
+      : forecastHorizonValue
+        ? String(forecastHorizonValue)
+        : forecastHorizonUnit;
+
+  return {
+    content: html`
+      <div class="crit-tool">
+        <div class="crit-tool__header">
+          <div class="crit-tool__heading">
+            <span class="crit-tool__eyebrow">Predictive Workspace Handoff</span>
+          </div>
+          <span class="crit-tool__status crit-tool__status--${state}">
+            ${state === "complete"
+              ? openInNewTab
+                ? "Opened"
+                : "Ready"
+              : state === "error"
+                ? "Error"
+                : state === "running"
+                  ? "Preparing"
+                  : "Queued"}
+          </span>
+        </div>
+
+        ${state === "running"
+          ? html`<div class="crit-tool__empty">Preparing the predictive workspace handoff…</div>`
+          : nothing}
+
+        ${targetColumn || taskKind || preset || datasetVersionId || timeColumn || horizon
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Planned Setup</div>
+              <div class="crit-tool__meta">
+                ${targetColumn ? html`<span><strong>Target:</strong> ${targetColumn}</span>` : nothing}
+                ${taskKind ? html`<span><strong>Task:</strong> ${taskKind}</span>` : nothing}
+                ${preset ? html`<span><strong>Preset:</strong> ${preset}</span>` : nothing}
+                ${datasetVersionId
+                  ? html`<span><strong>Dataset version:</strong> ${datasetVersionId}</span>`
+                  : nothing}
+                ${timeColumn ? html`<span><strong>Time column:</strong> ${timeColumn}</span>` : nothing}
+                ${horizon ? html`<span><strong>Horizon:</strong> ${horizon}</span>` : nothing}
+              </div>
+            </section>`
+          : nothing}
+
+        ${featureColumns.length > 0
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Feature Candidates</div>
+              <p class="crit-tool__summary">${featureColumns.join(", ")}</p>
+            </section>`
+          : nothing}
+
+        ${planningNote
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Planning Note</div>
+              <p class="crit-tool__summary">${planningNote}</p>
+            </section>`
+          : nothing}
+
+        ${href || returnToChat
+          ? html`<section class="crit-tool__section">
+              <div class="crit-tool__label">Actions</div>
+              <div class="crit-tool__action-row">
+                ${href
+                  ? html`<a
+                      class="crit-tool__download-button"
+                      href=${href}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open Predictive Workspace
+                    </a>`
+                  : nothing}
+                ${returnToChat
+                  ? html`<a class="crit-tool__asset-link" href=${returnToChat}>Keep Planning in Chat</a>`
+                  : nothing}
+              </div>
+            </section>`
+          : nothing}
+      </div>
+    `,
+    isCustom: false,
+  };
+}
+
 function renderCompanyKnowledgeSearchToolCard(
   params: unknown,
   result: ToolRendererResult | undefined,
@@ -867,6 +1094,18 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
   registry.registerToolRenderer("ask_user", {
     render(params, result, isStreaming) {
       return renderAskUserToolCard(params, result, isStreaming);
+    },
+  });
+
+  registry.registerToolRenderer("update_predictive_plan", {
+    render(params, result, isStreaming) {
+      return renderUpdatePredictivePlanToolCard(params, result, isStreaming);
+    },
+  });
+
+  registry.registerToolRenderer("open_predictive_workspace", {
+    render(params, result, isStreaming) {
+      return renderOpenPredictiveWorkspaceToolCard(params, result, isStreaming);
     },
   });
 }

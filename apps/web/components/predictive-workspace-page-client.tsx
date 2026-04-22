@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useSearchParams } from "next/navigation";
 
 import type {
   PredictiveAnalysisPreset,
@@ -10,6 +12,11 @@ import type {
   PredictiveRunSummary,
   PredictiveTaskKind,
 } from "@/lib/predictive-analysis";
+import {
+  buildPredictiveChatReturnHref,
+  buildPredictiveWorkspaceHref,
+  parsePredictiveWorkspaceHandoff,
+} from "@/lib/predictive-handoff";
 
 type PredictiveWorkspacePageClientProps = {
   initialCatalog: PredictiveDatasetCatalogItem[];
@@ -29,6 +36,7 @@ function getErrorMessage(value: unknown, fallbackMessage: string) {
 }
 
 export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: PredictiveWorkspacePageClientProps) {
+  const searchParams = useSearchParams();
   const [catalog] = useState(initialCatalog);
   const [datasetVersionId, setDatasetVersionId] = useState(
     initialCatalog[0]?.versions[0]?.id ?? "",
@@ -44,6 +52,13 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PredictiveRunResult | null>(null);
   const [runs, setRuns] = useState(initialRuns);
+  const appliedHandoffSignatureRef = useRef<string | null>(null);
+
+  const handoffSignature = searchParams.toString();
+  const handoff = useMemo(
+    () => parsePredictiveWorkspaceHandoff(searchParams),
+    [searchParams, handoffSignature],
+  );
 
   const selectedVersion = useMemo(() => {
     for (const dataset of catalog) {
@@ -61,12 +76,171 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
 
   const availableColumns = selectedVersion?.version.columns ?? [];
   const availableTimeColumns = availableColumns.filter((column) => column.semanticType === "time");
+  const returnToChat = handoff?.returnToChat ?? "/chat";
+  const predictiveWorkspaceHref = useMemo(
+    () =>
+      buildPredictiveWorkspaceHref({
+        datasetVersionId,
+        featureColumns,
+        forecastHorizonUnit,
+        forecastHorizonValue,
+        planningNote: handoff?.planningNote,
+        preset,
+        returnToChat,
+        targetColumn,
+        taskKind,
+        timeColumn,
+      }),
+    [
+      datasetVersionId,
+      featureColumns,
+      forecastHorizonUnit,
+      forecastHorizonValue,
+      handoff?.planningNote,
+      preset,
+      returnToChat,
+      targetColumn,
+      taskKind,
+      timeColumn,
+    ],
+  );
+  const workspaceReadyChatHref = useMemo(
+    () =>
+      buildPredictiveChatReturnHref({
+        datasetVersionId,
+        featureColumns,
+        forecastHorizonUnit,
+        forecastHorizonValue,
+        planningNote: handoff?.planningNote,
+        preset,
+        returnToChat,
+        status: "workspace_ready",
+        targetColumn,
+        taskKind,
+        timeColumn,
+        workspaceHref: predictiveWorkspaceHref,
+      }),
+    [
+      datasetVersionId,
+      featureColumns,
+      forecastHorizonUnit,
+      forecastHorizonValue,
+      handoff?.planningNote,
+      predictiveWorkspaceHref,
+      preset,
+      returnToChat,
+      targetColumn,
+      taskKind,
+      timeColumn,
+    ],
+  );
+  const runCompletedChatHref = useMemo(() => {
+    if (!result) {
+      return null;
+    }
+
+    const metricHighlights = Object.entries(result.metrics)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+      .slice(0, 3)
+      .map(([key, value]) => `${key}: ${formatMetricValue(value)}`);
+
+    return buildPredictiveChatReturnHref({
+      claimLabel: result.claimLabel,
+      datasetVersionId: result.datasetVersionId,
+      featureColumns: result.featureColumns,
+      forecastHorizonUnit: result.forecastConfig?.horizonUnit,
+      forecastHorizonValue: result.forecastConfig?.horizonValue,
+      metricHighlights,
+      planningNote: handoff?.planningNote,
+      preset: result.preset,
+      returnToChat,
+      runId: result.id,
+      status: "run_completed",
+      summary: result.summary,
+      targetColumn: result.targetColumn,
+      taskKind: result.taskKind,
+      timeColumn: result.forecastConfig?.timeColumnName ?? timeColumn,
+      workspaceHref: predictiveWorkspaceHref,
+    });
+  }, [handoff?.planningNote, predictiveWorkspaceHref, result, returnToChat, timeColumn]);
 
   useEffect(() => {
     if (!timeColumn && availableTimeColumns[0]?.columnName) {
       setTimeColumn(availableTimeColumns[0].columnName);
     }
   }, [availableTimeColumns, timeColumn]);
+
+  useEffect(() => {
+    if (!handoff || appliedHandoffSignatureRef.current === handoffSignature) {
+      return;
+    }
+
+    const hasRequestedDatasetVersion =
+      handoff.datasetVersionId &&
+      catalog.some((dataset) => dataset.versions.some((version) => version.id === handoff.datasetVersionId));
+
+    if (
+      hasRequestedDatasetVersion &&
+      handoff.datasetVersionId &&
+      handoff.datasetVersionId !== datasetVersionId
+    ) {
+      setDatasetVersionId(handoff.datasetVersionId);
+      setTargetColumn("");
+      setFeatureColumns([]);
+      setResult(null);
+      setTimeColumn("");
+      return;
+    }
+
+    if (handoff.taskKind) {
+      setTaskKind(handoff.taskKind);
+    }
+
+    if (handoff.preset) {
+      setPreset(handoff.preset);
+    }
+
+    if (handoff.forecastHorizonValue) {
+      setForecastHorizonValue(handoff.forecastHorizonValue);
+    }
+
+    if (handoff.forecastHorizonUnit) {
+      setForecastHorizonUnit(handoff.forecastHorizonUnit);
+    }
+
+    if (
+      handoff.timeColumn &&
+      availableColumns.some((column) => column.columnName === handoff.timeColumn)
+    ) {
+      setTimeColumn(handoff.timeColumn);
+    }
+
+    if (
+      handoff.targetColumn &&
+      availableColumns.some((column) => column.columnName === handoff.targetColumn)
+    ) {
+      setTargetColumn(handoff.targetColumn);
+    }
+
+    const filteredFeatureColumns = handoff.featureColumns.filter(
+      (columnName) =>
+        availableColumns.some((column) => column.columnName === columnName) &&
+        columnName !== (handoff.targetColumn ?? targetColumn),
+    );
+
+    if (filteredFeatureColumns.length > 0) {
+      setFeatureColumns(filteredFeatureColumns);
+    }
+
+    appliedHandoffSignatureRef.current = handoffSignature;
+  }, [
+    availableColumns,
+    catalog,
+    datasetVersionId,
+    handoff,
+    handoffSignature,
+    targetColumn,
+  ]);
 
   function handleToggleFeature(columnName: string) {
     setFeatureColumns((current) =>
@@ -139,14 +313,60 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
         <p className="causal-hero__eyebrow">Predictive workspace</p>
         <h1 className="causal-hero__title">Associational and predictive analysis</h1>
         <p className="causal-hero__copy">
-          Use this workspace for non-causal analysis such as predictors, feature importance, and
-          forecasts. Outputs here must remain labeled INSTRUMENTAL / HEURISTIC PREDICTION.
+          Use this workspace to run non-causal analysis such as predictors, feature importance, and
+          forecasts after the modeling approach has been worked out. Outputs here must remain labeled INSTRUMENTAL / HEURISTIC PREDICTION.
         </p>
       </div>
 
       <div className="causal-grid">
         <section className="causal-card">
           <h2 className="causal-card__title">Run predictive analysis</h2>
+          <p className="causal-card__copy">
+            This workspace is for execution, not model-framing from scratch. Business users should
+            use chat first to work through target definition, forecast horizon, candidate features,
+            and success metrics before running a predictive model here.
+          </p>
+          {handoff ? (
+            <div
+              style={{
+                background: "#eff6ff",
+                border: "1px solid rgba(37, 99, 235, 0.18)",
+                borderRadius: 12,
+                marginTop: 12,
+                padding: 12,
+              }}
+            >
+              <p className="causal-card__meta">Prefilled from chat planning</p>
+              <ul className="causal-list" style={{ marginTop: 8 }}>
+                {handoff.datasetVersionId ? <li>Suggested dataset version: {handoff.datasetVersionId}</li> : null}
+                {handoff.targetColumn ? <li>Suggested target: {handoff.targetColumn}</li> : null}
+                {handoff.featureColumns.length ? (
+                  <li>Suggested features: {handoff.featureColumns.join(", ")}</li>
+                ) : null}
+                {handoff.taskKind ? <li>Suggested task kind: {handoff.taskKind}</li> : null}
+                {handoff.preset ? <li>Suggested preset: {handoff.preset}</li> : null}
+                {handoff.timeColumn ? <li>Suggested time column: {handoff.timeColumn}</li> : null}
+                {handoff.forecastHorizonValue ? (
+                  <li>
+                    Suggested horizon: {handoff.forecastHorizonValue} {handoff.forecastHorizonUnit ?? "rows"}
+                  </li>
+                ) : null}
+              </ul>
+              {handoff.planningNote ? (
+                <p className="causal-card__copy" style={{ marginTop: 8 }}>
+                  <strong>Planning note:</strong> {handoff.planningNote}
+                </p>
+              ) : null}
+              <div className="causal-inline-actions" style={{ marginTop: 12 }}>
+                <Link className="causal-study-list__link" href={returnToChat}>
+                  Continue planning in chat
+                </Link>
+                <Link className="causal-study-list__link" href={workspaceReadyChatHref}>
+                  Send workspace-ready update to chat
+                </Link>
+              </div>
+            </div>
+          ) : null}
           <form className="causal-intake-form" onSubmit={handleSubmit}>
             <label className="causal-intake-form__label" htmlFor="predictive-dataset-version">
               Dataset version
@@ -331,6 +551,14 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
                       <li key={key}>{key}: {formatMetricValue(value)}</li>
                     ))}
                 </ul>
+              </div>
+              <div className="causal-inline-actions">
+                <Link className="causal-study-list__link" href={runCompletedChatHref ?? returnToChat}>
+                  Return to chat with this run update
+                </Link>
+                <Link className="causal-study-list__link" href={`/predictive/runs/${result.id}`}>
+                  Open predictive run detail
+                </Link>
               </div>
             </div>
           ) : (

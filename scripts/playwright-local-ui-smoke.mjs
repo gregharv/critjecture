@@ -65,6 +65,53 @@ function buildUrl(routePath) {
   return new URL(routePath, activeBaseURL).toString();
 }
 
+function buildPredictiveWorkspaceSmokePath() {
+  const params = new URLSearchParams({
+    datasetVersionId: "smoke-dataset-version-1",
+    targetColumn: "bookings",
+    taskKind: "regression",
+    preset: "forecast",
+    timeColumn: "event_date",
+    forecastHorizonValue: "14",
+    forecastHorizonUnit: "days",
+    planningNote: "Smoke test predictive planning handoff",
+    returnToChat: "/chat",
+  });
+  params.append("featureColumn", "discount_rate");
+  params.append("featureColumn", "seasonality");
+  return `/predictive?${params.toString()}`;
+}
+
+function buildPredictiveChatReturnSmokePath(status, predictiveWorkspacePath) {
+  const params = new URLSearchParams({
+    predictiveChatStatus: status,
+    predictiveDatasetVersionId: "smoke-dataset-version-1",
+    predictiveTargetColumn: "bookings",
+    predictiveTaskKind: "regression",
+    predictivePreset: "forecast",
+    predictiveTimeColumn: "event_date",
+    predictiveForecastHorizonValue: "14",
+    predictiveForecastHorizonUnit: "days",
+    predictivePlanningNote: "Smoke test predictive planning handoff",
+    predictiveWorkspaceHref: predictiveWorkspacePath,
+  });
+  params.append("predictiveFeatureColumn", "discount_rate");
+  params.append("predictiveFeatureColumn", "seasonality");
+
+  if (status === "run_completed") {
+    params.set("predictiveClaimLabel", "INSTRUMENTAL / HEURISTIC PREDICTION");
+    params.set("predictiveRunId", "smoke-predictive-run-1");
+    params.set(
+      "predictiveSummary",
+      "Bookings are most sensitive to discounting and seasonal demand.",
+    );
+    params.append("predictiveMetric", "mape: 0.1120");
+    params.append("predictiveMetric", "rmse: 21.4000");
+  }
+
+  return `/chat?${params.toString()}`;
+}
+
 async function mkdirIfNeeded(targetPath) {
   await mkdir(targetPath, { recursive: true });
 }
@@ -473,6 +520,52 @@ async function verifyPredictivePage(page) {
   await expectVisible(taskKindSelect, "predictive task kind selector");
   await taskKindSelect.selectOption("regression");
   await taskKindSelect.selectOption("classification");
+
+  logStep("Verifying predictive handoff and sync surfaces");
+  const predictiveWorkspacePath = buildPredictiveWorkspaceSmokePath();
+  await page.goto(buildUrl(predictiveWorkspacePath), { waitUntil: "domcontentloaded" });
+  await expectHeading(page, "Associational and predictive analysis");
+  await expectVisible(page.getByText("Prefilled from chat planning").first(), "predictive handoff banner");
+  await expectVisible(
+    page.getByRole("link", { name: "Send workspace-ready update to chat" }),
+    "workspace-ready sync link",
+  );
+  await page.getByRole("link", { name: "Send workspace-ready update to chat" }).click();
+  await expectUrlPath(page, "/chat");
+  const workspaceReadyCard = page.locator(".crit-sync").first();
+  await expectVisible(workspaceReadyCard, "workspace-ready sync card", 30_000);
+  await expectVisible(
+    workspaceReadyCard.locator(".crit-sync__title").getByText("Workspace ready"),
+    "workspace-ready title",
+  );
+  await expectVisible(
+    page.getByText("Your predictive setup is ready in the workspace with task regression, horizon 14 days.").first(),
+    "workspace-ready assistant summary",
+  );
+  await expectVisible(
+    page.getByText("Run the predictive analysis if the setup is ready").first(),
+    "workspace-ready recommendation",
+  );
+
+  await page.goto(
+    buildUrl(buildPredictiveChatReturnSmokePath("run_completed", predictiveWorkspacePath)),
+    { waitUntil: "domcontentloaded" },
+  );
+  await expectUrlPath(page, "/chat");
+  const runCompletedCard = page.locator(".crit-sync").first();
+  await expectVisible(runCompletedCard, "run-completed sync card", 30_000);
+  await expectVisible(
+    runCompletedCard.locator(".crit-sync__title").getByText("Run completed"),
+    "run-completed title",
+  );
+  await expectVisible(
+    runCompletedCard.getByText("Metric highlights").first(),
+    "run-completed metric highlights",
+  );
+  await expectVisible(
+    runCompletedCard.getByText("forecast quality looks useful for planning").first(),
+    "signal-quality recommendation",
+  );
 }
 
 async function maybeSignOut(page) {
@@ -540,9 +633,8 @@ try {
     await verifySettingsPage(page);
   }
 
-  if (!(await navigateViaShell(page, "Predictive", "/predictive"))) {
-    await verifyPredictivePage(page);
-  }
+  await navigateViaShell(page, "Predictive", "/predictive").catch(() => false);
+  await verifyPredictivePage(page);
   await maybeSignOut(page);
 
   logStep("Smoke test completed successfully.");
