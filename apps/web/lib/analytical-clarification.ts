@@ -1,4 +1,9 @@
 import type { CausalIntentClassification, EpistemicPosture } from "@/lib/causal-intent-types";
+import {
+  buildObservationalMechanismPolicyInstruction,
+  classifyObservationalMechanismClarificationReply,
+  isLoadedMechanismReframeQuestion,
+} from "@/lib/observational-mechanism-response-policy";
 
 function normalizeText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -50,22 +55,46 @@ export function looksLikeStandaloneAnalyticalRequest(message: string) {
   return STANDALONE_ANALYTICAL_REQUEST_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-function looksLikeShortClarificationReply(message: string) {
+function looksLikeShortClarificationReply(
+  message: string,
+  lastQuestion?: string | null,
+) {
   const trimmed = message.trim();
 
   if (!trimmed) {
     return false;
   }
 
-  return trimmed.split(/\s+/).length <= 8 && !looksLikeStandaloneAnalyticalRequest(trimmed);
+  const wordCount = trimmed.split(/\s+/).length;
+  const loadedCausalFollowUp =
+    Boolean(lastQuestion) &&
+    isLoadedMechanismReframeQuestion(lastQuestion) &&
+    wordCount <= 18 &&
+    !trimmed.includes("?") &&
+    !STANDALONE_ANALYTICAL_REQUEST_PATTERNS.some((pattern) => pattern.test(trimmed));
+
+  if (loadedCausalFollowUp) {
+    return true;
+  }
+
+  return wordCount <= 8 && !looksLikeStandaloneAnalyticalRequest(trimmed);
 }
 
 function contextualizeClarificationReply(lastQuestion: string | null | undefined, latestMessage: string) {
   const question = lastQuestion?.trim() ?? "";
   const latest = latestMessage.trim();
 
-  if (!question || !latest || !looksLikeShortClarificationReply(latest)) {
+  if (!question || !latest || !looksLikeShortClarificationReply(latest, question)) {
     return latest;
+  }
+
+  const observationalMechanismPreference = classifyObservationalMechanismClarificationReply({
+    lastQuestion: question,
+    latestMessage: latest,
+  });
+
+  if (observationalMechanismPreference !== "none") {
+    return buildObservationalMechanismPolicyInstruction(observationalMechanismPreference);
   }
 
   if (/\boverall level\b|\bbroken out\b|\bby something like region\b/i.test(question)) {
@@ -132,7 +161,7 @@ export function buildEffectiveAnalyticalPrompt(
     return latest;
   }
 
-  if (looksLikeStandaloneAnalyticalRequest(rawLatest)) {
+  if (looksLikeStandaloneAnalyticalRequest(rawLatest) && latest === rawLatest) {
     return rawLatest;
   }
 

@@ -23,6 +23,7 @@ This file indexes the project documents that live in the repository root and in 
 - [Causal V2 Database Schema Specification](causal_v2_db_schema_spec.md)
 - [Causal V2 Implementation Coordination Plan](causal_v2_implementation_coordination_plan.md)
 - [Open Source Analytical Guardrails Python-First Proposal](open_source_analytical_guardrails_python_first_proposal.md)
+- [Observational Mechanism Response Policy Classifier Specification](observational_mechanism_response_policy.md)
 
 ## apps/web/docs
 

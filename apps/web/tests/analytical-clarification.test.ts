@@ -43,6 +43,18 @@ describe("analytical clarification helpers", () => {
     );
   });
 
+  it("turns loaded-causal clarification follow-ups into a generic concise observational instruction", () => {
+    expect(
+      buildEffectiveAnalyticalPrompt(
+        "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?",
+        "yes there is a pattern just look at the correlation",
+        "Before we assume a direct pathway, do you want to first check whether the pattern could reflect omitted context or a common driver, or are you asking only for possible mechanisms?",
+      ),
+    ).toBe(
+      "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?\nTreat this as a concise observational response. Confirm the pattern only if the data supports it, say the observational pattern alone does not establish a direct mechanism, and give the shortest likely shared-driver, synchronized-demand, or omitted-context explanation instead of listing speculative pathways.",
+    );
+  });
+
   it("replaces pending context when the user starts a new standalone request", () => {
     expect(
       buildEffectiveAnalyticalPrompt(

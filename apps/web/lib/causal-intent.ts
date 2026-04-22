@@ -7,6 +7,7 @@ import {
   PREDICTIVE_FALLBACK_PATH,
   parseClassifierOutput,
 } from "@/lib/causal-intent-types";
+import { classifyObservationalMechanismRequest } from "@/lib/observational-mechanism-response-policy";
 
 function normalizeMessage(message: string) {
   return message.trim().toLowerCase().replace(/\s+/g, " ");
@@ -79,17 +80,6 @@ const OBSERVATIONAL_EVIDENCE_PATTERNS = [
   /\brobust\b/i,
   /\bwe (observed|found|identified|detected)\b/i,
   /\bas [^?.!]+ (drops?|falls?|rises?|increases?|decreases?)\b/i,
-];
-
-const DIRECTIONAL_PRESUPPOSITION_PATTERNS = [
-  /\bforces?\b/i,
-  /\bdirect mechanism\b/i,
-  /\bphysical pathway\b/i,
-  /\bby which\b/i,
-  /\bwhere .* (?:causes?|leads? to|results? in|forces?|makes?)\b/i,
-  /\bhow .* (?:causes?|leads? to|results? in|forces?|makes?)\b/i,
-  /\bwhat (?:specific )?(?:mechanisms|pathways) .* (?:cause|causes|lead|leads|result|results|force|forces|make|makes)\b/i,
-  /\bassuming .* (?:accurate|true|correct)\b/i,
 ];
 
 const AMBIGUOUS_ANALYSIS_PATTERNS = [
@@ -350,11 +340,7 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
     };
   }
 
-  if (
-    matchesAny(normalized, OBSERVATIONAL_EVIDENCE_PATTERNS) &&
-    matchesAny(normalized, MECHANISM_SEARCH_PATTERNS) &&
-    matchesAny(normalized, DIRECTIONAL_PRESUPPOSITION_PATTERNS)
-  ) {
+  if (classifyObservationalMechanismRequest(normalized).kind === "loaded_mechanism_from_observation") {
     const raw = {
       confidence: 0.9,
       intent_type: "unclear",
