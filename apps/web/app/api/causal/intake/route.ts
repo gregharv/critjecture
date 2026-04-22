@@ -33,6 +33,7 @@ export async function POST(request: Request) {
 
   try {
     const response = await runCausalIntake({
+      clarificationState: parsed.clarificationState,
       message: parsed.message,
       requestedStudyId: parsed.studyId,
       user,

@@ -66,8 +66,9 @@ import {
   getFileMentionMatch,
   replaceFileMention,
 } from "@/lib/chat-file-mentions";
+import { buildEffectiveAnalyticalPrompt } from "@/lib/analytical-clarification";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
-import type { CausalIntakeResponse } from "@/lib/causal-intent-types";
+import type { CausalIntakeResponse, EpistemicPosture } from "@/lib/causal-intent-types";
 import type {
   GetKnowledgeFilePreviewResponse,
   KnowledgeFilePreview,
@@ -1224,6 +1225,12 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const lastCompletedTurnIdRef = useRef<string | null>(null);
   const runDataAnalysisFailureStreakRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
+  const pendingAnalyticalClarificationRef = useRef<{
+    conversationId: string | null;
+    posture: EpistemicPosture | null;
+    question: string | null;
+    text: string | null;
+  }>({ conversationId: null, posture: null, question: null, text: null });
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -1830,14 +1837,31 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           synthetic: boolean,
         ) => {
           if (synthetic) {
-            return true;
+            return {
+              continueInChat: true,
+              resolvedInput: input,
+            };
           }
 
           const userPromptText = extractPromptText(input);
 
           if (!userPromptText) {
-            return true;
+            return {
+              continueInChat: true,
+              resolvedInput: input,
+            };
           }
+
+          const pendingClarification =
+            pendingAnalyticalClarificationRef.current.conversationId === conversationIdRef.current
+              ? pendingAnalyticalClarificationRef.current
+              : null;
+          const effectivePromptText = buildEffectiveAnalyticalPrompt(
+            pendingClarification?.text,
+            userPromptText,
+            pendingClarification?.question,
+          );
+          const resolvedInput = typeof input === "string" ? effectivePromptText : input;
 
           try {
             const response = await fetch("/api/causal/intake", {
@@ -1845,37 +1869,105 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               headers: {
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ message: userPromptText }),
+              body: JSON.stringify({
+                clarificationState: pendingClarification?.posture
+                  ? { epistemicPosture: pendingClarification.posture }
+                  : null,
+                message: effectivePromptText,
+              }),
             });
             const data = (await response.json()) as CausalIntakeResponse | { error: string } | null;
 
             if (!response.ok || typeof data !== "object" || data === null || !("decision" in data)) {
-              return true;
+              pendingAnalyticalClarificationRef.current = {
+                conversationId: null,
+                posture: null,
+                question: null,
+                text: null,
+              };
+              return {
+                continueInChat: true,
+                resolvedInput,
+              };
             }
 
             if (data.decision === "open_causal_study") {
+              pendingAnalyticalClarificationRef.current = {
+                conversationId: null,
+                posture: null,
+                question: null,
+                text: null,
+              };
               window.location.assign(`/causal/studies/${data.studyId}`);
-              return false;
+              return {
+                continueInChat: false,
+                resolvedInput,
+              };
             }
 
             if (data.decision === "open_predictive_analysis") {
-              return true;
+              pendingAnalyticalClarificationRef.current = {
+                conversationId: null,
+                posture: null,
+                question: null,
+                text: null,
+              };
+              return {
+                continueInChat: true,
+                resolvedInput,
+              };
             }
 
             if (data.decision === "ask_clarification") {
+              pendingAnalyticalClarificationRef.current = {
+                conversationId: conversationIdRef.current,
+                posture: data.clarificationState.epistemicPosture,
+                question: data.question,
+                text: effectivePromptText,
+              };
               appendAssistantTextMessage(data.question);
-              return false;
+              return {
+                continueInChat: false,
+                resolvedInput,
+              };
             }
 
             if (data.decision === "blocked") {
+              pendingAnalyticalClarificationRef.current = {
+                conversationId: null,
+                posture: null,
+                question: null,
+                text: null,
+              };
               appendAssistantTextMessage(data.message);
-              return false;
+              return {
+                continueInChat: false,
+                resolvedInput,
+              };
             }
 
-            return true;
+            pendingAnalyticalClarificationRef.current = {
+              conversationId: null,
+              posture: null,
+              question: null,
+              text: null,
+            };
+            return {
+              continueInChat: true,
+              resolvedInput,
+            };
           } catch (caughtError) {
             console.error("Intent routing failed; continuing in chat.", caughtError);
-            return true;
+            pendingAnalyticalClarificationRef.current = {
+              conversationId: null,
+              posture: null,
+              question: null,
+              text: null,
+            };
+            return {
+              continueInChat: true,
+              resolvedInput,
+            };
           }
         };
 
@@ -1885,25 +1977,26 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           synthetic: boolean,
           images?: unknown[],
         ) => {
-          const shouldContinueInChat = await routePromptIfNeeded(input, synthetic);
+          const routeResult = await routePromptIfNeeded(input, synthetic);
 
-          if (!shouldContinueInChat) {
+          if (!routeResult.continueInChat) {
             return;
           }
 
-          queueChatTurn(input, synthetic);
+          const resolvedInput = routeResult.resolvedInput;
+          queueChatTurn(resolvedInput, synthetic);
 
           if (synthetic) {
             syntheticContinuationRef.current = true;
           }
 
           try {
-            if (typeof input === "string") {
-              await originalPrompt(input, images as never);
+            if (typeof resolvedInput === "string") {
+              await originalPrompt(resolvedInput, images as never);
               return;
             }
 
-            await originalPrompt(input as never);
+            await originalPrompt(resolvedInput as never);
           } catch (caughtError) {
             scheduleConversationSave(true);
             const turnId = activeTurnIdRef.current;

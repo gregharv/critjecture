@@ -1,5 +1,5 @@
-export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v3";
-export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-flowchart-v3";
+export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v4";
+export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-flowchart-v4";
 export const DESCRIPTIVE_FALLBACK_PATH = "/chat";
 export const PREDICTIVE_FALLBACK_PATH = "/predictive";
 
@@ -31,9 +31,18 @@ export const CAUSAL_QUESTION_TYPES = [
   "other",
 ] as const;
 
+export const EPISTEMIC_POSTURES = [
+  "exploratory",
+  "diagnostic",
+  "predictive",
+  "causal_risk",
+  "data_limited",
+] as const;
+
 export type IntentType = (typeof INTENT_TYPES)[number];
 export type RoutingDecision = (typeof ROUTING_DECISIONS)[number];
 export type CausalQuestionType = (typeof CAUSAL_QUESTION_TYPES)[number];
+export type EpistemicPosture = (typeof EPISTEMIC_POSTURES)[number];
 
 export type CausalIntentClassification = {
   confidence: number;
@@ -58,6 +67,9 @@ export type ParsedCausalIntentOutput = {
 };
 
 export type CausalIntakeRequest = {
+  clarificationState?: {
+    epistemicPosture?: EpistemicPosture | null;
+  } | null;
   message: string;
   studyId?: string | null;
 };
@@ -101,6 +113,9 @@ export type OpenCausalStudyIntakeResponse = {
 };
 
 export type AskClarificationIntakeResponse = {
+  clarificationState: {
+    epistemicPosture: EpistemicPosture;
+  };
   decision: "ask_clarification";
   intent: {
     confidence: number;
@@ -145,6 +160,10 @@ export function isCausalQuestionType(value: unknown): value is CausalQuestionTyp
   return typeof value === "string" && CAUSAL_QUESTION_TYPES.includes(value as CausalQuestionType);
 }
 
+export function isEpistemicPosture(value: unknown): value is EpistemicPosture {
+  return typeof value === "string" && EPISTEMIC_POSTURES.includes(value as EpistemicPosture);
+}
+
 export function clampConfidence(value: unknown, fallback = 0.5) {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return fallback;
@@ -169,7 +188,15 @@ export function parseCausalIntakeRequest(input: unknown): CausalIntakeRequest | 
       ? input.studyId.trim()
       : null;
 
+  const clarificationState =
+    isRecord(input.clarificationState) && isEpistemicPosture(input.clarificationState.epistemicPosture)
+      ? {
+          epistemicPosture: input.clarificationState.epistemicPosture,
+        }
+      : null;
+
   return {
+    clarificationState,
     message,
     studyId,
   };

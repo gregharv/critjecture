@@ -74,8 +74,17 @@ describe("buildChatSystemPrompt", () => {
   it("starts why-questions with observational decomposition before causal escalation", () => {
     const prompt = buildChatSystemPrompt("owner");
 
-    expect(prompt).toContain("start with descriptive decomposition and observational contributors first");
+    expect(prompt).toContain("start with descriptive decomposition, competing explanations, and observational contributors first");
     expect(prompt).toContain("Escalate to the causal workspace only when the user explicitly wants a causal or counterfactual conclusion");
+  });
+
+  it("encourages analytical back-and-forth when the question or data fit is still unclear", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("prefer a short back-and-forth");
+    expect(prompt).toContain("refine the question, the target metric, the time window, the unit of analysis");
+    expect(prompt).toContain("ask a focused follow-up instead of guessing");
+    expect(prompt).toContain("what data would be needed, what is available, what is missing");
   });
 
   it("requires explicit claim labels for chat-side descriptive and diagnostic answers", () => {

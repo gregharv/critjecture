@@ -229,7 +229,7 @@ describe("causal intake", () => {
     }
   });
 
-  it("starts ambiguous observational requests on the descriptive path instead of prompting", async () => {
+  it("asks clarification for open-ended analytical requests instead of defaulting to descriptive", async () => {
     const environment = await createTestAppEnvironment();
 
     try {
@@ -242,7 +242,105 @@ describe("causal intake", () => {
       });
 
       expect(response).toMatchObject({
+        decision: "ask_clarification",
+      });
+      if (response.decision !== "ask_clarification") {
+        throw new Error("Expected ask_clarification response.");
+      }
+
+      expect(
+        [
+          "Got it — you're looking at conversion.",
+          "Understood — you're focused on conversion.",
+          "Okay — this seems to be about conversion.",
+        ].some((option) => response.question.includes(option)),
+      ).toBe(true);
+      expect(
+        [
+          "explain a change in conversion",
+          "explanation for a change in it",
+          "causal answer about what changed it",
+        ].some((option) => response.question.includes(option)),
+      ).toBe(true);
+      expect(
+        ["get a quick summary", "quick summary of conversion", "summary of conversion"].some(
+          (option) => response.question.includes(option),
+        ),
+      ).toBe(true);
+      expect(response.question).not.toContain("To make this analysis useful, can you clarify");
+      expect(response.question).not.toContain("which metric or outcome to focus on");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("does not ask for time window or grouping when the user already specified them", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const response = await runCausalIntake({
+        message: "Can you help me understand conversion last month by region?",
+        user: user!,
+      });
+
+      expect(response).toMatchObject({
+        decision: "ask_clarification",
+      });
+      if (response.decision !== "ask_clarification") {
+        throw new Error("Expected ask_clarification response.");
+      }
+
+      expect(
+        [
+          "Got it — you're looking at conversion last month by region.",
+          "Understood — you're focused on conversion last month by region.",
+          "Okay — this seems to be about conversion last month by region.",
+        ].some((option) => response.question.includes(option)),
+      ).toBe(true);
+      expect(
+        [
+          "explain why conversion changed",
+          "explain why conversion moved",
+          "get into why conversion changed",
+        ].some((option) => response.question.includes(option)),
+      ).toBe(true);
+      expect(
+        ["what changed by region", "map what changed by region", "how it shifted by region"].some(
+          (option) => response.question.includes(option),
+        ),
+      ).toBe(true);
+      expect(response.question).not.toContain("time window");
+      expect(response.question).not.toContain("grouping");
+      expect(response.question).not.toContain("which metric or outcome to focus on");
+      expect(response.question).not.toContain("what time window matters most");
+      expect(response.question).not.toContain("what unit, segment, or grouping should anchor the analysis");
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("treats observational-pattern-plus-mechanism questions as diagnostic instead of descriptive", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const response = await runCausalIntake({
+        message:
+          "We found a statistically significant negative correlation between metric A and metric B. What mechanisms or pathways could make lower A force higher B?",
+        user: user!,
+      });
+
+      expect(response).toMatchObject({
         decision: "continue_descriptive",
+        intent: {
+          intent_type: "diagnostic",
+          is_causal: false,
+        },
         nextPath: "/chat",
       });
     } finally {

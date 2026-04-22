@@ -6,10 +6,12 @@ import {
   type CausalIntakeResponse,
   type ContinueDescriptiveIntakeResponse,
   DESCRIPTIVE_FALLBACK_PATH,
+  type EpistemicPosture,
   type OpenCausalStudyIntakeResponse,
   type OpenPredictiveAnalysisIntakeResponse,
   PREDICTIVE_FALLBACK_PATH,
 } from "@/lib/causal-intent-types";
+import { buildConversationalClarificationQuestion } from "@/lib/analytical-clarification";
 import { ensureCausalFoundationForUser } from "@/lib/causal-foundation-sync";
 import {
   createStudyQuestion,
@@ -18,11 +20,10 @@ import {
 } from "@/lib/causal-studies";
 import type { AuthenticatedAppUser } from "@/lib/users";
 
-function buildClarificationQuestion() {
-  return "Do you want a descriptive summary, an associational/predictive analysis, or a causal analysis?";
-}
-
 export async function runCausalIntake(input: {
+  clarificationState?: {
+    epistemicPosture?: EpistemicPosture | null;
+  } | null;
   message: string;
   requestedStudyId?: string | null;
   user: AuthenticatedAppUser;
@@ -61,7 +62,15 @@ export async function runCausalIntake(input: {
   }
 
   if (classification.routingDecision === "ask_clarification") {
+    const clarification = buildConversationalClarificationQuestion(
+      message,
+      classification,
+      input.clarificationState?.epistemicPosture ?? null,
+    );
     const response: AskClarificationIntakeResponse = {
+      clarificationState: {
+        epistemicPosture: clarification.epistemicPosture,
+      },
       decision: "ask_clarification",
       intent: {
         confidence: classification.confidence,
@@ -69,7 +78,7 @@ export async function runCausalIntake(input: {
         is_causal: false,
         reason: classification.reason,
       },
-      question: buildClarificationQuestion(),
+      question: clarification.question,
     };
 
     return response;
