@@ -5,7 +5,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign In" }).click();
-  await page.waitForURL(/\/causal$/);
+  await page.waitForURL(/\/chat$/);
 }
 
 test("owner can load history and open owner admin pages", async ({ page }) => {
@@ -546,7 +546,7 @@ test("intern is redirected away from owner admin pages", async ({ page }) => {
   await login(page, "intern@example.com", "intern-password");
 
   await page.goto("/admin/logs");
-  await page.waitForURL("**/causal");
+  await page.waitForURL("**/chat");
   await expect(page.getByRole("link", { name: "Settings" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Audit Logs" })).toHaveCount(0);
 });

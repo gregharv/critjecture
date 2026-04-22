@@ -63,4 +63,11 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("treat those as explicit file selections");
     expect(prompt).toContain("Prefer those exact paths in inputFiles");
   });
+
+  it("routes clearly causal questions away from chat conclusions", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("do not present a causal conclusion in chat");
+    expect(prompt).toContain("dedicated causal workspace");
+  });
 });

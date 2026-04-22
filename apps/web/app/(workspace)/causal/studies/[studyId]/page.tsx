@@ -1,6 +1,7 @@
 import { CausalStudyPageClient } from "@/components/causal-study-page-client";
 import { requirePageUser } from "@/lib/auth-state";
 import { listCausalAnswersForStudy } from "@/lib/causal-answers";
+import { getComparisonStateForStudy } from "@/lib/causal-comparisons";
 import { getCausalDagWorkspaceDetail } from "@/lib/causal-dags";
 import { listCausalRunsForStudy } from "@/lib/causal-runs";
 import { getCausalStudyById, getStudyQuestionSummary } from "@/lib/causal-studies";
@@ -42,7 +43,7 @@ export default async function CausalStudyPage({
     );
   }
 
-  const [currentQuestion, datasetBinding, initialDagWorkspace, initialRuns, initialAnswers] = await Promise.all([
+  const [currentQuestion, datasetBinding, initialDagWorkspace, initialRuns, initialAnswers, initialComparisonState] = await Promise.all([
     getStudyQuestionSummary({
       organizationId: user.organizationId,
       studyId,
@@ -63,6 +64,11 @@ export default async function CausalStudyPage({
       organizationId: user.organizationId,
       studyId,
     }),
+    getComparisonStateForStudy({
+      organizationId: user.organizationId,
+      studyId,
+      userId: user.id,
+    }),
   ]);
 
   return (
@@ -72,6 +78,7 @@ export default async function CausalStudyPage({
         baseRunId: getSingleQueryParam(resolvedSearchParams.baseRunId),
         targetRunId: getSingleQueryParam(resolvedSearchParams.targetRunId),
       }}
+      initialComparisonState={initialComparisonState}
       initialCurrentQuestion={currentQuestion}
       initialDagWorkspace={initialDagWorkspace}
       initialDatasetBinding={datasetBinding}

@@ -18,6 +18,7 @@ export function buildChatSystemPrompt(role: UserRole) {
     "Use brave_search for public web lookups, documentation checks, or current external context that is not inside company_data.",
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
+    "If a request is clearly causal, counterfactual, or about the effect of an intervention, do not present a causal conclusion in chat. Direct the user to the dedicated causal workspace instead.",
     "For routine technical sandbox failures (CSV encoding, delimiter, line endings, schema parsing, dtype casting), do not ask the user for permission to continue. Instead, adjust the code and retry run_data_analysis automatically.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",

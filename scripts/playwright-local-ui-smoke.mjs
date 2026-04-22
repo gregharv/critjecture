@@ -508,16 +508,16 @@ try {
   startedServer = await ensureServerAvailability();
   await loginIfNeeded(page);
 
-  await expectUrlPath(page, "/causal").catch(async () => {
-    await page.goto(buildUrl("/causal"), { waitUntil: "domcontentloaded" });
-    await expectUrlPath(page, "/causal");
+  await expectUrlPath(page, "/chat").catch(async () => {
+    await page.goto(buildUrl("/chat"), { waitUntil: "domcontentloaded" });
+    await expectUrlPath(page, "/chat");
   });
 
-  await verifyCausalPage(page);
+  await verifyChatPage(page);
   await toggleAppearance(page);
 
-  if (await navigateViaShell(page, "Chat", "/chat")) {
-    await verifyChatPage(page);
+  if (await navigateViaShell(page, "Causal", "/causal")) {
+    await verifyCausalPage(page);
   }
 
   if (await navigateViaShell(page, "Knowledge", "/knowledge")) {
@@ -540,7 +540,9 @@ try {
     await verifySettingsPage(page);
   }
 
-  await verifyPredictivePage(page);
+  if (!(await navigateViaShell(page, "Predictive", "/predictive"))) {
+    await verifyPredictivePage(page);
+  }
   await maybeSignOut(page);
 
   logStep("Smoke test completed successfully.");

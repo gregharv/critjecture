@@ -86,7 +86,7 @@ export async function requireOwnerPageUser() {
   const user = await requirePageUser();
 
   if (user.role !== "owner") {
-    redirect("/causal");
+    redirect("/chat");
   }
 
   return user;
@@ -96,7 +96,7 @@ export async function requirePageUserCapability(capability: AccessCapability) {
   const user = await requirePageUser();
 
   if (!hasAccessCapability(user.access, capability)) {
-    redirect("/causal");
+    redirect("/chat");
   }
 
   return user;

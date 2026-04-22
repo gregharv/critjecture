@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth-state";
 import { listCausalAnswersForStudy } from "@/lib/causal-answers";
+import { getComparisonStateForStudy } from "@/lib/causal-comparisons";
 import { getCausalDagWorkspaceDetail } from "@/lib/causal-dags";
 import { listCausalRunsForStudy } from "@/lib/causal-runs";
 import { getCausalStudyById, getStudyQuestionSummary, updateCausalStudy } from "@/lib/causal-studies";
@@ -33,7 +34,7 @@ export async function GET(
     return jsonError("Causal study not found.", 404);
   }
 
-  const [currentQuestion, datasetBinding, dagWorkspace, runs, answers] = await Promise.all([
+  const [currentQuestion, datasetBinding, dagWorkspace, runs, answers, comparisonState] = await Promise.all([
     getStudyQuestionSummary({
       organizationId: user.organizationId,
       studyId,
@@ -54,10 +55,16 @@ export async function GET(
       organizationId: user.organizationId,
       studyId,
     }),
+    getComparisonStateForStudy({
+      organizationId: user.organizationId,
+      studyId,
+      userId: user.id,
+    }),
   ]);
 
   return NextResponse.json({
     answers,
+    comparisonState,
     currentQuestion,
     dagWorkspace,
     datasetBinding,

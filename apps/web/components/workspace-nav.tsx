@@ -27,19 +27,21 @@ export function WorkspaceNav({
   const activePage =
     pathname.startsWith("/chat")
       ? "chat"
-      : pathname.startsWith("/causal")
-        ? "causal"
-        : pathname.startsWith("/knowledge")
-          ? "knowledge"
-          : pathname.startsWith("/workflows")
-            ? "workflows"
-            : pathname.startsWith("/admin/logs")
-              ? "logs"
-              : pathname.startsWith("/admin/operations")
-                ? "operations"
-                : pathname.startsWith("/admin/settings")
-                  ? "settings"
-                  : "chat";
+      : pathname.startsWith("/predictive")
+        ? "predictive"
+        : pathname.startsWith("/causal")
+          ? "causal"
+          : pathname.startsWith("/knowledge")
+            ? "knowledge"
+            : pathname.startsWith("/workflows")
+              ? "workflows"
+              : pathname.startsWith("/admin/logs")
+                ? "logs"
+                : pathname.startsWith("/admin/operations")
+                  ? "operations"
+                  : pathname.startsWith("/admin/settings")
+                    ? "settings"
+                    : "chat";
 
   const returnTo = pathname;
   const closeMenu = useCallback(() => {
@@ -81,6 +83,13 @@ export function WorkspaceNav({
               onClick={closeMenu}
             >
               Chat
+            </Link>
+            <Link
+              className={`shell-nav__link ${activePage === "predictive" ? "is-active" : ""}`}
+              href="/predictive"
+              onClick={closeMenu}
+            >
+              Predictive
             </Link>
             <Link
               className={`shell-nav__link ${activePage === "causal" ? "is-active" : ""}`}

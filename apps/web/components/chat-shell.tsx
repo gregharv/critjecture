@@ -65,6 +65,7 @@ import {
   replaceFileMention,
 } from "@/lib/chat-file-mentions";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
+import type { CausalIntakeResponse } from "@/lib/causal-intent-types";
 import type {
   GetKnowledgeFilePreviewResponse,
   KnowledgeFilePreview,
@@ -1857,12 +1858,85 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           };
         };
 
+        const appendAssistantTextMessage = (text: string) => {
+          if (!agent || !text.trim()) {
+            return;
+          }
+
+          agent.appendMessage({
+            role: "assistant",
+            content: [{ type: "text", text: text.trim() }],
+          } as AgentMessage);
+          scheduleConversationSave(true);
+        };
+
+        const routePromptIfNeeded = async (
+          input: string | AgentMessage | AgentMessage[],
+          synthetic: boolean,
+        ) => {
+          if (synthetic) {
+            return true;
+          }
+
+          const userPromptText = extractPromptText(input);
+
+          if (!userPromptText) {
+            return true;
+          }
+
+          try {
+            const response = await fetch("/api/causal/intake", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ message: userPromptText }),
+            });
+            const data = (await response.json()) as CausalIntakeResponse | { error: string } | null;
+
+            if (!response.ok || typeof data !== "object" || data === null || !("decision" in data)) {
+              return true;
+            }
+
+            if (data.decision === "open_causal_study") {
+              window.location.assign(`/causal/studies/${data.studyId}`);
+              return false;
+            }
+
+            if (data.decision === "open_predictive_analysis") {
+              window.location.assign(data.nextPath);
+              return false;
+            }
+
+            if (data.decision === "ask_clarification") {
+              appendAssistantTextMessage(data.question);
+              return false;
+            }
+
+            if (data.decision === "blocked") {
+              appendAssistantTextMessage(data.message);
+              return false;
+            }
+
+            return true;
+          } catch (caughtError) {
+            console.error("Intent routing failed; continuing in chat.", caughtError);
+            return true;
+          }
+        };
+
         const runPromptWithAudit = async (
           originalPrompt: Agent["prompt"],
           input: string | AgentMessage | AgentMessage[],
           synthetic: boolean,
           images?: unknown[],
         ) => {
+          const shouldContinueInChat = await routePromptIfNeeded(input, synthetic);
+
+          if (!shouldContinueInChat) {
+            return;
+          }
+
           queueChatTurn(input, synthetic);
 
           if (synthetic) {

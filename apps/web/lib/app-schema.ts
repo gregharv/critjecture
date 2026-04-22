@@ -1252,6 +1252,83 @@ export const causalAnswers = sqliteTable(
   ],
 );
 
+export const causalComparisonSnapshots = sqliteTable(
+  "causal_comparison_snapshots",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    baseRunId: text("base_run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    targetRunId: text("target_run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("causal_comparison_snapshots_user_study_name_idx").on(
+      table.userId,
+      table.studyId,
+      table.name,
+    ),
+    index("causal_comparison_snapshots_user_study_updated_at_idx").on(
+      table.userId,
+      table.studyId,
+      table.updatedAt,
+    ),
+    index("causal_comparison_snapshots_base_run_idx").on(table.baseRunId),
+    index("causal_comparison_snapshots_target_run_idx").on(table.targetRunId),
+  ],
+);
+
+export const causalRecentComparisons = sqliteTable(
+  "causal_recent_comparisons",
+  {
+    id: text("id").primaryKey(),
+    studyId: text("study_id")
+      .notNull()
+      .references(() => causalStudies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    baseRunId: text("base_run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    targetRunId: text("target_run_id")
+      .notNull()
+      .references(() => causalRuns.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("causal_recent_comparisons_user_pair_idx").on(
+      table.userId,
+      table.studyId,
+      table.baseRunId,
+      table.targetRunId,
+    ),
+    index("causal_recent_comparisons_user_study_updated_at_idx").on(
+      table.userId,
+      table.studyId,
+      table.updatedAt,
+    ),
+  ],
+);
+
 export const predictiveRuns = sqliteTable(
   "predictive_runs",
   {

@@ -44,7 +44,7 @@ export function CausalStudiesPageClient({
   const hasStudies = studies.length > 0;
   const helperText = useMemo(() => {
     if (!response) {
-      return "Intent routing happens before any dataset analysis. Ask a what-if question to open a causal study, a predictive question to open the predictive path, or a descriptive question to stay observational.";
+      return "Use this workspace when a question needs intervention, counterfactual, or cause-and-effect analysis. Descriptive questions stay in chat, and predictive questions use the predictive workspace.";
     }
 
     if (response.decision === "open_causal_study") {
@@ -127,7 +127,7 @@ export function CausalStudiesPageClient({
   return (
     <section className="causal-page">
       <div className="causal-hero">
-        <p className="causal-hero__eyebrow">Causal-first workspace</p>
+        <p className="causal-hero__eyebrow">Causal workspace</p>
         <h1 className="causal-hero__title">Causal studies</h1>
         <p className="causal-hero__copy">{helperText}</p>
       </div>
@@ -136,9 +136,9 @@ export function CausalStudiesPageClient({
         <section className="causal-card">
           <h2 className="causal-card__title">Start with intake</h2>
           <p className="causal-card__copy">
-            Intake classifies intent before any dataset analysis. Causal questions open a study;
-            descriptive and diagnostic questions stay on an observational path; predictive questions
-            route to a separate predictive path.
+            Intake classifies intent before any dataset analysis. Use it here when the request is
+            explicitly causal. Descriptive work stays in chat, and predictive work belongs in the
+            predictive workspace.
           </p>
           <form className="causal-intake-form" onSubmit={handleSubmit}>
             <label className="causal-intake-form__label" htmlFor="causal-intake-message">

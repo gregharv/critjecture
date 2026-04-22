@@ -620,6 +620,36 @@ CREATE TABLE IF NOT EXISTS causal_answers (
 CREATE INDEX IF NOT EXISTS causal_answers_run_idx ON causal_answers(run_id);
 CREATE INDEX IF NOT EXISTS causal_answers_study_created_at_idx ON causal_answers(study_id, created_at);
 
+CREATE TABLE IF NOT EXISTS causal_comparison_snapshots (
+  id TEXT PRIMARY KEY NOT NULL,
+  study_id TEXT NOT NULL REFERENCES causal_studies(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  base_run_id TEXT NOT NULL REFERENCES causal_runs(id) ON DELETE CASCADE,
+  target_run_id TEXT NOT NULL REFERENCES causal_runs(id) ON DELETE CASCADE,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS causal_comparison_snapshots_user_study_name_idx ON causal_comparison_snapshots(user_id, study_id, name);
+CREATE INDEX IF NOT EXISTS causal_comparison_snapshots_user_study_updated_at_idx ON causal_comparison_snapshots(user_id, study_id, updated_at);
+CREATE INDEX IF NOT EXISTS causal_comparison_snapshots_base_run_idx ON causal_comparison_snapshots(base_run_id);
+CREATE INDEX IF NOT EXISTS causal_comparison_snapshots_target_run_idx ON causal_comparison_snapshots(target_run_id);
+
+CREATE TABLE IF NOT EXISTS causal_recent_comparisons (
+  id TEXT PRIMARY KEY NOT NULL,
+  study_id TEXT NOT NULL REFERENCES causal_studies(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  base_run_id TEXT NOT NULL REFERENCES causal_runs(id) ON DELETE CASCADE,
+  target_run_id TEXT NOT NULL REFERENCES causal_runs(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS causal_recent_comparisons_user_pair_idx ON causal_recent_comparisons(user_id, study_id, base_run_id, target_run_id);
+CREATE INDEX IF NOT EXISTS causal_recent_comparisons_user_study_updated_at_idx ON causal_recent_comparisons(user_id, study_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS predictive_runs (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
