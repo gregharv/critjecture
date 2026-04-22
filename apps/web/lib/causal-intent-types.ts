@@ -1,5 +1,5 @@
-export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v2";
-export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-heuristic-v2";
+export const CAUSAL_INTENT_MODEL_NAME = "heuristic-causal-intent-router-v3";
+export const CAUSAL_INTENT_PROMPT_VERSION = "causal-intent-flowchart-v3";
 export const DESCRIPTIVE_FALLBACK_PATH = "/chat";
 export const PREDICTIVE_FALLBACK_PATH = "/predictive";
 

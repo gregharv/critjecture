@@ -112,7 +112,33 @@ describe("causal intake", () => {
       expect(user).not.toBeNull();
 
       const response = await runCausalIntake({
-        message: "What predicts conversion?",
+        message: "Forecast next month's sales",
+        user: user!,
+      });
+
+      expect(response).toMatchObject({
+        decision: "open_predictive_analysis",
+        nextPath: "/predictive",
+      });
+
+      const db = await getAppDatabase();
+      const studies = await db.select().from(causalStudies);
+
+      expect(studies).toHaveLength(0);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+
+  it("routes associational requests to the predictive workspace and does not create a causal study", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      const user = await getAuthenticatedUserByEmail("owner@example.com");
+      expect(user).not.toBeNull();
+
+      const response = await runCausalIntake({
+        message: "What is correlated with churn?",
         user: user!,
       });
 
@@ -138,7 +164,7 @@ describe("causal intake", () => {
       expect(user).not.toBeNull();
 
       const response = await runCausalIntake({
-        message: "Why did conversion drop last week?",
+        message: "Why did churn spike in March?",
         user: user!,
       });
 
@@ -203,7 +229,7 @@ describe("causal intake", () => {
     }
   });
 
-  it("asks for clarification when intent is ambiguous", async () => {
+  it("starts ambiguous observational requests on the descriptive path instead of prompting", async () => {
     const environment = await createTestAppEnvironment();
 
     try {
@@ -216,7 +242,8 @@ describe("causal intake", () => {
       });
 
       expect(response).toMatchObject({
-        decision: "ask_clarification",
+        decision: "continue_descriptive",
+        nextPath: "/chat",
       });
     } finally {
       await environment.cleanup();

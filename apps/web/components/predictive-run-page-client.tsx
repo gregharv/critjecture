@@ -224,7 +224,7 @@ export function PredictiveRunPageClient({ initialRunDetail }: PredictiveRunPageC
             </button>
           </div>
           <p className="causal-card__copy">
-            Final answers are rendered from the stored predictive answer package only. They summarize predictive or associational evidence and do not establish causal effects.
+            Final answers are rendered from the stored predictive answer package only. They summarize instrumental / heuristic predictive evidence and do not establish causal effects.
           </p>
           {error ? <p className="causal-intake-form__error">{error}</p> : null}
 

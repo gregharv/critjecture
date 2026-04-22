@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
 import { predictiveAnswerPackages, predictiveAnswers, predictiveRuns } from "@/lib/app-schema";
+import { PREDICTIVE_USER_CLAIM_LABEL } from "@/lib/predictive-claim-labels";
 
 export const PREDICTIVE_ANSWER_MODEL_NAME = "grounded-predictive-package-template";
 export const PREDICTIVE_ANSWER_PROMPT_VERSION = "predictive_answer_markdown_v1";
@@ -101,7 +102,7 @@ function renderGroundedPredictiveAnswerMarkdown(packageJson: string) {
   const parsed = parsePackageJson(packageJson);
   const datasetName = parsed.dataset?.displayName ?? parsed.dataset?.datasetKey ?? "unknown dataset";
   const runId = parsed.run.runId ?? "unknown run";
-  const claimLabel = parsed.result.claimLabel ?? parsed.run.claimLabel ?? "predictive";
+  const claimLabel = parsed.result.claimLabel ?? parsed.run.claimLabel ?? PREDICTIVE_USER_CLAIM_LABEL;
   const taskKind = parsed.result.taskKind ?? parsed.run.taskKind ?? "unknown task";
   const targetColumn = parsed.result.targetColumnName ?? parsed.run.targetColumnName ?? "unknown target";
   const featureColumns = Array.isArray(parsed.run.featureColumns) ? parsed.run.featureColumns : [];
@@ -157,7 +158,7 @@ function renderGroundedPredictiveAnswerMarkdown(packageJson: string) {
     ...(parsed.nextSteps.length ? parsed.nextSteps.map((step) => `- ${step}`) : ["- Validate the model on additional held-out data before operational use."]),
     "",
     "## Guardrail note",
-    "This answer was rendered from the stored predictive answer package only. It summarizes predictive or associational output and does not establish causal effects.",
+    "This answer was rendered from the stored predictive answer package only. It summarizes instrumental or heuristic predictive output and does not establish causal effects.",
   ].join("\n");
 }
 

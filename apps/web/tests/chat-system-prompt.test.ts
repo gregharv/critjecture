@@ -70,4 +70,19 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("do not present a causal conclusion in chat");
     expect(prompt).toContain("dedicated causal workspace");
   });
+
+  it("starts why-questions with observational decomposition before causal escalation", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("start with descriptive decomposition and observational contributors first");
+    expect(prompt).toContain("Escalate to the causal workspace only when the user explicitly wants a causal or counterfactual conclusion");
+  });
+
+  it("requires explicit claim labels for chat-side descriptive and diagnostic answers", () => {
+    const prompt = buildChatSystemPrompt("owner");
+
+    expect(prompt).toContain("state the claim label explicitly near the top");
+    expect(prompt).toContain("Use DESCRIPTIVE for observational summaries");
+    expect(prompt).toContain("UNTESTED HYPOTHESES for observational diagnostic decomposition");
+  });
 });

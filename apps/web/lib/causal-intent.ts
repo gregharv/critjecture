@@ -26,6 +26,7 @@ const COUNTERFACTUAL_PATTERNS = [
 ];
 
 const EXPLICIT_CAUSAL_PATTERNS = [
+  /\bcausal effect of\b/i,
   /\bimpact of\b/i,
   /\beffect of\b/i,
   /\bdid .* affect\b/i,
@@ -33,11 +34,10 @@ const EXPLICIT_CAUSAL_PATTERNS = [
   /\bdid .* reduce\b/i,
   /\bdid .* decrease\b/i,
   /\bdid .* cause\b/i,
-  /\bwhat caused\b/i,
-  /\bcause of\b/i,
-  /\bcaused by\b/i,
-  /\bdriver of\b/i,
-  /\bdrivers of\b/i,
+  /\bwould .* have been lower without\b/i,
+  /\bwould .* have been higher without\b/i,
+  /\bwould .* have changed without\b/i,
+  /\bbut for\b/i,
   /\bif we\b/i,
   /\bif i\b/i,
 ];
@@ -47,6 +47,11 @@ const DIAGNOSTIC_EXPLANATION_PATTERNS = [
   /\bwhy does\b/i,
   /\bwhy is\b/i,
   /\bwhy are\b/i,
+  /\bwhat caused\b/i,
+  /\broot cause\b/i,
+  /\bdiagnos/i,
+  /\bexplain\b/i,
+  /\bexplanation for\b/i,
 ];
 
 const MEDIATION_PATTERNS = [/\bmediate\b/i, /\bmediator\b/i, /\bmediation\b/i];
@@ -66,6 +71,9 @@ const DESCRIPTIVE_PATTERNS = [
   /\bdistribution\b/i,
   /\bwhich segment\b/i,
   /\bwhich segments\b/i,
+  /\boverview\b/i,
+  /\banaly[sz]e\b/i,
+  /\bunderstand\b/i,
   /\blast month\b/i,
   /\byesterday\b/i,
   /\bthis week\b/i,
@@ -97,6 +105,8 @@ const PREDICTIVE_PATTERNS = [
 export function buildCausalIntentPrompt(message: string) {
   return [
     "Classify the user request before any dataset analysis begins.",
+    "Use this routing flow: descriptive -> continue_descriptive; associational or predictive -> open_predictive_analysis; explanation or diagnostic -> continue_descriptive first; explicit causal or counterfactual -> open_causal_study.",
+    "Reduce clarification prompts. If the request is not explicitly predictive or causal, prefer starting on the descriptive or diagnostic path.",
     "Return strict JSON with: is_causal, intent_type, reason, confidence, question_type, routing_decision.",
     "Allowed intent_type: descriptive, associational, predictive, diagnostic, causal, counterfactual, unclear.",
     "Allowed routing_decision: continue_descriptive, open_predictive_analysis, open_causal_study, ask_clarification, blocked.",
@@ -337,12 +347,12 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
   }
 
   const raw = {
-    confidence: 0.35,
-    intent_type: "unclear",
+    confidence: 0.55,
+    intent_type: "descriptive",
     is_causal: false,
     question_type: questionType,
-    reason: "The request is ambiguous about whether the user wants descriptive reporting or causal analysis.",
-    routing_decision: "ask_clarification",
+    reason: "The request does not explicitly ask for prediction or a counterfactual causal conclusion, so the system should start with descriptive or diagnostic analysis first.",
+    routing_decision: "continue_descriptive",
   } as const;
 
   return {
@@ -360,12 +370,12 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
 
 function buildSafeFallbackClassification(): CausalIntentClassification {
   const raw = {
-    confidence: 0.2,
-    intent_type: "unclear",
+    confidence: 0.4,
+    intent_type: "descriptive",
     is_causal: false,
     question_type: "other",
-    reason: "The intake classifier could not safely determine intent without clarification.",
-    routing_decision: "ask_clarification",
+    reason: "The intake classifier could not detect an explicit predictive or causal request, so it defaults to descriptive analysis first.",
+    routing_decision: "continue_descriptive",
   } as const;
 
   return {

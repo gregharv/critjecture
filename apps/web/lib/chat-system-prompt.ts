@@ -19,6 +19,8 @@ export function buildChatSystemPrompt(role: UserRole) {
     "If the user explicitly asks for grounded web citations, use brave_grounding.",
     "Use ask_user when requirements are ambiguous, a decision must be confirmed, or multiple valid options exist.",
     "If a request is clearly causal, counterfactual, or about the effect of an intervention, do not present a causal conclusion in chat. Direct the user to the dedicated causal workspace instead.",
+    "If the user asks a why, explanation, or diagnostic question, start with descriptive decomposition and observational contributors first. Escalate to the causal workspace only when the user explicitly wants a causal or counterfactual conclusion.",
+    "For chat answers, state the claim label explicitly near the top. Use DESCRIPTIVE for observational summaries, UNTESTED HYPOTHESES for observational diagnostic decomposition, and CORROBORATED ROOT-CAUSE CONJECTURE only if the response actually includes mechanism or pathway analysis that survived attempted falsification in the current turn.",
     "For routine technical sandbox failures (CSV encoding, delimiter, line endings, schema parsing, dtype casting), do not ask the user for permission to continue. Instead, adjust the code and retry run_data_analysis automatically.",
     "Use the run_data_analysis tool whenever the user asks for calculations, Python execution, tabular analysis, or anything that should be computed rather than guessed.",
     "Use the generate_visual_graph tool whenever the user asks for a chart, graph, plot, or other visual. It can either render a stored chart via analysisResultId or run full matplotlib code directly against staged company files.",

@@ -27,133 +27,180 @@ START
 |-- 1. Classify the user's question
 |      |
 |      |-- A. Descriptive
+|      |      Examples:
+|      |      - "What happened?"
+|      |      - "Summarize this dataset"
+|      |      |
 |      |      -> Run descriptive analysis
-|      |      -> Allowed outputs: counts, trends, segment comparisons, charts
-|      |      -> Claim label: DESCRIPTIVE
+|      |      -> Allowed outputs:
+|      |         counts, trends, segment comparisons
+|      |      -> Claim label:
+|      |         DESCRIPTIVE (Observation statement)
 |      |
-|      |-- B. Associational / Predictive
+|      |-- B. Associational / Instrumental Predictive
+|      |      Examples:
+|      |      - "What is correlated with churn?"
+|      |      - "Forecast next month's sales"
+|      |      |
 |      |      -> Run statistical / ML workflow
-|      |      -> Allowed outputs: correlations, regression coefficients,
-|      |         feature importance, forecasts
-|      |      -> Forbidden: causal wording unless explicitly qualified
-|      |      -> Claim label: ASSOCIATIONAL or PREDICTIVE
+|      |      -> Allowed outputs:
+|      |         correlations, predictive weights, forecasts
+|      |      -> Forbidden:
+|      |         causal wording; treating associations as universal laws
+|      |      -> Claim label:
+|      |         INSTRUMENTAL / HEURISTIC PREDICTION
 |      |
 |      |-- C. Explanation / Diagnostic
+|      |      Examples:
+|      |      - "Why did churn spike in March?"
+|      |      |
 |      |      -> Go to 2
 |      |
-|      |-- D. Explicit Causal / Intervention
+|      |-- D. Explicit Causal Conjecture
+|             Examples:
+|             - "Did campaign A cause the increase in sales?"
+|             - "Would churn have been lower without that change?"
+|             |
 |             -> Go to 5
 |
 |-- 2. For explanation/diagnostic questions:
-|      "Can this be answered descriptively first?"
+|      "Can this be answered purely descriptively first?"
 |      |
 |      |-- Yes
-|      |     -> Decompose the change
-|      |     -> Output: observed contributors or candidate drivers
-|      |     -> Claim label: DIAGNOSTIC
+|      |     -> Decompose the change to generate hypotheses:
+|      |        - what changed over time?
+|      |        - which segments contributed most?
+|      |
+|      |     -> Output:
+|      |        "candidate conjectures"
+|      |     -> Claim label:
+|      |        UNTESTED HYPOTHESES
 |      |     -> Then go to 3
 |      |
 |      |-- No
 |            -> Go to 3
 |
-|-- 3. Is this a root-cause / mechanism problem?
+|-- 3. Is this a mechanism search?
 |      |
 |      |-- Yes
+|      |     |
 |      |     -> Build dependency/path analysis
-|      |     -> Output: likely root causes, affected path, confidence
-|      |     -> Claim label: ROOT-CAUSE HYPOTHESIS
+|      |     -> Attempt to falsify competing pathways
+|      |     -> Output:
+|      |        surviving (un-falsified) pathways, severity of tests passed
+|      |     -> Claim label:
+|      |        CORROBORATED ROOT-CAUSE CONJECTURE
 |      |     -> Then go to 4
 |      |
 |      |-- No
 |            -> Go to 4
 |
-|-- 4. Does the user appear to want a counterfactual answer?
+|-- 4. Does the user seek a causal/counterfactual conclusion?
 |      |
 |      |-- No
 |      |     -> Stop here
-|      |     -> Return observational explanations only
-|      |     -> Include disclaimer that causation is not yet proven
+|      |     -> Return:
+|      |        un-falsified descriptive contributors
+|      |     -> Include disclaimer:
+|      |        "These represent observational regularities, but are
+|      |         not severely tested causal claims."
 |      |
 |      |-- Yes
-|            -> Reframe into explicit causal question
+|            -> Reframe into explicit causal conjecture
 |            -> Go to 5
 |
-|-- 5. Can the system define a causal setup?
+|-- 5. Can the system define a testable causal setup?
 |      |
 |      |-- Required:
-|      |     - treatment clearly defined
+|      |     - treatment clearly defined and logically isolatable
 |      |     - outcome clearly defined
 |      |     - unit of analysis clear
-|      |     - time horizon clear
 |      |
 |      |-- No
-|      |     -> Do not run causal inference
-|      |     -> Claim label: CAUSAL QUESTION NOT YET SPECIFIED
+|      |     -> Block causal testing
+|      |     -> Claim label:
+|      |        UNFALSIFIABLE CONJECTURE
 |      |
 |      |-- Yes
 |            -> Go to 6
 |
-|-- 6. Does treatment occur before outcome?
+|-- 6. Does treatment logically precede outcome?
 |      |
 |      |-- No / unknown
 |      |     -> Block causal claim
-|      |     -> Return temporal-order failure
+|      |     -> Return:
+|      |        "Hypothesis falsified/rejected a priori: temporal order
+|      |         violates causal logic."
 |      |
 |      |-- Yes
 |            -> Go to 7
 |
-|-- 7. Is the data suitable for observational causal inference?
+|-- 7. Is the data capable of providing a severe test?
 |      |
 |      |-- No
-|      |     -> Do not estimate causal effect
-|      |     -> Recommend better data / experiment / quasi-experiment
-|      |     -> Claim label: CAUSAL INFERENCE NOT SUPPORTED
+|      |     Examples:
+|      |     - severe selection bias
+|      |     - post-treatment controls only
+|      |     |
+|      |     -> Do not estimate effect
+|      |     -> Claim label:
+|      |        SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA
 |      |
 |      |-- Yes
 |            -> Go to 8
 |
-|-- 8. Can assumptions be written as a defensible causal graph?
+|-- 8. Can assumptions be formalized as a strictly falsifiable graph?
 |      |
 |      |-- No
-|      |     -> Do not produce causal estimate
+|      |     -> Return:
+|      |        "A causal test requires formal structural assumptions
+|      |         that expose the hypothesis to refutation."
 |      |
 |      |-- Yes
 |            -> Go to 9
 |
-|-- 9. Is there an identification strategy?
+|-- 9. Is there a strategy to isolate the hypothesis for testing?
 |      |
-|      |-- Backdoor adjustment
-|      |     -> run causal estimation with confounder adjustment
-|      |
-|      |-- Instrumental variables
-|      |     -> run IV path
-|      |
-|      |-- Diff-in-diff / panel / RDD / frontdoor / natural experiment
-|      |     -> run design-specific workflow
+|      |-- Backdoor / IV / Diff-in-diff / RDD
+|      |     -> run estimation strategy to isolate the theoretical effect
 |      |
 |      |-- None
-|      |     -> Stop with non-identifiable result
+|            -> Stop
+|            -> Return:
+|               "The conjecture is causal, but the effect cannot be
+|                isolated for a severe test using current data."
 |
-|-- 10. Run robustness checks
+|-- 10. Subject to Severe Testing (Falsification Attempts)
 |       |
-|       |-- placebo treatment test
-|       |-- random common cause test
-|       |-- subset stability
-|       |-- sensitivity to hidden confounding
-|       |-- negative controls if available
+|       |-- placebo treatment test (attempt to find effect where none exists)
+|       |-- negative controls (attempt to break the isolation strategy)
+|       |-- sensitivity to hidden confounding (stress-test assumptions)
 |       |
 |       -> Go to 11
 |
-|-- 11. Compose final answer
+|-- 11. Compose final epistemic verdict
 |        |
-|        |-- If stable and credible
-|        |     -> Claim label: CAUSAL ESTIMATE
+|        |-- If it survives all severe tests
+|        |     -> Claim label:
+|        |        CORROBORATED CAUSAL CONJECTURE
+|        |     -> Say:
+|        |        "The conjecture that X causes Y was subjected to severe
+|        |         testing and remains unfalsified."
 |        |
-|        |-- If somewhat fragile
-|        |     -> Claim label: TENTATIVE CAUSAL ESTIMATE
+|        |-- If it fails some stress tests
+|        |     -> Claim label:
+|        |        WEAKLY CORROBORATED
+|        |     -> Say:
+|        |        "The causal conjecture survived baseline tests but was
+|        |         partially falsified under stricter assumptions. It
+|        |         requires theoretical reformulation."
 |        |
-|        |-- If robustness fails
-|              -> Claim label: NO DEFENSIBLE CAUSAL CONCLUSION
+|        |-- If placebo/negative control tests fail
+|              -> Claim label:
+|                 FALSIFIED CAUSAL CONJECTURE
+|              -> Say:
+|                 "The data decisively falsifies the causal claim. The
+|                  observed effect is driven by confounding or noise."
 ```
 
 ---
@@ -196,12 +243,12 @@ Use this routing contract in the next implementation pass:
 - `descriptive` -> `continue_descriptive`
 - `associational` -> `open_predictive_analysis`
 - `predictive` -> `open_predictive_analysis`
-- `diagnostic` -> `continue_descriptive` initially, using the diagnostic protocol in steps 2-4 and escalating to `open_causal_study` only when a counterfactual answer is requested or required
+- `diagnostic` -> `continue_descriptive` initially, using the diagnostic protocol in steps 2-4 and escalating to `open_causal_study` only when a causal or counterfactual conclusion is explicitly requested
 - `causal` -> `open_causal_study`
 - `counterfactual` -> `open_causal_study`
-- `unclear` -> `ask_clarification`
+- `unclear` -> default to `continue_descriptive` unless the request is too underspecified to support even observational analysis
 
-This preserves a separate predictive route, while allowing diagnostic work to start observationally and escalate into causal mode only when warranted.
+This preserves a separate predictive route, allows diagnostic work to start observationally, and reduces unnecessary prompting about question type.
 
 ---
 
@@ -212,15 +259,14 @@ All user-visible answers must carry a claim label aligned to the executed branch
 ### Allowed claim labels
 
 - `DESCRIPTIVE`
-- `ASSOCIATIONAL`
-- `PREDICTIVE`
-- `DIAGNOSTIC`
-- `ROOT-CAUSE HYPOTHESIS`
-- `CAUSAL QUESTION NOT YET SPECIFIED`
-- `CAUSAL INFERENCE NOT SUPPORTED`
-- `CAUSAL ESTIMATE`
-- `TENTATIVE CAUSAL ESTIMATE`
-- `NO DEFENSIBLE CAUSAL CONCLUSION`
+- `INSTRUMENTAL / HEURISTIC PREDICTION`
+- `UNTESTED HYPOTHESES`
+- `CORROBORATED ROOT-CAUSE CONJECTURE`
+- `UNFALSIFIABLE CONJECTURE`
+- `SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA`
+- `CORROBORATED CAUSAL CONJECTURE`
+- `WEAKLY CORROBORATED`
+- `FALSIFIED CAUSAL CONJECTURE`
 
 ### Guardrail rule
 
@@ -228,8 +274,8 @@ No branch may emit a stronger claim label than the workflow supports.
 
 Examples:
 - predictive output must not be labeled causal
-- diagnostic decomposition must not be labeled causal
-- non-identifiable runs must not be labeled causal estimate
+- diagnostic decomposition must not be labeled a corroborated causal conjecture
+- non-identifiable runs must not be labeled a corroborated causal conjecture
 
 ---
 
@@ -261,7 +307,7 @@ First implementation target:
 - `CatBoostClassifier` for classification
 - `CatBoostRegressor` for regression and direct prediction tasks
 
-Forecasting may initially be implemented as a supervised tabular problem using lagged features and forecast horizons, provided the output is labeled `PREDICTIVE` and not causal.
+Forecasting may initially be implemented as a supervised tabular problem using lagged features and forecast horizons, provided the output is labeled `INSTRUMENTAL / HEURISTIC PREDICTION` and not causal.
 
 ### Allowed outputs
 
@@ -307,9 +353,9 @@ If the problem is mechanistic or dependency-driven, the system should produce:
 
 ### Stop condition
 
-If the user does not appear to want a counterfactual answer, stop at the observational or root-cause-hypothesis stage and include this disclaimer:
+If the user does not appear to want a counterfactual answer, stop at the observational or root-cause-conjecture stage and include this disclaimer:
 
-> These explain the pattern observationally, but do not yet prove causation.
+> These represent observational regularities, but are not severely tested causal claims.
 
 ### Escalation condition
 
@@ -328,7 +374,7 @@ Do not run causal estimation until all of the following are explicit:
 - unit of analysis
 - time horizon / analysis window
 
-If any are missing, return `CAUSAL QUESTION NOT YET SPECIFIED`.
+If any are missing, return `UNFALSIFIABLE CONJECTURE`.
 
 ### Temporal-order rule
 
@@ -345,7 +391,7 @@ Block or downgrade causal inference when any of these conditions hold:
 - treatment is nearly deterministic
 - overlap / positivity is implausible
 
-In those cases return `CAUSAL INFERENCE NOT SUPPORTED` and recommend better data, an experiment, or a quasi-experimental design.
+In those cases return `SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA` and recommend better data, an experiment, or a quasi-experimental design.
 
 ### Graph requirement
 
@@ -399,9 +445,9 @@ Run, where available and defensible:
 
 ### Final causal conclusion rule
 
-- pass / stable -> `CAUSAL ESTIMATE`
-- mixed / fragile -> `TENTATIVE CAUSAL ESTIMATE`
-- failed robustness -> `NO DEFENSIBLE CAUSAL CONCLUSION`
+- pass / stable -> `CORROBORATED CAUSAL CONJECTURE`
+- mixed / fragile -> `WEAKLY CORROBORATED`
+- failed robustness -> `FALSIFIED CAUSAL CONJECTURE`
 
 The final answer must explicitly connect its label to the robustness results and stated assumptions.
 
@@ -413,12 +459,11 @@ The current codebase does **not** yet fully match this spec.
 
 Notable gaps to close in the implementation pass:
 
-- add `associational` and `predictive` as first-class intent types
-- add `open_predictive_analysis` as a first-class routing decision
-- change diagnostic "why" routing from immediate causal opening to staged observational diagnosis with optional causal escalation
+- reduce question-type prompting further so unclear requests default to observational analysis unless a predictive or causal ask is explicit
+- ensure diagnostic "why" routing remains staged observational diagnosis with optional causal escalation
 - install and capability-check CatBoost and EconML in the Python runtime(s)
 - update causal estimation from linear regression / propensity weighting default paths to DoWhy + EconML DML for the default backdoor path
-- add explicit temporal-order and data-suitability gates before causal estimation
+- add explicit temporal-order and severe-test feasibility gates before causal estimation
 - add sensitivity-to-hidden-confounding and negative-control hooks where supported
 - update tests, docs, and answer labels to match this decision tree exactly
 

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { deriveCausalEpistemicVerdict } from "@/lib/causal-claim-labels";
+
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -103,6 +105,10 @@ type ParsedAnswerPackage = {
     pValue?: number | null;
     stdError?: number | null;
   }>;
+  epistemicVerdict: null | {
+    claimLabel?: string;
+    summaryText?: string;
+  };
   estimands: Array<{
     estimandExpression?: string;
     estimandKind?: string;
@@ -182,6 +188,7 @@ function parseAnswerPackage(packageJson: string | null | undefined): ParsedAnswe
       assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
       approval: parsed.approval ?? null,
       estimates: Array.isArray(parsed.estimates) ? parsed.estimates : [],
+      epistemicVerdict: parsed.epistemicVerdict ?? null,
       estimands: Array.isArray(parsed.estimands) ? parsed.estimands : [],
       identification: parsed.identification ?? null,
       limitations: Array.isArray(parsed.limitations) ? parsed.limitations : [],
@@ -211,7 +218,12 @@ function parseStringArray(value: string | null | undefined) {
 function getStatusTone(status: string) {
   const normalized = status.toLowerCase();
 
-  if (normalized.includes("failed") || normalized.includes("blocked") || normalized.includes("error")) {
+  if (
+    normalized.includes("failed") ||
+    normalized.includes("falsified") ||
+    normalized.includes("blocked") ||
+    normalized.includes("error")
+  ) {
     return {
       background: "#fef2f2",
       border: "1px solid rgba(220, 38, 38, 0.18)",
@@ -219,7 +231,20 @@ function getStatusTone(status: string) {
     };
   }
 
-  if (normalized.includes("completed") || normalized.includes("succeeded") || normalized.includes("accepted")) {
+  if (normalized.includes("weakly")) {
+    return {
+      background: "#fffbeb",
+      border: "1px solid rgba(217, 119, 6, 0.18)",
+      color: "#b45309",
+    };
+  }
+
+  if (
+    normalized.includes("completed") ||
+    normalized.includes("succeeded") ||
+    normalized.includes("accepted") ||
+    normalized.includes("corroborated")
+  ) {
     return {
       background: "#f0fdf4",
       border: "1px solid rgba(22, 163, 74, 0.18)",
@@ -292,6 +317,17 @@ export function CausalRunPageClient({
     (identified === true ? "identified" : identified === false ? "not identified" : "not recorded");
   const packagePrimaryEstimate = parsedPackage?.estimates[0] ?? null;
   const packagePrimaryEstimand = parsedPackage?.estimands[0] ?? null;
+  const derivedEpistemicVerdict = deriveCausalEpistemicVerdict({
+    blockingReasons: identificationBlockingReasons,
+    identified,
+    outcomeNodeKey: runDetail.run.outcomeNodeKey,
+    refutationStatuses: runDetail.refutations.map((refutation) => refutation.status),
+    treatmentNodeKey: runDetail.run.treatmentNodeKey,
+  });
+  const epistemicVerdict = {
+    claimLabel: parsedPackage?.epistemicVerdict?.claimLabel ?? derivedEpistemicVerdict.claimLabel,
+    summaryText: parsedPackage?.epistemicVerdict?.summaryText ?? derivedEpistemicVerdict.summaryText,
+  };
   const summaryEstimateValue =
     typeof packagePrimaryEstimate?.estimateValue === "number"
       ? packagePrimaryEstimate.estimateValue
@@ -387,6 +423,11 @@ export function CausalRunPageClient({
             value: formatLabel(identificationStatusLabel),
           },
           {
+            label: "Epistemic verdict",
+            tone: getStatusTone(epistemicVerdict.claimLabel),
+            value: epistemicVerdict.claimLabel,
+          },
+          {
             label: "Primary estimate",
             tone: getStatusTone(primaryEstimate?.estimateValue == null ? "pending" : "completed"),
             value: formatNumber(primaryEstimate?.estimateValue ?? null),
@@ -461,7 +502,7 @@ export function CausalRunPageClient({
                   <p className="causal-card__meta">Topline claim</p>
                   <div
                     style={{
-                      ...getStatusTone(identificationStatusLabel),
+                      ...getStatusTone(epistemicVerdict.claimLabel),
                       borderRadius: 12,
                       display: "inline-flex",
                       fontSize: 13,
@@ -470,9 +511,12 @@ export function CausalRunPageClient({
                       padding: "6px 10px",
                     }}
                   >
-                    {formatLabel(identificationStatusLabel)}
+                    {epistemicVerdict.claimLabel}
                   </div>
                   <p className="causal-card__copy" style={{ marginTop: 12 }}>
+                    {epistemicVerdict.summaryText}
+                  </p>
+                  <p className="causal-card__meta" style={{ marginTop: 12 }}>
                     {identified === false
                       ? `The stored package does not support identification of ${runDetail.run.treatmentNodeKey} → ${runDetail.run.outcomeNodeKey}.`
                       : describeEstimateDirection(summaryEstimateValue)}
@@ -586,6 +630,8 @@ export function CausalRunPageClient({
           <h2 className="causal-card__title">Run grounding and status</h2>
           <ul className="causal-list">
             <li>Run status: {runDetail.run.status}</li>
+            <li>Epistemic verdict: {epistemicVerdict.claimLabel}</li>
+            <li>Verdict summary: {epistemicVerdict.summaryText}</li>
             <li>Primary dataset version: {runDetail.run.primaryDatasetVersionId}</li>
             <li>DAG version: {runDetail.run.dagVersionId}</li>
             <li>Treatment: {runDetail.run.treatmentNodeKey}</li>

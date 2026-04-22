@@ -214,7 +214,7 @@ describe("predictive grounded answers", () => {
         .where(eq(predictiveAnswerPackages.runId, run.id));
 
       expect(packageRows).toHaveLength(1);
-      expect(packageRows[0]?.packageJson).toContain("ASSOCIATIONAL");
+      expect(packageRows[0]?.packageJson).toContain("INSTRUMENTAL / HEURISTIC PREDICTION");
 
       const answer = await createGroundedPredictiveAnswer({
         organizationId: user!.organizationId,

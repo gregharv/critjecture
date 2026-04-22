@@ -22,7 +22,7 @@ describe("POST /api/predictive/run", () => {
     vi.clearAllMocks();
     mocks.getSessionUser.mockResolvedValue(createSessionUser());
     mocks.executePredictiveRun.mockResolvedValue({
-      claimLabel: "ASSOCIATIONAL",
+      claimLabel: "INSTRUMENTAL / HEURISTIC PREDICTION",
       datasetVersionId: "dataset-version-1",
       featureColumns: ["discount_rate", "seasonality"],
       featureImportance: {
@@ -37,7 +37,7 @@ describe("POST /api/predictive/run", () => {
       modelName: "catboost_classifier",
       preset: "standard",
       rowCount: 120,
-      summary: "ASSOCIATIONAL result from catboost_classifier with roc_auc=0.8100.",
+      summary: "INSTRUMENTAL / HEURISTIC PREDICTION result from catboost_classifier with roc_auc=0.8100.",
       targetColumn: "conversion_rate",
       taskKind: "classification",
     });
@@ -142,7 +142,7 @@ describe("POST /api/predictive/run", () => {
 
     expect(response.status).toBe(200);
     await expect(readJson<{ claimLabel: string; modelName: string }>(response)).resolves.toMatchObject({
-      claimLabel: "ASSOCIATIONAL",
+      claimLabel: "INSTRUMENTAL / HEURISTIC PREDICTION",
       modelName: "catboost_classifier",
     });
     expect(mocks.executePredictiveRun).toHaveBeenCalledWith({

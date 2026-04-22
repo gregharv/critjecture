@@ -11,6 +11,14 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { resolveOrganizationStorageRoot, resolveRepositoryRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/app-db";
 import { completeComputeRun, createComputeRun, failComputeRun, markComputeRunRunning } from "@/lib/compute-runs";
+import {
+  buildPredictiveClaimSummary,
+  PREDICTIVE_USER_CLAIM_LABEL,
+  toPredictiveStoredClaimLabel,
+  toPredictiveUserClaimLabel,
+  type PredictiveStoredClaimLabel,
+  type PredictiveUserClaimLabel,
+} from "@/lib/predictive-claim-labels";
 import { buildAndStorePredictiveAnswerPackage } from "@/lib/predictive-result-package";
 import {
   datasetVersionColumns,
@@ -27,11 +35,11 @@ import { listDatasetCatalogForOrganization } from "@/lib/study-dataset-bindings"
 
 const execFileAsync = promisify(execFile);
 
-export const PREDICTIVE_CLAIM_LABELS = ["ASSOCIATIONAL", "PREDICTIVE"] as const;
+export const PREDICTIVE_CLAIM_LABELS = [PREDICTIVE_USER_CLAIM_LABEL] as const;
 export const PREDICTIVE_TASK_KINDS = ["classification", "regression"] as const;
 export const PREDICTIVE_ANALYSIS_PRESETS = ["standard", "forecast"] as const;
 
-export type PredictiveClaimLabel = (typeof PREDICTIVE_CLAIM_LABELS)[number];
+export type PredictiveClaimLabel = PredictiveUserClaimLabel;
 export type PredictiveTaskKind = (typeof PREDICTIVE_TASK_KINDS)[number];
 export type PredictiveAnalysisPreset = (typeof PREDICTIVE_ANALYSIS_PRESETS)[number];
 export type PredictiveForecastConfig = {
@@ -424,12 +432,7 @@ export async function listPredictiveRunsForOrganization(input: {
     const result = resultByRunId.get(run.id);
     const metadata = parsePredictiveRunMetadata(run.metadataJson);
     return {
-      claimLabel:
-        run.claimLabel === "associational"
-          ? "ASSOCIATIONAL"
-          : run.claimLabel === "predictive"
-            ? "PREDICTIVE"
-            : null,
+      claimLabel: toPredictiveUserClaimLabel(run.claimLabel as PredictiveStoredClaimLabel | null | undefined),
       createdAt: run.createdAt,
       datasetDisplayName: dataset?.displayName ?? run.datasetId,
       datasetVersionId: run.datasetVersionId,
@@ -546,7 +549,7 @@ export async function getPredictiveRunDetail(input: {
       : null,
     result: result
       ? {
-          claimLabel: result.claimLabel === "associational" ? "ASSOCIATIONAL" : "PREDICTIVE",
+          claimLabel: toPredictiveUserClaimLabel(result.claimLabel as PredictiveStoredClaimLabel) ?? PREDICTIVE_USER_CLAIM_LABEL,
           createdAt: result.createdAt,
           featureImportance: JSON.parse(result.featureImportanceJson) as Record<string, number>,
           metrics: JSON.parse(result.metricsJson) as Record<string, number>,
@@ -559,12 +562,7 @@ export async function getPredictiveRunDetail(input: {
         }
       : null,
     run: {
-      claimLabel:
-        run.claimLabel === "associational"
-          ? "ASSOCIATIONAL"
-          : run.claimLabel === "predictive"
-            ? "PREDICTIVE"
-            : null,
+      claimLabel: toPredictiveUserClaimLabel(run.claimLabel as PredictiveStoredClaimLabel | null | undefined),
       completedAt: run.completedAt,
       createdAt: run.createdAt,
       datasetVersionId: run.datasetVersionId,
@@ -783,7 +781,8 @@ export async function executePredictiveRun(input: {
       row_count?: number;
     };
 
-    const claimLabel = parsed.claim_label === "ASSOCIATIONAL" ? "ASSOCIATIONAL" : "PREDICTIVE";
+    const rawClaimLabel = parsed.claim_label === "ASSOCIATIONAL" ? "ASSOCIATIONAL" : "PREDICTIVE";
+    const claimLabel = toPredictiveUserClaimLabel(rawClaimLabel) ?? PREDICTIVE_USER_CLAIM_LABEL;
     const metrics = parsed.metrics && typeof parsed.metrics === "object" ? parsed.metrics : {};
     const featureImportance =
       parsed.feature_importance && typeof parsed.feature_importance === "object"
@@ -798,8 +797,12 @@ export async function executePredictiveRun(input: {
       preset === "forecast" && forecastConfig
         ? ` using a time-ordered holdout of the last ${forecastConfig.horizonValue} ${forecastConfig.horizonUnit}`
         : "";
-    const summary = `${claimLabel} result from ${parsed.model_name ?? "CatBoost"}${metricSummary ? ` with ${metricSummary}` : ""}${forecastSummary}. This output describes predictors or predictive performance, not causal effects.`;
-    const storedClaimLabel = claimLabel === "ASSOCIATIONAL" ? "associational" : "predictive";
+    const summary = buildPredictiveClaimSummary({
+      forecastSummary,
+      metricSummary,
+      modelName: parsed.model_name ?? "CatBoost",
+    });
+    const storedClaimLabel = toPredictiveStoredClaimLabel(rawClaimLabel);
     const completedAt = Date.now();
 
     await db.insert(predictiveResults).values({

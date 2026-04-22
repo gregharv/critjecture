@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
+import { deriveCausalEpistemicVerdict } from "@/lib/causal-claim-labels";
 import { causalAnswerPackages, causalAnswers, causalRuns, causalStudies } from "@/lib/app-schema";
 
 export const CAUSAL_ANSWER_MODEL_NAME = "grounded-package-template";
@@ -32,6 +33,10 @@ type ParsedCausalAnswerPackage = {
     pValue?: number | null;
     stdError?: number | null;
   }>;
+  epistemicVerdict?: {
+    claimLabel?: string;
+    summaryText?: string;
+  } | null;
   estimands?: Array<{
     estimandExpression?: string;
     estimandKind?: string;
@@ -81,6 +86,7 @@ function parsePackageJson(packageJson: string) {
     assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
     approval: parsed.approval ?? null,
     estimates: Array.isArray(parsed.estimates) ? parsed.estimates : [],
+    epistemicVerdict: parsed.epistemicVerdict ?? null,
     estimands: Array.isArray(parsed.estimands) ? parsed.estimands : [],
     identification: parsed.identification ?? null,
     limitations: Array.isArray(parsed.limitations) ? parsed.limitations : [],
@@ -125,6 +131,13 @@ function renderGroundedAnswerMarkdown(packageJson: string) {
   const outcome = parsed.run.outcomeNodeKey ?? "unassigned_outcome";
   const identification = parsed.identification;
   const estimate = parsed.estimates[0];
+  const derivedVerdict = parsed.epistemicVerdict ?? deriveCausalEpistemicVerdict({
+    blockingReasons: identification?.blockingReasons,
+    identified: identification?.identified,
+    outcomeNodeKey: parsed.run.outcomeNodeKey,
+    refutationStatuses: parsed.refutations.map((refutation) => refutation.status),
+    treatmentNodeKey: parsed.run.treatmentNodeKey,
+  });
   const estimand = parsed.estimands[0];
   const bindings = parsed.runDatasetBindings
     .map((binding) => `${binding.bindingRole ?? "dataset"}: ${binding.datasetVersionId ?? binding.datasetId ?? "unknown"}`)
@@ -148,6 +161,10 @@ function renderGroundedAnswerMarkdown(packageJson: string) {
   }
 
   lines.push(
+    "",
+    "## Epistemic verdict",
+    `- Claim label: ${derivedVerdict.claimLabel}`,
+    `- Summary: ${derivedVerdict.summaryText}`,
     "",
     "## Grounding",
     `- Study: ${parsed.study.title ?? parsed.study.id ?? "unknown study"}`,

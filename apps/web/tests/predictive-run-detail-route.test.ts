@@ -65,7 +65,7 @@ describe("GET /api/predictive/runs/[runId]", () => {
         versionNumber: 1,
       },
       result: {
-        claimLabel: "ASSOCIATIONAL",
+        claimLabel: "INSTRUMENTAL / HEURISTIC PREDICTION",
         createdAt: 123,
         featureImportance: { discount_rate: 0.7 },
         metrics: { roc_auc: 0.81 },
@@ -77,7 +77,7 @@ describe("GET /api/predictive/runs/[runId]", () => {
         targetColumnName: "conversion_rate",
       },
       run: {
-        claimLabel: "ASSOCIATIONAL",
+        claimLabel: "INSTRUMENTAL / HEURISTIC PREDICTION",
         completedAt: 123,
         createdAt: 100,
         datasetVersionId: "dataset-version-1",

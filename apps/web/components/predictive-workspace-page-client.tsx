@@ -140,7 +140,7 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
         <h1 className="causal-hero__title">Associational and predictive analysis</h1>
         <p className="causal-hero__copy">
           Use this workspace for non-causal analysis such as predictors, feature importance, and
-          forecasts. Outputs here must remain ASSOCIATIONAL or PREDICTIVE.
+          forecasts. Outputs here must remain labeled INSTRUMENTAL / HEURISTIC PREDICTION.
         </p>
       </div>
 
@@ -183,13 +183,13 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
               onChange={(event) => setPreset(event.target.value as PredictiveAnalysisPreset)}
               value={preset}
             >
-              <option value="standard">Standard predictive / associational</option>
+              <option value="standard">Standard instrumental / heuristic prediction</option>
               <option value="forecast">Forecast-style time-aware holdout</option>
             </select>
 
             {preset === "forecast" ? (
               <p className="causal-card__meta">
-                Forecast mode validates that a time column exists and evaluates the model on the last N ordered rows instead of a random split. This remains predictive, not causal.
+                Forecast mode validates that a time column exists and evaluates the model on the last N ordered rows instead of a random split. This remains instrumental / heuristic prediction, not causal.
               </p>
             ) : null}
             {preset === "forecast" && availableTimeColumns.length === 0 ? (
@@ -208,8 +208,8 @@ export function PredictiveWorkspacePageClient({ initialCatalog, initialRuns }: P
               onChange={(event) => setTaskKind(event.target.value as PredictiveTaskKind)}
               value={taskKind}
             >
-              <option value="classification">Classification / associational</option>
-              <option value="regression">Regression / predictive</option>
+              <option value="classification">Classification / heuristic prediction</option>
+              <option value="regression">Regression / heuristic prediction</option>
             </select>
 
             <label className="causal-intake-form__label" htmlFor="predictive-target-column">

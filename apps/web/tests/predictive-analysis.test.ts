@@ -233,6 +233,7 @@ describe("predictive analysis telemetry", () => {
       expect(computeRows[0]?.status).toBe("completed");
       expect(computeRows[0]?.runner).toBe("catboost-classifier");
       expect(computeRows[0]?.stdoutText).toContain("ASSOCIATIONAL");
+      expect(result.claimLabel).toBe("INSTRUMENTAL / HEURISTIC PREDICTION");
       expect(artifactRows).toHaveLength(2);
       expect(artifactRows.some((artifact) => artifact.computeRunId === (computeRows[0]?.id ?? null))).toBe(true);
       expect(artifactRows.some((artifact) => artifact.artifactKind === "answer_package")).toBe(true);
@@ -306,6 +307,7 @@ describe("predictive analysis telemetry", () => {
       expect(result.forecastConfig?.timeColumnName).toBe("event_date");
       expect(result.featureColumns).toContain("event_date");
       expect(result.summary).toContain("time-ordered holdout");
+      expect(result.claimLabel).toBe("INSTRUMENTAL / HEURISTIC PREDICTION");
 
       const db = await getAppDatabase();
       const runRows = await db.select().from(predictiveRuns).where(eq(predictiveRuns.id, result.id));

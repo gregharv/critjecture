@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 
 import { getAppDatabase } from "@/lib/app-db";
+import { deriveCausalEpistemicVerdict } from "@/lib/causal-claim-labels";
 import {
   causalAnswerPackages,
   causalApprovals,
@@ -49,6 +50,14 @@ export async function buildAndStoreCausalAnswerPackage(input: {
         : Promise.resolve([]),
     ]);
 
+  const epistemicVerdict = deriveCausalEpistemicVerdict({
+    blockingReasons: identification[0] ? (JSON.parse(identification[0].blockingReasonsJson) as string[]) : [],
+    identified: identification[0]?.identified ?? null,
+    outcomeNodeKey: run.outcomeNodeKey,
+    refutationStatuses: refutations.map((refutation) => refutation.status),
+    treatmentNodeKey: run.treatmentNodeKey,
+  });
+
   const packageObject = {
     assumptions: assumptions.map((assumption) => ({
       assumptionType: assumption.assumptionType,
@@ -77,6 +86,7 @@ export async function buildAndStoreCausalAnswerPackage(input: {
       estimandKind: estimand.estimandKind,
       estimandLabel: estimand.estimandLabel,
     })),
+    epistemicVerdict,
     identification: identification[0]
       ? {
           adjustmentSet: JSON.parse(identification[0].adjustmentSetJson),

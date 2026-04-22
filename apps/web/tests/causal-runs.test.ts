@@ -341,6 +341,7 @@ describe("causal runs", () => {
       expect(identificationRows[0]?.identified).toBe(true);
       expect(estimateRows[0]?.estimateValue).not.toBeNull();
       expect(packageRows).toHaveLength(1);
+      expect(packageRows[0]?.packageJson).toContain("CORROBORATED CAUSAL CONJECTURE");
       expect(artifactRows.length).toBeGreaterThanOrEqual(3);
     } finally {
       await environment.cleanup();
@@ -375,6 +376,7 @@ describe("causal runs", () => {
       expect(result.identification?.identified).toBe(false);
       expect(result.estimates).toHaveLength(0);
       expect(result.answerPackage?.packageJson).toContain("not identified");
+      expect(result.answerPackage?.packageJson).toContain("SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA");
 
       const db = await getAppDatabase();
       const estimateRows = await db
@@ -517,6 +519,7 @@ describe("causal runs", () => {
       });
       expect(answer?.answerText).toContain("Package-only limitation sentinel.");
       expect(answer?.answerText).toContain("stored causal answer package only");
+      expect(answer?.answerText).toContain("Claim label:");
 
       await createGroundedCausalAnswer({
         organizationId: user!.organizationId,
@@ -561,6 +564,7 @@ describe("causal runs", () => {
 
       expect(answer?.answerText).toContain("not identified");
       expect(answer?.answerText).toContain("unobserved");
+      expect(answer?.answerText).toContain("SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA");
     } finally {
       await environment.cleanup();
     }

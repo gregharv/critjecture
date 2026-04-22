@@ -13,6 +13,11 @@ import {
   predictiveRuns,
   runArtifacts,
 } from "@/lib/app-schema";
+import {
+  PREDICTIVE_USER_CLAIM_LABEL,
+  toPredictiveUserClaimLabel,
+  type PredictiveStoredClaimLabel,
+} from "@/lib/predictive-claim-labels";
 
 function parsePredictiveRunMetadata(metadataJson: string) {
   try {
@@ -113,7 +118,7 @@ export async function buildAndStorePredictiveAnswerPackage(input: {
       "Review the top features for data leakage, drift risk, and business plausibility.",
     ],
     result: {
-      claimLabel: result.claimLabel,
+      claimLabel: toPredictiveUserClaimLabel(result.claimLabel as PredictiveStoredClaimLabel) ?? PREDICTIVE_USER_CLAIM_LABEL,
       createdAt: result.createdAt,
       featureImportance,
       metrics,
@@ -124,7 +129,7 @@ export async function buildAndStorePredictiveAnswerPackage(input: {
       taskKind: result.taskKind,
     },
     run: {
-      claimLabel: run.claimLabel,
+      claimLabel: toPredictiveUserClaimLabel(run.claimLabel as PredictiveStoredClaimLabel | null | undefined),
       completedAt: run.completedAt,
       createdAt: run.createdAt,
       datasetId: run.datasetId,
