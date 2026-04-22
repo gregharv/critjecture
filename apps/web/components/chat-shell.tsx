@@ -73,6 +73,7 @@ import {
 } from "@/lib/analytical-clarification";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
 import type { CausalIntakeResponse, EpistemicPosture } from "@/lib/causal-intent-types";
+import { classifyObservationalMechanismClarificationReply } from "@/lib/observational-mechanism-response-policy";
 import type {
   GetKnowledgeFilePreviewResponse,
   KnowledgeFilePreview,
@@ -1883,6 +1884,28 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             pendingAnalyticalClarificationRef.current.conversationId === conversationIdRef.current
               ? pendingAnalyticalClarificationRef.current
               : null;
+
+          const resolvedObservationalMechanismReply =
+            pendingClarification?.question &&
+            classifyObservationalMechanismClarificationReply({
+              lastQuestion: pendingClarification.question,
+              latestMessage: userPromptText,
+            }) !== "none";
+
+          if (pendingClarification && resolvedObservationalMechanismReply) {
+            pendingAnalyticalClarificationRef.current = {
+              conversationId: null,
+              posture: null,
+              question: null,
+              text: null,
+            };
+            setAnalyticalClarificationBanner(null);
+            return {
+              continueInChat: true,
+              resolvedInput: input,
+            };
+          }
+
           const effectivePromptText = buildEffectiveAnalyticalPrompt(
             pendingClarification?.text,
             userPromptText,
@@ -1927,7 +1950,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 text: null,
               };
               setAnalyticalClarificationBanner(null);
-              window.location.assign(`/causal/studies/${data.studyId}`);
+              appendUserTextMessage(userPromptText);
+              appendAssistantTextMessage(
+                [
+                  "This question needs the causal workspace rather than a chat-side answer.",
+                  `I created a study for it: /causal/studies/${data.studyId}`,
+                  "Open that link when you want to continue.",
+                ].join(" "),
+              );
               return {
                 continueInChat: false,
                 resolvedInput,

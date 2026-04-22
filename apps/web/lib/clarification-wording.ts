@@ -15,7 +15,7 @@ export type ClarificationWording = {
 };
 
 function isClarificationWordingEnabled() {
-  return process.env.ENABLE_LLM_CLARIFICATION_WORDING?.trim().toLowerCase() === "true";
+  return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
 function extractJsonObject(text: string) {
@@ -127,6 +127,8 @@ export async function generateClarificationWording(
           "Do not ask for information the user already provided.",
           "Ask exactly one clarification question.",
           "If the posture is causal_risk or the clarificationKind is loaded_causal_reframe, do not accept the user's causal framing as established fact.",
+          "Write like a polished customer-facing assistant, not an internal template.",
+          "Use the user's context naturally so the question feels specific to their request.",
           "Keep the wording natural, concise, and non-templated.",
           "Return strict JSON only with keys eyebrow, lead, question.",
           "The question field is required. eyebrow and lead are optional and should be subtle if present.",

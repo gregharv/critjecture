@@ -82,6 +82,7 @@ const CONCISE_CONCLUSION_CUES = [
 ];
 
 const SHARED_DRIVER_CUES = [/\bshared driver\b/i, /\bcommon driver\b/i, /\bconfound/i];
+const AFFIRMATIVE_REPLY_CUES = [/^(yes|yeah|yep|sure|ok|okay|sounds good|do that|let's do that)\b/i];
 
 export type ObservationalMechanismRequestClassification = {
   explicitHypothesisRequest: boolean;
@@ -153,6 +154,10 @@ export function classifyObservationalMechanismClarificationReply(input: {
 
   if (matchesAny(latest, CONCISE_CONCLUSION_CUES)) {
     return "concise_observational_conclusion";
+  }
+
+  if (matchesAny(latest, AFFIRMATIVE_REPLY_CUES)) {
+    return "challenge_direct_framing";
   }
 
   return "none";

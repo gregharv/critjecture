@@ -42,6 +42,16 @@ describe("observational mechanism response policy", () => {
     ).toBe("concise_observational_conclusion");
   });
 
+  it("treats a simple affirmative reply as accepting the framing challenge", () => {
+    expect(
+      classifyObservationalMechanismClarificationReply({
+        lastQuestion:
+          "Before we assume a direct pathway, do you want to first check whether the pattern could reflect omitted context or a common driver, or are you asking only for possible mechanisms?",
+        latestMessage: "sure",
+      }),
+    ).toBe("challenge_direct_framing");
+  });
+
   it("maps explicit brainstorming requests to hypothesis mode", () => {
     expect(
       classifyObservationalMechanismClarificationReply({
