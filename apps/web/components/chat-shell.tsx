@@ -66,7 +66,12 @@ import {
   getFileMentionMatch,
   replaceFileMention,
 } from "@/lib/chat-file-mentions";
-import { buildEffectiveAnalyticalPrompt } from "@/lib/analytical-clarification";
+import {
+  buildAnalyticalClarificationBannerEyebrow,
+  buildAnalyticalClarificationBannerLabels,
+  buildAnalyticalClarificationBannerLead,
+  buildEffectiveAnalyticalPrompt,
+} from "@/lib/analytical-clarification";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
 import type { CausalIntakeResponse, EpistemicPosture } from "@/lib/causal-intent-types";
 import type {
@@ -128,6 +133,16 @@ type PendingPlannerSearch = {
   recommendedFiles: string[];
   selectedFiles: string[];
   selectionRequired: boolean;
+};
+
+type AnalyticalClarificationBannerState = {
+  conversationId: string | null;
+  eyebrow: string;
+  lead: string;
+  question: string;
+  questionLabel: string;
+  userLabel: string;
+  userPromptText: string;
 };
 
 type ConversationBootstrapState = {
@@ -1237,6 +1252,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const syntheticContinuationRef = useRef(false);
   const toolbarMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState("");
+  const [analyticalClarificationBanner, setAnalyticalClarificationBanner] =
+    useState<AnalyticalClarificationBannerState | null>(null);
   const [fileMentionMenu, setFileMentionMenu] = useState<FileMentionMenuState | null>(null);
   const [fileMentionPreview, setFileMentionPreview] = useState<FileMentionPreviewState | null>(
     null,
@@ -1333,6 +1350,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           setWorkflowSaveError(null);
           setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
+          setAnalyticalClarificationBanner(null);
           setConversationBootstrap(draft);
         }
 
@@ -1376,6 +1394,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         setWorkflowSaveError(null);
         setWorkflowSaveSuccess(null);
         setActiveConversationTitle(data.conversation.title);
+        setAnalyticalClarificationBanner(null);
         setConversationBootstrap(bootstrap);
       } catch (caughtError) {
         console.error("Failed to restore conversation from URL.", caughtError);
@@ -1396,6 +1415,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           setWorkflowSaveError(null);
           setWorkflowSaveSuccess(null);
           setActiveConversationTitle("");
+          setAnalyticalClarificationBanner(null);
           setConversationBootstrap(draft);
         }
       }
@@ -1795,15 +1815,26 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           };
         };
 
-        const appendAssistantTextMessage = (text: string) => {
+        const appendChatTextMessage = (role: "assistant" | "user", text: string) => {
           if (!agent || !text.trim()) {
             return;
           }
 
-          agent.appendMessage({
-            role: "assistant",
-            content: [{ type: "text", text: text.trim() }],
-          } as AgentMessage);
+          agent.replaceMessages([
+            ...(agent.state.messages as AgentMessage[]),
+            {
+              role,
+              content: [{ type: "text", text: text.trim() }],
+            } as AgentMessage,
+          ]);
+        };
+
+        const appendUserTextMessage = (text: string) => {
+          appendChatTextMessage("user", text);
+        };
+
+        const appendAssistantTextMessage = (text: string) => {
+          appendChatTextMessage("assistant", text);
           scheduleConversationSave(true);
         };
 
@@ -1885,6 +1916,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: null,
                 text: null,
               };
+              setAnalyticalClarificationBanner(null);
               return {
                 continueInChat: true,
                 resolvedInput,
@@ -1898,6 +1930,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: null,
                 text: null,
               };
+              setAnalyticalClarificationBanner(null);
               window.location.assign(`/causal/studies/${data.studyId}`);
               return {
                 continueInChat: false,
@@ -1912,6 +1945,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: null,
                 text: null,
               };
+              setAnalyticalClarificationBanner(null);
               return {
                 continueInChat: true,
                 resolvedInput,
@@ -1925,6 +1959,26 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: data.question,
                 text: effectivePromptText,
               };
+              const bannerLabels = buildAnalyticalClarificationBannerLabels(
+                data.clarificationState.epistemicPosture,
+                effectivePromptText,
+              );
+              setAnalyticalClarificationBanner({
+                conversationId: conversationIdRef.current,
+                eyebrow: buildAnalyticalClarificationBannerEyebrow(
+                  data.clarificationState.epistemicPosture,
+                  effectivePromptText,
+                ),
+                lead: buildAnalyticalClarificationBannerLead(
+                  data.clarificationState.epistemicPosture,
+                  effectivePromptText,
+                ),
+                question: data.question,
+                questionLabel: bannerLabels.questionLabel,
+                userLabel: bannerLabels.userLabel,
+                userPromptText,
+              });
+              appendUserTextMessage(userPromptText);
               appendAssistantTextMessage(data.question);
               return {
                 continueInChat: false,
@@ -1939,6 +1993,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
                 question: null,
                 text: null,
               };
+              setAnalyticalClarificationBanner(null);
+              appendUserTextMessage(userPromptText);
               appendAssistantTextMessage(data.message);
               return {
                 continueInChat: false,
@@ -1952,6 +2008,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               question: null,
               text: null,
             };
+            setAnalyticalClarificationBanner(null);
             return {
               continueInChat: true,
               resolvedInput,
@@ -1964,6 +2021,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               question: null,
               text: null,
             };
+            setAnalyticalClarificationBanner(null);
             return {
               continueInChat: true,
               resolvedInput,
@@ -3185,6 +3243,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
       setWorkflowSaveError(null);
       setWorkflowSaveSuccess(null);
       setActiveConversationTitle(data.conversation.title);
+      setAnalyticalClarificationBanner(null);
       setConversationBootstrap({
         createdAt: data.conversation.createdAt,
         id: data.conversation.id,
@@ -3218,6 +3277,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     setWorkflowSaveError(null);
     setWorkflowSaveSuccess(null);
     setActiveConversationTitle("");
+    setAnalyticalClarificationBanner(null);
     setHistoryOpen(false);
     setConversationBootstrap(draft);
   }
@@ -3322,6 +3382,28 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         ) : null}
         {workflowSaveSuccess ? (
           <p className="chat-toolbar__status chat-toolbar__status--success">{workflowSaveSuccess}</p>
+        ) : null}
+        {analyticalClarificationBanner?.conversationId === conversationIdRef.current ? (
+          <section aria-live="polite" className="chat-clarification-banner">
+            <div className="chat-clarification-banner__eyebrow">
+              {analyticalClarificationBanner.eyebrow}
+            </div>
+            <p className="chat-clarification-banner__lead">
+              {analyticalClarificationBanner.lead}
+            </p>
+            <div className="chat-clarification-banner__user-question">
+              <span className="chat-clarification-banner__label">
+                {analyticalClarificationBanner.userLabel}
+              </span>
+              <p>{analyticalClarificationBanner.userPromptText}</p>
+            </div>
+            <div className="chat-clarification-banner__question">
+              <span className="chat-clarification-banner__label">
+                {analyticalClarificationBanner.questionLabel}
+              </span>
+              <p>{analyticalClarificationBanner.question}</p>
+            </div>
+          </section>
         ) : null}
         <div className="chat-host" ref={hostRef} />
         {fileMentionMenu ? (

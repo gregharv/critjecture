@@ -81,6 +81,27 @@ test("chat triggers clarification questions and carries clarification state acro
   await sendChatMessage(page, "Can you help me understand conversion?");
 
   await expect.poll(() => capturedBodies.length).toBe(1);
+  await expect(page.locator(".chat-clarification-banner")).toBeVisible();
+  await expect(page.locator(".chat-clarification-banner__eyebrow")).toContainText(
+    /Checking data fit|Clarifying what the data can support|Aligning the question to the data/,
+  );
+  await expect(page.locator(".chat-clarification-banner__lead")).toContainText(
+    /shaping it around what the data can support|the question fits the data we likely have|the available data can actually answer/,
+  );
+  await expect(page.locator(".chat-clarification-banner__label").first()).toContainText(
+    /Question in view|Current question|Starting point/,
+  );
+  await expect(page.locator(".chat-clarification-banner__label").nth(1)).toContainText(
+    /What I need pinned down|Data-fit check|Clarification/,
+  );
+  await expect(
+    page.locator(".chat-clarification-banner").getByText("Can you help me understand conversion?"),
+  ).toBeVisible();
+  await expect(
+    page.locator(".chat-clarification-banner").getByText(
+      "Understood — you're focused on conversion. Do you want the first pass overall, or broken out by something like region, segment, or customer type?",
+    ),
+  ).toBeVisible();
   await expect
     .poll(() => JSON.stringify(savedConversationSnapshots.at(-1) ?? {}))
     .toContain("Understood — you're focused on conversion. Do you want the first pass overall, or broken out by something like region, segment, or customer type?");
@@ -88,6 +109,12 @@ test("chat triggers clarification questions and carries clarification state acro
   await sendChatMessage(page, "overall first");
 
   await expect.poll(() => capturedBodies.length).toBe(2);
+  await expect(page.locator(".chat-clarification-banner").getByText("overall first")).toBeVisible();
+  await expect(
+    page
+      .locator(".chat-clarification-banner")
+      .getByText("Got it — we'll start at the overall level. What time period should we focus on for conversion?"),
+  ).toBeVisible();
   await expect
     .poll(() => JSON.stringify(savedConversationSnapshots.at(-1) ?? {}))
     .toContain("Got it — we'll start at the overall level. What time period should we focus on for conversion?");
@@ -132,6 +159,22 @@ I uploaded the file: waterpressure.csv
 In our municipal infrastructure dataset, we have identified a robust, statistically significant negative correlation (r = -0.85) between localized water main pressure (PSI) and residential substation load (MW). As water pressure drops, electrical load reliably spikes. Assuming this telemetry is accurate, what are the specific electromechanical mechanisms or physical fluid-dynamics pathways where a loss of municipal water pressure forces residential electrical equipment to draw more amperage from the grid?`,
   );
 
+  await expect(page.locator(".chat-clarification-banner")).toBeVisible();
+  await expect(page.locator(".chat-clarification-banner__eyebrow")).toContainText(
+    /Checking the causal framing|Pressure-testing the causal story|Checking causal assumptions/,
+  );
+  await expect(page.locator(".chat-clarification-banner__lead")).toContainText(
+    /pressure-test the causal framing|check the causal framing before we run with it|not jumping from a pattern to a causal story too quickly/,
+  );
+  await expect(page.locator(".chat-clarification-banner__label").first()).toContainText(
+    /Observed pattern|Claim to examine|Question in view/,
+  );
+  await expect(page.locator(".chat-clarification-banner__label").nth(1)).toContainText(
+    /Framing check|Causal check|Assumption check/,
+  );
+  await expect(
+    page.locator(".chat-clarification-banner").getByText(/waterpressure\.csv/),
+  ).toBeVisible();
   await expect
     .poll(() => JSON.stringify(savedConversationSnapshots.at(-1) ?? {}), { timeout: 10_000 })
     .toMatch(/shared driver or confounding pattern|challenge the direct-causation framing|omitted context or a common driver/);

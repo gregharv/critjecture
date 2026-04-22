@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAnalyticalClarificationBannerEyebrow,
+  buildAnalyticalClarificationBannerLabels,
+  buildAnalyticalClarificationBannerLead,
   buildConversationalClarificationQuestion,
   buildEffectiveAnalyticalPrompt,
   looksLikeStandaloneAnalyticalRequest,
@@ -60,6 +63,84 @@ describe("analytical clarification helpers", () => {
   it("recognizes short intent labels as standalone analytical requests", () => {
     expect(looksLikeStandaloneAnalyticalRequest("descriptive summary")).toBe(true);
     expect(looksLikeStandaloneAnalyticalRequest("last month by region")).toBe(false);
+  });
+
+  it("builds posture-aware banner eyebrow copy for clarification UI", () => {
+    expectOneOf(
+      buildAnalyticalClarificationBannerEyebrow("data_limited", "Can you help me understand conversion?"),
+      [
+        "Checking data fit",
+        "Clarifying what the data can support",
+        "Aligning the question to the data",
+      ],
+    );
+
+    expectOneOf(
+      buildAnalyticalClarificationBannerEyebrow(
+        "causal_risk",
+        "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
+      ),
+      [
+        "Checking the causal framing",
+        "Pressure-testing the causal story",
+        "Checking causal assumptions",
+      ],
+    );
+  });
+
+  it("builds posture-aware banner section labels for clarification UI", () => {
+    const dataLimitedLabels = buildAnalyticalClarificationBannerLabels(
+      "data_limited",
+      "Can you help me understand conversion?",
+    );
+    expectOneOf(dataLimitedLabels.userLabel, [
+      "Question in view",
+      "Current question",
+      "Starting point",
+    ]);
+    expectOneOf(dataLimitedLabels.questionLabel, [
+      "What I need pinned down",
+      "Data-fit check",
+      "Clarification",
+    ]);
+
+    const causalRiskLabels = buildAnalyticalClarificationBannerLabels(
+      "causal_risk",
+      "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
+    );
+    expectOneOf(causalRiskLabels.userLabel, [
+      "Observed pattern",
+      "Claim to examine",
+      "Question in view",
+    ]);
+    expectOneOf(causalRiskLabels.questionLabel, [
+      "Framing check",
+      "Causal check",
+      "Assumption check",
+    ]);
+  });
+
+  it("builds posture-aware banner lead copy for clarification UI", () => {
+    expectOneOf(
+      buildAnalyticalClarificationBannerLead("data_limited", "Can you help me understand conversion?"),
+      [
+        "Before I analyze this, I want to make sure we're shaping it around what the data can support.",
+        "Before I analyze this, I want to make sure the question fits the data we likely have.",
+        "Before I analyze this, I want to pin down the question in a way the available data can actually answer.",
+      ],
+    );
+
+    expectOneOf(
+      buildAnalyticalClarificationBannerLead(
+        "causal_risk",
+        "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
+      ),
+      [
+        "Before I analyze this, I want to pressure-test the causal framing a bit.",
+        "Before I analyze this, I want to check the causal framing before we run with it.",
+        "Before I analyze this, I want to make sure we are not jumping from a pattern to a causal story too quickly.",
+      ],
+    );
   });
 
   it("builds conversational clarification questions instead of checklist prompts", () => {

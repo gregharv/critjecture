@@ -335,6 +335,173 @@ function buildEpistemicRiskLead(input: {
   return "";
 }
 
+export function buildAnalyticalClarificationBannerEyebrow(posture: EpistemicPosture, message: string) {
+  const seed = normalizeText(message);
+
+  if (posture === "causal_risk") {
+    return chooseVariant(`${seed}:banner-eyebrow:causal-risk`, [
+      "Checking the causal framing",
+      "Pressure-testing the causal story",
+      "Checking causal assumptions",
+    ]);
+  }
+
+  if (posture === "predictive") {
+    return chooseVariant(`${seed}:banner-eyebrow:predictive`, [
+      "Separating prediction from causation",
+      "Clarifying the predictive target",
+      "Checking the predictive framing",
+    ]);
+  }
+
+  if (posture === "data_limited") {
+    return chooseVariant(`${seed}:banner-eyebrow:data-limited`, [
+      "Checking data fit",
+      "Clarifying what the data can support",
+      "Aligning the question to the data",
+    ]);
+  }
+
+  if (posture === "diagnostic") {
+    return chooseVariant(`${seed}:banner-eyebrow:diagnostic`, [
+      "Pinning down the explanation target",
+      "Clarifying what needs explaining",
+      "Narrowing the explanation target",
+    ]);
+  }
+
+  return chooseVariant(`${seed}:banner-eyebrow:exploratory`, [
+    "Clarifying the request",
+    "Tightening the question",
+    "Pinning down the framing",
+  ]);
+}
+
+export function buildAnalyticalClarificationBannerLabels(
+  posture: EpistemicPosture,
+  message: string,
+) {
+  const seed = normalizeText(message);
+
+  if (posture === "causal_risk") {
+    return {
+      questionLabel: chooseVariant(`${seed}:banner-label:causal-risk:question`, [
+        "Framing check",
+        "Causal check",
+        "Assumption check",
+      ]),
+      userLabel: chooseVariant(`${seed}:banner-label:causal-risk:user`, [
+        "Observed pattern",
+        "Claim to examine",
+        "Question in view",
+      ]),
+    };
+  }
+
+  if (posture === "predictive") {
+    return {
+      questionLabel: chooseVariant(`${seed}:banner-label:predictive:question`, [
+        "Predictive framing check",
+        "Prediction target",
+        "Clarification",
+      ]),
+      userLabel: chooseVariant(`${seed}:banner-label:predictive:user`, [
+        "Question in view",
+        "Outcome in focus",
+        "Current question",
+      ]),
+    };
+  }
+
+  if (posture === "data_limited") {
+    return {
+      questionLabel: chooseVariant(`${seed}:banner-label:data-limited:question`, [
+        "What I need pinned down",
+        "Data-fit check",
+        "Clarification",
+      ]),
+      userLabel: chooseVariant(`${seed}:banner-label:data-limited:user`, [
+        "Question in view",
+        "Current question",
+        "Starting point",
+      ]),
+    };
+  }
+
+  if (posture === "diagnostic") {
+    return {
+      questionLabel: chooseVariant(`${seed}:banner-label:diagnostic:question`, [
+        "What I need clarified",
+        "Explanation check",
+        "Clarification",
+      ]),
+      userLabel: chooseVariant(`${seed}:banner-label:diagnostic:user`, [
+        "What you're trying to explain",
+        "Question in view",
+        "Current question",
+      ]),
+    };
+  }
+
+  return {
+    questionLabel: chooseVariant(`${seed}:banner-label:exploratory:question`, [
+      "Clarification",
+      "What I need clarified",
+      "Next question",
+    ]),
+    userLabel: chooseVariant(`${seed}:banner-label:exploratory:user`, [
+      "Your question",
+      "Question in view",
+      "Starting point",
+    ]),
+  };
+}
+
+export function buildAnalyticalClarificationBannerLead(
+  posture: EpistemicPosture,
+  message: string,
+) {
+  const seed = normalizeText(message);
+
+  if (posture === "causal_risk") {
+    return chooseVariant(`${seed}:banner:causal-risk`, [
+      "Before I analyze this, I want to pressure-test the causal framing a bit.",
+      "Before I analyze this, I want to check the causal framing before we run with it.",
+      "Before I analyze this, I want to make sure we are not jumping from a pattern to a causal story too quickly.",
+    ]);
+  }
+
+  if (posture === "predictive") {
+    return chooseVariant(`${seed}:banner:predictive`, [
+      "Before I analyze this, I want to separate prediction from causation.",
+      "Before I analyze this, I want to pin down whether you want a predictive read or a causal one.",
+      "Before I analyze this, I want to be clear on whether we're predicting an outcome or explaining a cause.",
+    ]);
+  }
+
+  if (posture === "data_limited") {
+    return chooseVariant(`${seed}:banner:data-limited`, [
+      "Before I analyze this, I want to make sure we're shaping it around what the data can support.",
+      "Before I analyze this, I want to make sure the question fits the data we likely have.",
+      "Before I analyze this, I want to pin down the question in a way the available data can actually answer.",
+    ]);
+  }
+
+  if (posture === "diagnostic") {
+    return chooseVariant(`${seed}:banner:diagnostic`, [
+      "Before I analyze this, I want to pin down what exactly we're trying to explain.",
+      "Before I analyze this, I want to narrow the explanation target a bit.",
+      "Before I analyze this, I want to make sure we're precise about what needs explaining.",
+    ]);
+  }
+
+  return chooseVariant(`${seed}:banner:exploratory`, [
+    "Before I analyze this, I want to pin down the framing a bit.",
+    "Before I analyze this, I want to make the framing a little more precise.",
+    "Before I analyze this, I want to tighten up the question a bit.",
+  ]);
+}
+
 function buildConversationalContextLead(input: {
   metric: string | null;
   timeWindow: string | null;
