@@ -81,6 +81,17 @@ const OBSERVATIONAL_EVIDENCE_PATTERNS = [
   /\bas [^?.!]+ (drops?|falls?|rises?|increases?|decreases?)\b/i,
 ];
 
+const DIRECTIONAL_PRESUPPOSITION_PATTERNS = [
+  /\bforces?\b/i,
+  /\bdirect mechanism\b/i,
+  /\bphysical pathway\b/i,
+  /\bby which\b/i,
+  /\bwhere .* (?:causes?|leads? to|results? in|forces?|makes?)\b/i,
+  /\bhow .* (?:causes?|leads? to|results? in|forces?|makes?)\b/i,
+  /\bwhat (?:specific )?(?:mechanisms|pathways) .* (?:cause|causes|lead|leads|result|results|force|forces|make|makes)\b/i,
+  /\bassuming .* (?:accurate|true|correct)\b/i,
+];
+
 const AMBIGUOUS_ANALYSIS_PATTERNS = [
   /\banaly[sz]e\b/i,
   /\bunderstand\b/i,
@@ -144,7 +155,7 @@ export function buildCausalIntentPrompt(message: string) {
     "Classify the user request before any dataset analysis begins.",
     "Use this routing flow: clear descriptive summary -> continue_descriptive; associational or predictive -> open_predictive_analysis; explanation, mechanism search, or diagnostic -> continue_descriptive first; explicit causal or counterfactual -> open_causal_study.",
     "Do not default unclear analytical requests to descriptive. If the user has not made the analytical goal specific enough to distinguish descriptive, diagnostic, predictive, or causal work, return ask_clarification.",
-    "Treat observational-pattern-plus-mechanism questions as diagnostic, not descriptive.",
+    "Treat observational-pattern-plus-mechanism questions as diagnostic, not descriptive, unless they presuppose a direct causal pathway from an observed pattern. Those loaded questions should return ask_clarification so the system can challenge the framing before analysis.",
     "Return strict JSON with: is_causal, intent_type, reason, confidence, question_type, routing_decision.",
     "Allowed intent_type: descriptive, associational, predictive, diagnostic, causal, counterfactual, unclear.",
     "Allowed routing_decision: continue_descriptive, open_predictive_analysis, open_causal_study, ask_clarification, blocked.",
@@ -324,6 +335,33 @@ function buildHeuristicClassification(message: string): CausalIntentClassificati
       question_type: questionType,
       reason: "The request asks for prediction or forecasting rather than a causal effect estimate.",
       routing_decision: "open_predictive_analysis",
+    } as const;
+
+    return {
+      confidence: raw.confidence,
+      intentType: raw.intent_type,
+      isCausal: raw.is_causal,
+      proposedOutcomeLabel: suggestedLabels.proposedOutcomeLabel,
+      proposedTreatmentLabel: suggestedLabels.proposedTreatmentLabel,
+      questionType,
+      rawOutputJson: JSON.stringify(raw),
+      reason: raw.reason,
+      routingDecision: raw.routing_decision,
+    };
+  }
+
+  if (
+    matchesAny(normalized, OBSERVATIONAL_EVIDENCE_PATTERNS) &&
+    matchesAny(normalized, MECHANISM_SEARCH_PATTERNS) &&
+    matchesAny(normalized, DIRECTIONAL_PRESUPPOSITION_PATTERNS)
+  ) {
+    const raw = {
+      confidence: 0.9,
+      intent_type: "unclear",
+      is_causal: false,
+      question_type: questionType,
+      reason: "The request starts from an observed pattern but presupposes a direct causal mechanism, so the system should clarify whether to challenge that framing before analysis.",
+      routing_decision: "ask_clarification",
     } as const;
 
     return {

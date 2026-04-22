@@ -211,6 +211,22 @@ function inferAnalyticalGoal(message: string): AnalyticalGoal {
   return null;
 }
 
+function hasLoadedQuestionFraming(message: string) {
+  const normalized = normalizeText(message);
+
+  const hasMechanismCue = /\b(mechanism|mechanisms|pathway|pathways|force|forces|drives|caused by|causes|what caused|why does|why did)\b/i.test(
+    normalized,
+  );
+  const hasObservationalCue = /\b(correlat|associated with|relationship between|statistically significant|robust|observed|found|identified|detected)\b/i.test(
+    normalized,
+  );
+  const hasDirectionalPresupposition = /\b(forces?|direct mechanism|physical pathway|by which|assuming .* (accurate|true|correct))\b/i.test(
+    normalized,
+  );
+
+  return hasMechanismCue && hasObservationalCue && hasDirectionalPresupposition;
+}
+
 function detectEpistemicRisk(input: {
   classification: CausalIntentClassification;
   goal: AnalyticalGoal;
@@ -399,6 +415,16 @@ export function buildConversationalClarificationQuestion(
     epistemicPosture: posture,
     question: withLead(question),
   });
+
+  if (posture === "causal_risk" && hasLoadedQuestionFraming(message)) {
+    return result(
+      chooseVariant(`${seed}:loaded-question`, [
+        "Do you want to first test whether this relationship could be explained by a shared driver or confounding pattern, or are you only asking for plausible mechanism hypotheses?",
+        "Would it be more useful to first challenge the direct-causation framing and check for alternative explanations, or should I only outline mechanism hypotheses as conjectures?",
+        "Before we assume a direct pathway, do you want to first check whether the pattern could reflect omitted context or a common driver, or are you asking only for possible mechanisms?",
+      ]),
+    );
+  }
 
   if (!goal) {
     if (metric && timeWindow && grouping) {

@@ -125,9 +125,9 @@ describe("analytical clarification helpers", () => {
     expect(clarification.question).not.toContain("grouping");
   });
 
-  it("adds a causal-risk nudge when the user is trying to jump from a pattern to a mechanism", () => {
+  it("challenges loaded mechanism questions with a reframing clarification", () => {
     const clarification = buildConversationalClarificationQuestion(
-      "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
+      "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?",
       {
         confidence: 0.6,
         intentType: "unclear",
@@ -143,13 +143,9 @@ describe("analytical clarification helpers", () => {
 
     expect(clarification.epistemicPosture).toBe("causal_risk");
     expectOneOf(clarification.question, [
-      "Before we jump from a pattern to a causal story",
-      "I don't want to overread an observed pattern as a causal explanation too quickly.",
-      "Before we treat an observed pattern as a mechanism",
-    ]);
-    expectOneOf(clarification.question, [
-      "what kind of answer",
-      "the kind of answer you're after",
+      "shared driver or confounding pattern",
+      "challenge the direct-causation framing",
+      "omitted context or a common driver",
     ]);
   });
 

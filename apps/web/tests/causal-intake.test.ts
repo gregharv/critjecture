@@ -322,7 +322,7 @@ describe("causal intake", () => {
     }
   });
 
-  it("treats observational-pattern-plus-mechanism questions as diagnostic instead of descriptive", async () => {
+  it("asks clarification for loaded mechanism questions instead of accepting the direct causal framing", async () => {
     const environment = await createTestAppEnvironment();
 
     try {
@@ -336,13 +336,22 @@ describe("causal intake", () => {
       });
 
       expect(response).toMatchObject({
-        decision: "continue_descriptive",
-        intent: {
-          intent_type: "diagnostic",
-          is_causal: false,
+        decision: "ask_clarification",
+        clarificationState: {
+          epistemicPosture: "causal_risk",
         },
-        nextPath: "/chat",
       });
+      if (response.decision !== "ask_clarification") {
+        throw new Error("Expected ask_clarification response.");
+      }
+
+      expect(
+        [
+          "shared driver or confounding pattern",
+          "challenge the direct-causation framing",
+          "omitted context or a common driver",
+        ].some((option) => response.question.includes(option)),
+      ).toBe(true);
     } finally {
       await environment.cleanup();
     }
