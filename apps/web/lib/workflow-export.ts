@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 
 import { and, eq, inArray } from "drizzle-orm";
 
+import { resolveRepositoryRoot } from "@/lib/app-paths";
 import { getAppDatabase } from "@/lib/legacy-app-db";
 import { dataAssets, documents } from "@/lib/legacy-app-schema";
 import {
@@ -239,25 +240,19 @@ function buildWorkflowManifest(input: {
 }
 
 async function resolvePythonSandboxRequirements() {
-  const candidates = [
-    path.resolve(process.cwd(), "packages/python-sandbox/pyproject.toml"),
-    path.resolve(process.cwd(), "../packages/python-sandbox/pyproject.toml"),
-    path.resolve(process.cwd(), "../../packages/python-sandbox/pyproject.toml"),
-  ];
+  try {
+    const repositoryRoot = await resolveRepositoryRoot();
+    const pyprojectPath = path.join(repositoryRoot, "packages", "python-sandbox", "pyproject.toml");
+    const pyproject = await readFile(pyprojectPath, "utf8");
+    const dependencyBlockMatch = pyproject.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
+    const dependencyBlock = dependencyBlockMatch?.[1] ?? "";
+    const requirements = [...dependencyBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? "");
 
-  for (const candidate of candidates) {
-    try {
-      const pyproject = await readFile(candidate, "utf8");
-      const dependencyBlockMatch = pyproject.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
-      const dependencyBlock = dependencyBlockMatch?.[1] ?? "";
-      const requirements = [...dependencyBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? "");
-
-      if (requirements.length > 0) {
-        return requirements.join("\n");
-      }
-    } catch {
-      // Try the next candidate.
+    if (requirements.length > 0) {
+      return requirements.join("\n");
     }
+  } catch {
+    // Fall back to the checked-in baseline requirements.
   }
 
   return ["matplotlib>=3.10.8", "polars>=1.39.3", "reportlab>=4.4.10"].join("\n");

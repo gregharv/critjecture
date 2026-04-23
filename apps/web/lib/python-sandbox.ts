@@ -393,8 +393,8 @@ async function resolvePythonSandboxRoot() {
 
 async function resolvePythonExecutable() {
   const sandboxRoot = await resolvePythonSandboxRoot();
-  const pythonExecutable = path.join(sandboxRoot, ".venv/bin/python");
-  const sitePackagesRoot = path.join(sandboxRoot, ".venv/lib");
+  const pythonExecutable = path.join(/* turbopackIgnore: true */ sandboxRoot, ".venv/bin/python");
+  const sitePackagesRoot = path.join(/* turbopackIgnore: true */ sandboxRoot, ".venv/lib");
 
   if (!(await pathExists(pythonExecutable, fsConstants.X_OK))) {
     throw new Error(
@@ -416,7 +416,12 @@ async function resolvePythonExecutable() {
     pythonExecutable,
     resolvedPythonExecutable,
     sandboxRoot,
-    sitePackagesPath: path.join(sandboxRoot, ".venv/lib", pythonLibDir.name, "site-packages"),
+    sitePackagesPath: path.join(
+      /* turbopackIgnore: true */ sandboxRoot,
+      ".venv/lib",
+      pythonLibDir.name,
+      "site-packages",
+    ),
   };
 }
 

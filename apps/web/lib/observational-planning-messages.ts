@@ -240,9 +240,8 @@ export function upsertObservationalPlanningMessage(
     }
   }
 
-  const previous = lastIndex >= 0 && isObservationalPlanningMessage(messages[lastIndex])
-    ? messages[lastIndex]
-    : null;
+  const previousMessage = lastIndex >= 0 ? messages[lastIndex] : undefined;
+  const previous = isObservationalPlanningMessage(previousMessage) ? previousMessage : null;
   const nextMessage = createObservationalPlanningMessage({
     candidateDrivers: "candidateDrivers" in update ? update.candidateDrivers : previous?.candidateDrivers,
     constraints: "constraints" in update ? update.constraints : previous?.constraints,

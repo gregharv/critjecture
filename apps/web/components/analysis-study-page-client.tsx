@@ -981,6 +981,66 @@ export function AnalysisStudyPageClient({
     window.localStorage.setItem(getDraftAutosaveKey(study.id), JSON.stringify(dagDraft));
   }, [dagDraft, study.id]);
 
+  const updateComparisonState = useCallback(
+    async (
+      body: Record<string, unknown>,
+      options?: {
+        fallbackMessage?: string;
+        pendingLabel?: string;
+        quiet?: boolean;
+        successMessage?: string;
+      },
+    ) => {
+      if (!options?.quiet) {
+        setComparisonPendingAction(options?.pendingLabel ?? "Syncing comparison state…");
+        setComparisonError(null);
+        setComparisonSuccessMessage(null);
+      }
+
+      try {
+        const response = await fetch(`/api/analysis/studies/${study.id}/comparison-state`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const json = (await response.json()) as unknown;
+
+        if (!response.ok) {
+          throw new Error(getErrorMessage(json, options?.fallbackMessage ?? "Failed to update comparison state."));
+        }
+
+        const next = json as {
+          comparisonState: {
+            recentComparisons: RecentComparisonEntry[];
+            snapshots: ComparisonSnapshot[];
+          };
+        };
+
+        setComparisonSnapshots(next.comparisonState.snapshots);
+        setRecentComparisons(next.comparisonState.recentComparisons);
+        setComparisonLastSyncedAt(Date.now());
+        if (!options?.quiet && options?.successMessage) {
+          setComparisonSuccessMessage(options.successMessage);
+        }
+      } catch (updateError) {
+        if (!options?.quiet) {
+          setComparisonError(
+            updateError instanceof Error
+              ? updateError.message
+              : options?.fallbackMessage ?? "Failed to update comparison state.",
+          );
+        }
+        throw updateError;
+      } finally {
+        if (!options?.quiet) {
+          setComparisonPendingAction(null);
+        }
+      }
+    },
+    [study.id],
+  );
 
   useEffect(() => {
     if (selectedNodeKey && !dagDraft?.nodes.some((node) => node.nodeKey === selectedNodeKey)) {
@@ -1167,67 +1227,6 @@ export function AnalysisStudyPageClient({
       }
     }
   }
-
-  const updateComparisonState = useCallback(
-    async (
-      body: Record<string, unknown>,
-      options?: {
-        fallbackMessage?: string;
-        pendingLabel?: string;
-        quiet?: boolean;
-        successMessage?: string;
-      },
-    ) => {
-      if (!options?.quiet) {
-        setComparisonPendingAction(options?.pendingLabel ?? "Syncing comparison state…");
-        setComparisonError(null);
-        setComparisonSuccessMessage(null);
-      }
-
-      try {
-        const response = await fetch(`/api/analysis/studies/${study.id}/comparison-state`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        const json = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(getErrorMessage(json, options?.fallbackMessage ?? "Failed to update comparison state."));
-        }
-
-        const next = json as {
-          comparisonState: {
-            recentComparisons: RecentComparisonEntry[];
-            snapshots: ComparisonSnapshot[];
-          };
-        };
-
-        setComparisonSnapshots(next.comparisonState.snapshots);
-        setRecentComparisons(next.comparisonState.recentComparisons);
-        setComparisonLastSyncedAt(Date.now());
-        if (!options?.quiet && options?.successMessage) {
-          setComparisonSuccessMessage(options.successMessage);
-        }
-      } catch (updateError) {
-        if (!options?.quiet) {
-          setComparisonError(
-            updateError instanceof Error
-              ? updateError.message
-              : options?.fallbackMessage ?? "Failed to update comparison state.",
-          );
-        }
-        throw updateError;
-      } finally {
-        if (!options?.quiet) {
-          setComparisonPendingAction(null);
-        }
-      }
-    },
-    [study.id],
-  );
 
   async function handleSaveStudyMetadata(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

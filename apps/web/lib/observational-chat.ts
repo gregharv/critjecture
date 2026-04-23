@@ -12,16 +12,7 @@ import {
   buildObservationalWorkspaceStatusAssistantSummary,
 } from "@/lib/observational-workspace-status-messages";
 
-type TypeboxLike = {
-  Array: (value: unknown) => unknown;
-  Boolean: () => unknown;
-  Integer: (options?: { minimum?: number }) => unknown;
-  Literal: (value: string) => unknown;
-  Object: (shape: Record<string, unknown>) => unknown;
-  Optional: (value: unknown) => unknown;
-  String: () => unknown;
-  Union: (values: unknown[]) => unknown;
-};
+type TypeboxLike = any;
 
 type ObservationalPlanningToolParams = {
   candidateDrivers?: string[];
