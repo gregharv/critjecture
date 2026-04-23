@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { getAppDatabase } from "@/lib/app-db";
-import { runCausalIntake } from "@/lib/causal-intake";
+import { runAnalysisIntake } from "@/lib/analysis-intake";
 import {
   datasetVersionColumns,
   datasetVersions,
@@ -182,13 +182,13 @@ describe("study dataset bindings", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
 
-      const intake = await runCausalIntake({
+      const intake = await runAnalysisIntake({
         message: "Did the pricing change affect conversion?",
         user: user!,
       });
-      expect(intake.decision).toBe("open_causal_study");
-      if (intake.decision !== "open_causal_study") {
-        throw new Error("Expected causal study creation.");
+      expect(intake.decision).toBe("open_rung2_study");
+      if (intake.decision !== "open_rung2_study") {
+        throw new Error("Expected analysis study creation.");
       }
 
       await seedDatasetFixture(user!.organizationId);
@@ -235,13 +235,13 @@ describe("study dataset bindings", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
 
-      const intake = await runCausalIntake({
+      const intake = await runAnalysisIntake({
         message: "What happens if we increase discount rate by five percent?",
         user: user!,
       });
-      expect(intake.decision).toBe("open_causal_study");
-      if (intake.decision !== "open_causal_study") {
-        throw new Error("Expected causal study creation.");
+      expect(intake.decision).toBe("open_rung2_study");
+      if (intake.decision !== "open_rung2_study") {
+        throw new Error("Expected analysis study creation.");
       }
 
       await seedDatasetFixture(user!.organizationId);
@@ -278,13 +278,13 @@ describe("study dataset bindings", () => {
       const user = await getAuthenticatedUserByEmail("owner@example.com");
       expect(user).not.toBeNull();
 
-      const intake = await runCausalIntake({
+      const intake = await runAnalysisIntake({
         message: "Did the onboarding change affect activation?",
         user: user!,
       });
-      expect(intake.decision).toBe("open_causal_study");
-      if (intake.decision !== "open_causal_study") {
-        throw new Error("Expected causal study creation.");
+      expect(intake.decision).toBe("open_rung2_study");
+      if (intake.decision !== "open_rung2_study") {
+        throw new Error("Expected analysis study creation.");
       }
 
       const initialReadiness = await getStudyDatasetBindingReadiness({

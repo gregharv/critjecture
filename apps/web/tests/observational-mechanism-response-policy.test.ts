@@ -52,6 +52,17 @@ describe("observational mechanism response policy", () => {
     ).toBe("challenge_direct_framing");
   });
 
+  it("uses clarification kind when the wording changes", () => {
+    expect(
+      classifyObservationalMechanismClarificationReply({
+        clarificationKind: "loaded_presupposition_reframe",
+        lastQuestion:
+          "Would you like me to treat the pressure-load relationship as a causal mechanism to explain, or first assess whether the correlation could be driven by a third factor or measurement artifact?",
+        latestMessage: "sure",
+      }),
+    ).toBe("challenge_direct_framing");
+  });
+
   it("maps explicit brainstorming requests to hypothesis mode", () => {
     expect(
       classifyObservationalMechanismClarificationReply({

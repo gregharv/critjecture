@@ -68,14 +68,14 @@ describe("buildChatSystemPrompt", () => {
     const prompt = buildChatSystemPrompt("owner");
 
     expect(prompt).toContain("do not present a causal conclusion in chat");
-    expect(prompt).toContain("dedicated causal workspace");
+    expect(prompt).toContain("dedicated analysis study workspace");
   });
 
   it("starts why-questions with observational decomposition before causal escalation", () => {
     const prompt = buildChatSystemPrompt("owner");
 
     expect(prompt).toContain("start with descriptive decomposition, competing explanations, and observational contributors first");
-    expect(prompt).toContain("Escalate to the causal workspace only when the user explicitly wants a causal or counterfactual conclusion");
+    expect(prompt).toContain("Escalate to the higher-rung analysis study workspace only when the user explicitly wants a causal or counterfactual conclusion");
   });
 
   it("encourages analytical back-and-forth when the question or data fit is still unclear", () => {
@@ -95,22 +95,22 @@ describe("buildChatSystemPrompt", () => {
     expect(prompt).toContain("UNTESTED HYPOTHESES for observational diagnostic decomposition");
   });
 
-  it("keeps predictive planning in chat before sending users to the predictive workspace", () => {
+  it("keeps observational planning in chat before sending users to the observational workspace", () => {
     const prompt = buildChatSystemPrompt("owner");
 
     expect(prompt).toContain("keep the interaction in chat first");
     expect(prompt).toContain("help the user define the target, prediction horizon");
-    expect(prompt).toContain("before recommending that they run the dedicated predictive workspace");
-    expect(prompt).toContain("use update_predictive_plan");
-    expect(prompt).toContain("use open_predictive_workspace");
-    expect(prompt).toContain("Prefer opening the predictive workspace in a new tab");
+    expect(prompt).toContain("before recommending that they run the dedicated observational workspace");
+    expect(prompt).toContain("use update_observational_plan");
+    expect(prompt).toContain("use open_observational_workspace");
+    expect(prompt).toContain("Prefer opening the observational workspace in a new tab");
     expect(prompt).toContain("give a short business-readable handoff summary");
-    expect(prompt).toContain("Objective, Target, Horizon, Candidate Drivers, Constraints, Success Metric, and Ready for Predictive Workspace");
+    expect(prompt).toContain("Objective, Target, Horizon, Candidate Drivers, Constraints, Success Metric, and Ready for Observational Workspace");
     expect(prompt).toContain("Do not force business users to speak in modeling jargon");
     expect(prompt).toContain("end with the clearest next planning question");
-    expect(prompt).toContain("Refresh update_predictive_plan whenever the target, horizon, candidate drivers, constraints, success metric, or readiness status changes");
-    expect(prompt).toContain("If a predictive workspace update returns to chat, explain what the run means in business terms, recommend the next step based on signal quality");
-    expect(prompt).toContain("instrumental / heuristic rather than causal");
+    expect(prompt).toContain("Refresh update_observational_plan whenever the target, horizon, candidate drivers, constraints, success metric, or readiness status changes");
+    expect(prompt).toContain("If an observational workspace update returns to chat, explain what the run means in business terms, recommend the next step based on signal quality");
+    expect(prompt).toContain("observational / heuristic rather than causal");
     expect(prompt).toContain("asking what would happen if they changed a policy, treatment, price, or intervention");
   });
 });

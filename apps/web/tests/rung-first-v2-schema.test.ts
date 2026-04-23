@@ -1,0 +1,81 @@
+import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+
+import { getAppDatabase } from "@/lib/app-db";
+import {
+  createTestAppEnvironment,
+  resetTestAppState,
+} from "@/tests/helpers/test-environment";
+
+describe("rung-first V2 schema baseline", () => {
+  afterEach(async () => {
+    await resetTestAppState();
+  });
+
+  it("boots the clean-slate V2 schema around the rung-first analysis core instead of chat/workflow tables", async () => {
+    const environment = await createTestAppEnvironment();
+
+    try {
+      await getAppDatabase();
+
+      const sqlite = new Database(environment.databaseFilePath, { readonly: true });
+
+      const tableNames = new Set(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all()
+          .map((row) => String((row as { name: string }).name)),
+      );
+
+      const indexNames = new Set(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+          .all()
+          .map((row) => String((row as { name: string }).name)),
+      );
+
+      const classificationColumns = new Set(
+        sqlite
+          .prepare("PRAGMA table_info('intent_classifications')")
+          .all()
+          .map((row) => String((row as { name: string }).name)),
+      );
+
+      sqlite.close();
+
+      expect(tableNames.has("causal_studies")).toBe(true);
+      expect(tableNames.has("study_questions")).toBe(true);
+      expect(tableNames.has("intent_classifications")).toBe(true);
+      expect(tableNames.has("causal_dag_versions")).toBe(true);
+      expect(tableNames.has("causal_runs")).toBe(true);
+      expect(tableNames.has("causal_answer_packages")).toBe(true);
+      expect(tableNames.has("causal_comparison_snapshots")).toBe(true);
+      expect(tableNames.has("causal_recent_comparisons")).toBe(true);
+      expect(tableNames.has("predictive_runs")).toBe(true);
+      expect(tableNames.has("predictive_results")).toBe(true);
+      expect(tableNames.has("predictive_answer_packages")).toBe(true);
+      expect(tableNames.has("predictive_answers")).toBe(true);
+
+      expect(tableNames.has("conversations")).toBe(false);
+      expect(tableNames.has("chat_turns")).toBe(false);
+      expect(tableNames.has("workflow_runs")).toBe(false);
+      expect(tableNames.has("analysis_results")).toBe(false);
+
+      expect(indexNames.has("study_dataset_bindings_one_active_primary_idx")).toBe(true);
+      expect(indexNames.has("compute_runs_predictive_run_id_idx")).toBe(true);
+      expect(indexNames.has("causal_comparison_snapshots_user_study_name_idx")).toBe(true);
+      expect(indexNames.has("causal_recent_comparisons_user_pair_idx")).toBe(true);
+      expect(indexNames.has("predictive_answer_packages_run_idx")).toBe(true);
+
+      expect(classificationColumns.has("is_analytical")).toBe(true);
+      expect(classificationColumns.has("required_rung")).toBe(true);
+      expect(classificationColumns.has("task_form")).toBe(true);
+      expect(classificationColumns.has("guardrail_flag")).toBe(true);
+      expect(classificationColumns.has("routing_decision")).toBe(true);
+      expect(classificationColumns.has("intent_type")).toBe(false);
+      expect(classificationColumns.has("is_causal")).toBe(false);
+    } finally {
+      await environment.cleanup();
+    }
+  });
+});

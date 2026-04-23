@@ -19,11 +19,13 @@ This file indexes the project documents that live in the repository root and in 
 - [Sandbox Decisions](sandbox.md)
 - [Polars Guardrails](polars_guardrails.md)
 - [Analysis Routing Decision Tree Specification](analysis_routing_decision_tree.md)
-- [Causal Intent Gate And DAG Workflow Implementation Plan](causal_guardrail_implementation_plan.md)
-- [Causal V2 Database Schema Specification](causal_v2_db_schema_spec.md)
-- [Causal V2 Implementation Coordination Plan](causal_v2_implementation_coordination_plan.md)
-- [Open Source Analytical Guardrails Python-First Proposal](open_source_analytical_guardrails_python_first_proposal.md)
+- [Rung-First Overhaul Plan](rung_first_overhaul_plan.md)
+- [Rung-First Analysis Intake, Study Workflow, And Inference Guardrail Implementation Plan](causal_guardrail_implementation_plan.md)
+- [Causal Presupposition Guardrail Specification](causal_presupposition_guardrail.md)
 - [Observational Mechanism Response Policy Classifier Specification](observational_mechanism_response_policy.md)
+- [Rung-First V2 Database Schema Specification](causal_v2_db_schema_spec.md)
+- [Rung-First V2 Implementation Coordination Plan](causal_v2_implementation_coordination_plan.md)
+- [Open Source Analytical Guardrails Python-First Proposal](open_source_analytical_guardrails_python_first_proposal.md)
 
 ## apps/web/docs
 

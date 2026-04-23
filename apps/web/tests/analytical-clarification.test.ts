@@ -49,9 +49,23 @@ describe("analytical clarification helpers", () => {
         "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?",
         "yes there is a pattern just look at the correlation",
         "Before we assume a direct pathway, do you want to first check whether the pattern could reflect omitted context or a common driver, or are you asking only for possible mechanisms?",
+        "loaded_presupposition_reframe",
       ),
     ).toBe(
       "We found a statistically significant correlation between pressure and load. What mechanism explains it? Assuming the telemetry is accurate, what physical pathway forces the outcome?\nTreat this as a concise observational response. Confirm the pattern only if the data supports it, say the observational pattern alone does not establish a direct mechanism, and give the shortest likely shared-driver, synchronized-demand, or omitted-context explanation instead of listing speculative pathways.",
+    );
+  });
+
+  it("uses clarification kind instead of exact wording for loaded-causal follow-ups", () => {
+    expect(
+      buildEffectiveAnalyticalPrompt(
+        "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
+        "sure",
+        "Would you like me to treat the pressure-load relationship as a causal mechanism to explain, or first assess whether the correlation could be driven by a third factor or measurement artifact?",
+        "loaded_presupposition_reframe",
+      ),
+    ).toBe(
+      "We found a statistically significant correlation between pressure and load. What mechanism explains it?\nTreat this as a concise observational response. Confirm the pattern only if the data supports it, say the observational pattern alone does not establish a direct mechanism, and prioritize shared-driver, synchronized-demand, or omitted-context explanations over direct causal storytelling.",
     );
   });
 
@@ -99,13 +113,13 @@ describe("analytical clarification helpers", () => {
 
     expectOneOf(
       buildAnalyticalClarificationBannerEyebrow(
-        "causal_risk",
+        "guardrail",
         "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
       ),
       [
-        "Checking the causal framing",
+        "Checking the higher-rung framing",
         "Pressure-testing the causal story",
-        "Checking causal assumptions",
+        "Checking higher-rung assumptions",
       ],
     );
   });
@@ -122,13 +136,13 @@ describe("analytical clarification helpers", () => {
 
     expectOneOf(
       buildAnalyticalClarificationBannerLead(
-        "causal_risk",
+        "guardrail",
         "We found a statistically significant correlation between pressure and load. What mechanism explains it?",
       ),
       [
-        "Before I analyze this, I want to pressure-test the causal framing a bit.",
-        "Before I analyze this, I want to check the causal framing before we run with it.",
-        "Before I analyze this, I want to make sure we are not jumping from a pattern to a causal story too quickly.",
+        "Before I analyze this, I want to pressure-test the higher-rung framing a bit.",
+        "Before I analyze this, I want to check whether this really needs a causal framing before we run with it.",
+        "Before I analyze this, I want to make sure we are not jumping from a pattern to a higher-rung story too quickly.",
       ],
     );
   });
@@ -149,8 +163,8 @@ describe("analytical clarification helpers", () => {
       },
     );
 
-    expect(clarificationIntent.epistemicPosture).toBe("causal_risk");
-    expect(clarificationIntent.clarificationKind).toBe("loaded_causal_reframe");
+    expect(clarificationIntent.epistemicPosture).toBe("guardrail");
+    expect(clarificationIntent.clarificationKind).toBe("loaded_presupposition_reframe");
     expect(clarificationIntent.loadedQuestionFraming).toBe(true);
   });
 
@@ -176,7 +190,7 @@ describe("analytical clarification helpers", () => {
     expectOneOf(clarification.question, [
       "explain a change in conversion",
       "explanation for a change in it",
-      "causal answer about what changed it",
+      "higher-rung answer about what would change it",
     ]);
     expect(clarification.question).not.toContain("To make this analysis useful, can you clarify");
   });
@@ -233,7 +247,7 @@ describe("analytical clarification helpers", () => {
       },
     );
 
-    expect(clarification.epistemicPosture).toBe("causal_risk");
+    expect(clarification.epistemicPosture).toBe("guardrail");
     expectOneOf(clarification.question, [
       "shared driver or confounding pattern",
       "challenge the direct-causation framing",
@@ -305,10 +319,10 @@ describe("analytical clarification helpers", () => {
         reason: "test",
         routingDecision: "ask_clarification",
       },
-      "causal_risk",
+      "guardrail",
     );
 
-    expect(clarification.epistemicPosture).toBe("causal_risk");
+    expect(clarification.epistemicPosture).toBe("guardrail");
     expectOneOf(clarification.question, [
       "Before we jump from a pattern to a causal story",
       "I don't want to overread an observed pattern as a causal explanation too quickly.",

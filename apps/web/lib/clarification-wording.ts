@@ -126,7 +126,7 @@ export async function generateClarificationWording(
           "Use the structured input exactly as constraints.",
           "Do not ask for information the user already provided.",
           "Ask exactly one clarification question.",
-          "If the posture is causal_risk or the clarificationKind is loaded_causal_reframe, do not accept the user's causal framing as established fact.",
+          "If the posture is guardrail or the clarificationKind is loaded_presupposition_reframe, do not accept the user's causal framing as established fact.",
           "Write like a polished customer-facing assistant, not an internal template.",
           "Use the user's context naturally so the question feels specific to their request.",
           "Keep the wording natural, concise, and non-templated.",

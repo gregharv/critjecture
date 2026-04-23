@@ -1,3 +1,5 @@
+import type { AnalyticalClarificationKind as ClarificationKind } from "@/lib/analytical-clarification-types";
+
 function normalizeText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -135,12 +137,16 @@ export function isLoadedMechanismReframeQuestion(question: string | null | undef
 }
 
 export function classifyObservationalMechanismClarificationReply(input: {
+  clarificationKind?: ClarificationKind | null;
   latestMessage: string;
   lastQuestion?: string | null;
 }): ObservationalMechanismReplyPreference {
   const latest = normalizeText(input.latestMessage);
+  const isLoadedClarification =
+    input.clarificationKind === "loaded_presupposition_reframe" ||
+    isLoadedMechanismReframeQuestion(input.lastQuestion);
 
-  if (!latest || !isLoadedMechanismReframeQuestion(input.lastQuestion)) {
+  if (!latest || !isLoadedClarification) {
     return "none";
   }
 

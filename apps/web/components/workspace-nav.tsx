@@ -27,10 +27,10 @@ export function WorkspaceNav({
   const activePage =
     pathname.startsWith("/chat")
       ? "chat"
-      : pathname.startsWith("/predictive")
-        ? "predictive"
-        : pathname.startsWith("/causal")
-          ? "causal"
+      : pathname.startsWith("/analysis/observational")
+        ? "observational"
+        : pathname.startsWith("/analysis")
+          ? "analysis"
           : pathname.startsWith("/knowledge")
             ? "knowledge"
             : pathname.startsWith("/workflows")
@@ -85,18 +85,18 @@ export function WorkspaceNav({
               Chat
             </Link>
             <Link
-              className={`shell-nav__link ${activePage === "predictive" ? "is-active" : ""}`}
-              href="/predictive"
+              className={`shell-nav__link ${activePage === "observational" ? "is-active" : ""}`}
+              href="/analysis/observational"
               onClick={closeMenu}
             >
-              Predictive
+              Observational
             </Link>
             <Link
-              className={`shell-nav__link ${activePage === "causal" ? "is-active" : ""}`}
-              href="/causal"
+              className={`shell-nav__link ${activePage === "analysis" ? "is-active" : ""}`}
+              href="/analysis"
               onClick={closeMenu}
             >
-              Causal
+              Analysis
             </Link>
             <Link
               className={`shell-nav__link ${activePage === "knowledge" ? "is-active" : ""}`}

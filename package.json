@@ -15,7 +15,6 @@
     "test:all": "pnpm --filter web test:all",
     "smoke:ui:local": "node ./scripts/playwright-local-ui-smoke.mjs",
     "db:migrate": "pnpm --filter web db:migrate",
-    "archive:legacy": "pnpm --filter web archive:legacy",
     "import:v1-foundations": "pnpm --filter web import:v1-foundations",
     "sandbox-supervisor:start": "pnpm --filter sandbox-supervisor start",
     "backup:create": "pnpm --filter web backup:create",

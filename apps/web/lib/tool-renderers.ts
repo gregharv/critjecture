@@ -710,7 +710,7 @@ function renderUpdatePredictivePlanToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("Predictive Planning", result);
+    return renderCollapsedToolError("Observational Planning", result);
   }
 
   const parsedParams = parseToolParams(params);
@@ -723,10 +723,10 @@ function renderUpdatePredictivePlanToolCard(
     getStringValue(details, "successMetric") || getStringValue(parsedParams, "successMetric");
   const nextQuestion =
     getStringValue(details, "nextQuestion") || getStringValue(parsedParams, "nextQuestion");
-  const readyForPredictiveWorkspace =
-    isRecord(details) && "readyForPredictiveWorkspace" in details
-      ? getBooleanValue(details, "readyForPredictiveWorkspace")
-      : getBooleanValue(parsedParams, "readyForPredictiveWorkspace");
+  const readyForObservationalWorkspace =
+    isRecord(details) && ("readyForObservationalWorkspace" in details || "readyForPredictiveWorkspace" in details)
+      ? getBooleanValue(details, "readyForObservationalWorkspace") || getBooleanValue(details, "readyForPredictiveWorkspace")
+      : getBooleanValue(parsedParams, "readyForObservationalWorkspace") || getBooleanValue(parsedParams, "readyForPredictiveWorkspace");
   const candidateDrivers = [
     ...new Set([
       ...getStringArrayValue(details, "candidateDrivers"),
@@ -741,11 +741,11 @@ function renderUpdatePredictivePlanToolCard(
       <div class="crit-tool">
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
-            <span class="crit-tool__eyebrow">Predictive Planning Panel</span>
+            <span class="crit-tool__eyebrow">Observational Planning Panel</span>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
-              ? readyForPredictiveWorkspace
+              ? readyForObservationalWorkspace
                 ? "Ready"
                 : "Updated"
               : state === "error"
@@ -776,7 +776,7 @@ function renderUpdatePredictivePlanToolCard(
             </section>`
           : nothing}
 
-        ${nextQuestion && !readyForPredictiveWorkspace
+        ${nextQuestion && !readyForObservationalWorkspace
           ? html`<section class="crit-tool__section">
               <div class="crit-tool__label">Next Question</div>
               <p class="crit-tool__summary">${nextQuestion}</p>
@@ -784,9 +784,9 @@ function renderUpdatePredictivePlanToolCard(
           : nothing}
 
         <div class="crit-tool__empty">
-          ${readyForPredictiveWorkspace
-            ? "The chat-side predictive planning panel is ready for handoff."
-            : "The chat-side predictive planning panel was updated so planning can continue here."}
+          ${readyForObservationalWorkspace
+            ? "The chat-side observational planning panel is ready for handoff."
+            : "The chat-side observational planning panel was updated so planning can continue here."}
         </div>
       </div>
     `,
@@ -800,7 +800,7 @@ function renderOpenPredictiveWorkspaceToolCard(
   isStreaming?: boolean,
 ) {
   if (result?.isError) {
-    return renderCollapsedToolError("Predictive Handoff", result);
+    return renderCollapsedToolError("Observational Handoff", result);
   }
 
   const parsedParams = parseToolParams(params);
@@ -847,7 +847,7 @@ function renderOpenPredictiveWorkspaceToolCard(
       <div class="crit-tool">
         <div class="crit-tool__header">
           <div class="crit-tool__heading">
-            <span class="crit-tool__eyebrow">Predictive Workspace Handoff</span>
+            <span class="crit-tool__eyebrow">Observational Workspace Handoff</span>
           </div>
           <span class="crit-tool__status crit-tool__status--${state}">
             ${state === "complete"
@@ -863,7 +863,7 @@ function renderOpenPredictiveWorkspaceToolCard(
         </div>
 
         ${state === "running"
-          ? html`<div class="crit-tool__empty">Preparing the predictive workspace handoff…</div>`
+          ? html`<div class="crit-tool__empty">Preparing the observational workspace handoff…</div>`
           : nothing}
 
         ${targetColumn || taskKind || preset || datasetVersionId || timeColumn || horizon
@@ -907,7 +907,7 @@ function renderOpenPredictiveWorkspaceToolCard(
                       rel="noreferrer"
                       target="_blank"
                     >
-                      Open Predictive Workspace
+                      Open Observational Workspace
                     </a>`
                   : nothing}
                 ${returnToChat
@@ -1097,9 +1097,21 @@ export function registerCritjectureToolRenderers(registry: ToolRendererRegistry)
     },
   });
 
+  registry.registerToolRenderer("update_observational_plan", {
+    render(params, result, isStreaming) {
+      return renderUpdatePredictivePlanToolCard(params, result, isStreaming);
+    },
+  });
+
   registry.registerToolRenderer("update_predictive_plan", {
     render(params, result, isStreaming) {
       return renderUpdatePredictivePlanToolCard(params, result, isStreaming);
+    },
+  });
+
+  registry.registerToolRenderer("open_observational_workspace", {
+    render(params, result, isStreaming) {
+      return renderOpenPredictiveWorkspaceToolCard(params, result, isStreaming);
     },
   });
 

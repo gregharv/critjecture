@@ -80,19 +80,32 @@ const studyQuestionTypeValues = [
   "other",
 ] as const;
 const studyQuestionStatusValues = ["open", "clarifying", "ready", "closed", "archived"] as const;
-const intentTypeValues = [
-  "descriptive",
-  "associational",
-  "predictive",
-  "diagnostic",
-  "causal",
-  "counterfactual",
-  "unclear",
+const classificationRequiredRungValues = [
+  "rung_1_observational",
+  "rung_2_interventional",
+  "rung_3_counterfactual",
+] as const;
+const classificationTaskFormValues = [
+  "describe",
+  "predict",
+  "explain",
+  "advise",
+  "compare",
+  "teach",
+  "critique",
+  "unknown",
+] as const;
+const classificationGuardrailFlagValues = [
+  "none",
+  "unsupported_rung_jump",
+  "unsupported_direct_mechanism",
+  "unsupported_actual_cause_presupposition",
 ] as const;
 const routingDecisionValues = [
-  "continue_descriptive",
-  "open_predictive_analysis",
-  "open_causal_study",
+  "continue_chat",
+  "open_rung1_analysis",
+  "open_rung2_study",
+  "open_rung3_study",
   "ask_clarification",
   "blocked",
 ] as const;
@@ -626,15 +639,27 @@ export const intentClassifications = sqliteTable(
     classifierModelName: text("classifier_model_name").notNull(),
     classifierPromptVersion: text("classifier_prompt_version").notNull(),
     rawOutputJson: text("raw_output_json").notNull(),
-    isCausal: integer("is_causal", { mode: "boolean" }).notNull(),
-    intentType: text("intent_type", { enum: intentTypeValues }).notNull(),
+    isAnalytical: integer("is_analytical", { mode: "boolean" }).notNull(),
+    requiredRung: text("required_rung", { enum: classificationRequiredRungValues }),
+    taskForm: text("task_form", { enum: classificationTaskFormValues }).notNull(),
+    guardrailFlag: text("guardrail_flag", { enum: classificationGuardrailFlagValues }).notNull(),
     confidence: real("confidence").notNull(),
     reasonText: text("reason_text").notNull(),
     routingDecision: text("routing_decision", { enum: routingDecisionValues }).notNull(),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    enumCheck("intent_classifications_intent_type_check", table.intentType, intentTypeValues),
+    enumCheck(
+      "intent_classifications_required_rung_check",
+      table.requiredRung,
+      classificationRequiredRungValues,
+    ),
+    enumCheck("intent_classifications_task_form_check", table.taskForm, classificationTaskFormValues),
+    enumCheck(
+      "intent_classifications_guardrail_flag_check",
+      table.guardrailFlag,
+      classificationGuardrailFlagValues,
+    ),
     enumCheck("intent_classifications_routing_decision_check", table.routingDecision, routingDecisionValues),
     index("intent_classifications_question_created_at_idx").on(table.studyQuestionId, table.createdAt),
     index("intent_classifications_org_created_at_idx").on(table.organizationId, table.createdAt),
@@ -1589,3 +1614,31 @@ export const governanceJobs = sqliteTable(
     index("governance_jobs_type_completed_at_idx").on(table.jobType, table.completedAt),
   ],
 );
+
+// Rung-first compatibility aliases used during the V2 naming transition.
+export const analysisStudies = causalStudies;
+export const analysisClassifications = intentClassifications;
+export const analysisGraphs = causalDags;
+export const analysisGraphVersions = causalDagVersions;
+export const analysisGraphNodes = causalDagNodes;
+export const analysisGraphEdges = causalDagEdges;
+export const analysisAssumptions = causalAssumptions;
+export const analysisDataRequirements = causalDataRequirements;
+export const analysisApprovals = causalApprovals;
+export const studyApprovals = causalApprovals;
+export const analysisRuns = causalRuns;
+export const analysisRunDatasetBindings = causalRunDatasetBindings;
+export const analysisIdentifications = causalIdentifications;
+export const analysisEstimands = causalEstimands;
+export const analysisEstimates = causalEstimates;
+export const analysisRefutations = causalRefutations;
+export const analysisComparisonSnapshots = causalComparisonSnapshots;
+export const analysisRecentComparisons = causalRecentComparisons;
+export const analysisAnswerPackages = causalAnswerPackages;
+export const analysisAnswers = causalAnswers;
+export const answerPackages = causalAnswerPackages;
+export const answers = causalAnswers;
+export const observationalRuns = predictiveRuns;
+export const observationalResults = predictiveResults;
+export const observationalAnswerPackages = predictiveAnswerPackages;
+export const observationalAnswers = predictiveAnswers;

@@ -1,21 +1,31 @@
-# Analysis Routing Decision Tree Specification
+# Rung-First Analysis Routing Decision Tree Specification
 
 Status: proposed implementation baseline  
-Date: 2026-04-21  
-Related documents: [`causal_guardrail_implementation_plan.md`](./causal_guardrail_implementation_plan.md), [`causal_v2_db_schema_spec.md`](./causal_v2_db_schema_spec.md), [`causal_v2_implementation_coordination_plan.md`](./causal_v2_implementation_coordination_plan.md)
+Date: 2026-04-23  
+Related documents: [`causal_presupposition_guardrail.md`](./causal_presupposition_guardrail.md), [`causal_guardrail_implementation_plan.md`](./causal_guardrail_implementation_plan.md), [`causal_v2_db_schema_spec.md`](./causal_v2_db_schema_spec.md)
 
 ## Purpose
 
-This document freezes the intended question-routing and claim-governance behavior for the next implementation pass.
+This document replaces the older mixed intent taxonomy with a **rung-first routing model**.
 
-It adds two major decisions on top of the existing causal-first rebuild:
+The classifier should no longer treat `descriptive`, `associational`, `predictive`, `diagnostic`, `causal`, and `counterfactual` as one flat conceptual layer.
 
-1. use the explicit decision tree below instead of the simpler descriptive-vs-causal split
-2. use:
-   - **CatBoost** for the associational / predictive path
-   - **DoWhy + EconML DML** for the primary backdoor causal estimation path
+Instead, routing must answer three separate questions:
 
-This is a **spec-first** document. It intentionally gets ahead of the current implementation so code can be updated against a stable contract later.
+1. is this **ordinary chat** or a **dataset-backed analytical request**?
+2. if analytical, what is the **minimum Pearl rung** required for a non-misleading answer?
+3. what **task form** is the user asking for, and is there any **unsupported rung jump** or causal presupposition that must be challenged first?
+
+---
+
+## Core design rule
+
+Classify by the **minimum rung required for a non-misleading answer**.
+
+- Do **not** escalate just because the user used words like “cause,” “why,” or “mechanism.”
+- Do escalate when the requested answer would otherwise silently convert:
+  - observational pattern -> intervention effect, or
+  - observational pattern -> actual-cause / but-for judgment.
 
 ---
 
@@ -24,207 +34,210 @@ This is a **spec-first** document. It intentionally gets ahead of the current im
 ```text
 START
 |
-|-- 1. Classify the user's question
+|-- 1. Is this ordinary chat or dataset-backed analysis?
 |      |
-|      |-- A. Descriptive
+|      |-- A. Ordinary chat
 |      |      Examples:
-|      |      - "What happened?"
-|      |      - "Summarize this dataset"
+|      |      - "What is Pearl's ladder of causation?"
+|      |      - "Compare causal inference methods"
+|      |      - "Explain counterfactual reasoning"
 |      |      |
-|      |      -> Run descriptive analysis
-|      |      -> Allowed outputs:
-|      |         counts, trends, segment comparisons
-|      |      -> Claim label:
-|      |         DESCRIPTIVE (Observation statement)
+|      |      -> Route: continue_chat
+|      |      -> No analytical workflow routing
 |      |
-|      |-- B. Associational / Instrumental Predictive
+|      |-- B. Dataset-backed analytical request
+|             -> Go to 2
+|
+|-- 2. What is the minimum required rung?
+|      |
+|      |-- A. Rung 1: observational
+|      |      Use when the question can be answered with:
+|      |      - description of what happened
+|      |      - association/correlation
+|      |      - forecasting from observed patterns
+|      |      - observational decomposition
+|      |      - tentative contributors or hypotheses
+|      |      |
 |      |      Examples:
-|      |      - "What is correlated with churn?"
-|      |      - "Forecast next month's sales"
+|      |      - "What happened to churn in March?"
+|      |      - "What correlates with churn?"
+|      |      - "Forecast next month's churn"
+|      |      - "Why did churn spike in March?" (default case)
 |      |      |
-|      |      -> Run statistical / ML workflow
-|      |      -> Allowed outputs:
-|      |         correlations, predictive weights, forecasts
-|      |      -> Forbidden:
-|      |         causal wording; treating associations as universal laws
-|      |      -> Claim label:
-|      |         INSTRUMENTAL / HEURISTIC PREDICTION
+|      |      -> Go to 3
 |      |
-|      |-- C. Explanation / Diagnostic
+|      |-- B. Rung 2: interventional
+|      |      Use when the question asks:
+|      |      - what happens if we do/set/change X
+|      |      - how to increase/decrease Y via intervention
+|      |      - the effect of a policy/treatment/decision
+|      |      |
 |      |      Examples:
-|      |      - "Why did churn spike in March?"
+|      |      - "What happens if we cut price by 10%?"
+|      |      - "How can we reduce churn?" (intervention sense)
+|      |      - "What is the effect of campaign A on sales?"
 |      |      |
-|      |      -> Go to 2
+|      |      -> Go to 4
 |      |
-|      |-- D. Explicit Causal Conjecture
+|      |-- C. Rung 3: counterfactual / actual-cause
+|             Use when the question asks:
+|             - whether X was the reason for this particular outcome
+|             - whether the outcome would still have happened without X
+|             - but-for, responsibility, or actual-cause judgments
+|             |
 |             Examples:
-|             - "Did campaign A cause the increase in sales?"
-|             - "Would churn have been lower without that change?"
+|             - "Would churn have been lower if we had not changed onboarding?"
+|             - "Was the onboarding change the reason churn spiked?"
+|             - "Would this outage have happened without the cache flush?"
 |             |
 |             -> Go to 5
 |
-|-- 2. For explanation/diagnostic questions:
-|      "Can this be answered purely descriptively first?"
+|-- 3. Rung 1 observational path
 |      |
-|      |-- Yes
-|      |     -> Decompose the change to generate hypotheses:
-|      |        - what changed over time?
-|      |        - which segments contributed most?
+|      |-- 3a. Classify task form separately:
+|      |      - describe
+|      |      - predict
+|      |      - explain
+|      |      - advise
+|      |      - compare
+|      |      - teach
+|      |      - critique
 |      |
-|      |     -> Output:
-|      |        "candidate conjectures"
-|      |     -> Claim label:
-|      |        UNTESTED HYPOTHESES
-|      |     -> Then go to 3
+|      |-- 3b. Check presupposition guardrail
+|      |      |
+|      |      |-- If unsupported rung jump / direct mechanism claim is embedded
+|      |      |     -> Route: ask_clarification
+|      |      |     -> Challenge framing before analysis
+|      |      |
+|      |      |-- Otherwise
+|      |            -> Route: open_rung1_analysis
 |      |
-|      |-- No
-|            -> Go to 3
+|      |-- 3c. Allowed outputs
+|      |      - descriptions and summaries
+|      |      - associations and predictors
+|      |      - forecasts
+|      |      - observational decomposition
+|      |      - explanatory hypotheses stated as hypotheses
+|      |
+|      |-- 3d. Forbidden outputs
+|             - intervention-effect claims
+|             - actual-cause verdicts
+|             - direct mechanism claims presented as established
 |
-|-- 3. Is this a mechanism search?
+|-- 4. Rung 2 interventional path
 |      |
-|      |-- Yes
-|      |     |
-|      |     -> Build dependency/path analysis
-|      |     -> Attempt to falsify competing pathways
-|      |     -> Output:
-|      |        surviving (un-falsified) pathways, severity of tests passed
-|      |     -> Claim label:
-|      |        CORROBORATED ROOT-CAUSE CONJECTURE
-|      |     -> Then go to 4
+|      |-- Required before estimation
+|      |      - intervention/treatment defined
+|      |      - outcome defined
+|      |      - unit of analysis defined
+|      |      - time horizon defined
+|      |      - assumptions formalized explicitly
 |      |
-|      |-- No
-|            -> Go to 4
+|      |-- If missing / not formalizable
+|      |     -> Route: ask_clarification or blocked
+|      |
+|      |-- If formalizable
+|            -> Route: open_rung2_study
 |
-|-- 4. Does the user seek a causal/counterfactual conclusion?
+|-- 5. Rung 3 counterfactual / actual-cause path
 |      |
-|      |-- No
-|      |     -> Stop here
-|      |     -> Return:
-|      |        un-falsified descriptive contributors
-|      |     -> Include disclaimer:
-|      |        "These represent observational regularities, but are
-|      |         not severely tested causal claims."
+|      |-- Required before estimation
+|      |      - factual outcome/case identified
+|      |      - alternative state/action defined
+|      |      - unit/case specificity explicit
+|      |      - structural assumptions support counterfactual reasoning
 |      |
-|      |-- Yes
-|            -> Reframe into explicit causal conjecture
-|            -> Go to 5
-|
-|-- 5. Can the system define a testable causal setup?
+|      |-- If missing / not formalizable
+|      |     -> Route: ask_clarification or blocked
 |      |
-|      |-- Required:
-|      |     - treatment clearly defined and logically isolatable
-|      |     - outcome clearly defined
-|      |     - unit of analysis clear
-|      |
-|      |-- No
-|      |     -> Block causal testing
-|      |     -> Claim label:
-|      |        UNFALSIFIABLE CONJECTURE
-|      |
-|      |-- Yes
-|            -> Go to 6
-|
-|-- 6. Does treatment logically precede outcome?
-|      |
-|      |-- No / unknown
-|      |     -> Block causal claim
-|      |     -> Return:
-|      |        "Hypothesis falsified/rejected a priori: temporal order
-|      |         violates causal logic."
-|      |
-|      |-- Yes
-|            -> Go to 7
-|
-|-- 7. Is the data capable of providing a severe test?
-|      |
-|      |-- No
-|      |     Examples:
-|      |     - severe selection bias
-|      |     - post-treatment controls only
-|      |     |
-|      |     -> Do not estimate effect
-|      |     -> Claim label:
-|      |        SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA
-|      |
-|      |-- Yes
-|            -> Go to 8
-|
-|-- 8. Can assumptions be formalized as a strictly falsifiable graph?
-|      |
-|      |-- No
-|      |     -> Return:
-|      |        "A causal test requires formal structural assumptions
-|      |         that expose the hypothesis to refutation."
-|      |
-|      |-- Yes
-|            -> Go to 9
-|
-|-- 9. Is there a strategy to isolate the hypothesis for testing?
-|      |
-|      |-- Backdoor / IV / Diff-in-diff / RDD
-|      |     -> run estimation strategy to isolate the theoretical effect
-|      |
-|      |-- None
-|            -> Stop
-|            -> Return:
-|               "The conjecture is causal, but the effect cannot be
-|                isolated for a severe test using current data."
-|
-|-- 10. Subject to Severe Testing (Falsification Attempts)
-|       |
-|       |-- placebo treatment test (attempt to find effect where none exists)
-|       |-- negative controls (attempt to break the isolation strategy)
-|       |-- sensitivity to hidden confounding (stress-test assumptions)
-|       |
-|       -> Go to 11
-|
-|-- 11. Compose final epistemic verdict
-|        |
-|        |-- If it survives all severe tests
-|        |     -> Claim label:
-|        |        CORROBORATED CAUSAL CONJECTURE
-|        |     -> Say:
-|        |        "The conjecture that X causes Y was subjected to severe
-|        |         testing and remains unfalsified."
-|        |
-|        |-- If it fails some stress tests
-|        |     -> Claim label:
-|        |        WEAKLY CORROBORATED
-|        |     -> Say:
-|        |        "The causal conjecture survived baseline tests but was
-|        |         partially falsified under stricter assumptions. It
-|        |         requires theoretical reformulation."
-|        |
-|        |-- If placebo/negative control tests fail
-|              -> Claim label:
-|                 FALSIFIED CAUSAL CONJECTURE
-|              -> Say:
-|                 "The data decisively falsifies the causal claim. The
-|                  observed effect is driven by confounding or noise."
+|      |-- If formalizable
+|            -> Route: open_rung3_study
 ```
 
 ---
 
-## Standardized intent taxonomy
+## Canonical classifier axes
 
-The classifier should support these intent types:
+## 1) Analytical mode
 
-- `descriptive`
-- `associational`
-- `predictive`
-- `diagnostic`
-- `causal`
-- `counterfactual`
-- `unclear`
+Allowed values:
+- `ordinary_chat`
+- `dataset_backed_analysis`
+
+### Rule
+A conceptual or educational discussion of causation does **not** become a rung-2 or rung-3 request just because it mentions causal ideas.
+
+---
+
+## 2) Required rung
+
+Allowed values:
+- `rung_1_observational`
+- `rung_2_interventional`
+- `rung_3_counterfactual`
 
 ### Interpretation rules
 
-- `descriptive` means observational summarization with no modeling claim beyond what happened.
-- `associational` means correlational or explanatory-pattern analysis that does not imply intervention effects.
-- `predictive` means supervised learning or forecasting focused on prediction quality rather than causal interpretation.
-- `diagnostic` means explanation of an observed change or underperformance using observational decomposition and possible escalation.
-- `causal` means an explicit intervention or effect question.
-- `counterfactual` means a what-if or but-for question that must enter the causal workflow.
+#### `rung_1_observational`
+Use for:
+- what happened
+- what is associated with what
+- what predicts what from observed patterns
+- observational decomposition of changes
+- tentative contributors and hypotheses
+
+#### `rung_2_interventional`
+Use for:
+- what happens if we change X
+- what is the effect of doing X
+- how to change Y through an action or policy
+
+#### `rung_3_counterfactual`
+Use for:
+- would Y still have happened without X
+- was X the reason for this particular realized outcome
+- actual-cause and but-for questions
+
+---
+
+## 3) Task form
+
+Allowed values:
+- `describe`
+- `predict`
+- `explain`
+- `advise`
+- `compare`
+- `teach`
+- `critique`
+- `unknown`
+
+### Rule
+Task form is **not** a rung.
+
+Examples:
+- forecasting is usually `predict` at rung 1
+- diagnostics are usually `explain` at rung 1 by default
+- “how should we change pricing?” may be `advise` at rung 2
+- “what is Pearl's ladder?” is `teach` in ordinary chat
+
+---
+
+## 4) Guardrail flag
+
+Allowed values:
+- `none`
+- `unsupported_rung_jump`
+- `unsupported_direct_mechanism`
+- `unsupported_actual_cause_presupposition`
+
+### Rule
+The guardrail should fire when the user’s framing would tempt the system to answer a higher-rung question using lower-rung evidence.
+
+Examples:
+- observed pattern + “what mechanism caused it?” + no causal identification
+- association + “what happens if we change X?” asked as if already established
+- observed outcome + “was X the reason?” without counterfactual setup
 
 ---
 
@@ -232,245 +245,164 @@ The classifier should support these intent types:
 
 Use this routing contract in the next implementation pass:
 
-- `continue_descriptive`
-- `open_predictive_analysis`
-- `open_causal_study`
+- `continue_chat`
+- `open_rung1_analysis`
+- `open_rung2_study`
+- `open_rung3_study`
 - `ask_clarification`
 - `blocked`
 
 ### Routing policy
 
-- `descriptive` -> `continue_descriptive`
-- `associational` -> `open_predictive_analysis`
-- `predictive` -> `open_predictive_analysis`
-- `diagnostic` -> `continue_descriptive` initially, using the diagnostic protocol in steps 2-4 and escalating to `open_causal_study` only when a causal or counterfactual conclusion is explicitly requested
-- `causal` -> `open_causal_study`
-- `counterfactual` -> `open_causal_study`
-- `unclear` -> default to `continue_descriptive` unless the request is too underspecified to support even observational analysis
-
-This preserves a separate predictive route, allows diagnostic work to start observationally, and reduces unnecessary prompting about question type.
+- ordinary conceptual/explanatory chat -> `continue_chat`
+- `rung_1_observational` without guardrail problem -> `open_rung1_analysis`
+- `rung_2_interventional` -> `open_rung2_study`
+- `rung_3_counterfactual` -> `open_rung3_study`
+- unresolved ambiguity -> `ask_clarification`
+- non-formalizable or policy-blocked request -> `blocked`
 
 ---
 
-## Claim label policy
+## Claim-label policy
 
-All user-visible answers must carry a claim label aligned to the executed branch.
+All user-visible answers must carry a claim label aligned to the rung actually used.
 
-### Allowed claim labels
+## Allowed claim labels
 
-- `DESCRIPTIVE`
-- `INSTRUMENTAL / HEURISTIC PREDICTION`
-- `UNTESTED HYPOTHESES`
-- `CORROBORATED ROOT-CAUSE CONJECTURE`
-- `UNFALSIFIABLE CONJECTURE`
-- `SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA`
-- `CORROBORATED CAUSAL CONJECTURE`
-- `WEAKLY CORROBORATED`
-- `FALSIFIED CAUSAL CONJECTURE`
+### Ordinary chat
+- `CONCEPTUAL EXPLANATION`
+- `COMPARATIVE EXPLANATION`
+- `CRITIQUE`
 
-### Guardrail rule
+### Rung 1
+- `OBSERVATIONAL DESCRIPTION`
+- `OBSERVATIONAL ASSOCIATION`
+- `OBSERVATIONAL FORECAST`
+- `OBSERVATIONAL EXPLANATORY HYPOTHESES`
 
-No branch may emit a stronger claim label than the workflow supports.
+### Rung 2
+- `INTERVENTIONAL QUESTION NOT YET IDENTIFIED`
+- `INTERVENTIONAL ESTIMATE`
+- `INTERVENTIONAL ESTIMATE, ASSUMPTION-SENSITIVE`
+- `INTERVENTIONAL CLAIM FALSIFIED`
+
+### Rung 3
+- `COUNTERFACTUAL QUESTION NOT YET IDENTIFIED`
+- `COUNTERFACTUAL ESTIMATE`
+- `ACTUAL-CAUSE ASSESSMENT, ASSUMPTION-SENSITIVE`
+- `COUNTERFACTUAL CLAIM FALSIFIED`
+
+## Guardrail rule
+
+No branch may emit a claim label from a higher rung than the workflow supports.
 
 Examples:
-- predictive output must not be labeled causal
-- diagnostic decomposition must not be labeled a corroborated causal conjecture
-- non-identifiable runs must not be labeled a corroborated causal conjecture
+- rung-1 forecasting must not be labeled causal
+- rung-1 diagnostic decomposition must not be labeled root-cause corroboration
+- non-identified rung-2 or rung-3 runs must not be narrated as established effects
 
 ---
 
-## Descriptive branch requirements
+## Rung 1 observational branch requirements
 
-The descriptive branch may output:
-
-- counts
-- time trends
+The rung-1 branch may output:
+- summaries
+- counts and trends
 - segment comparisons
-- charts
-- anomaly summaries
+- correlations and predictors
+- supervised forecasts from observed patterns
+- observational decomposition of changes
+- tentative explanatory hypotheses
 
 It must not output:
-
-- intervention claims
-- causal mechanisms presented as proven
-- counterfactual language
-
----
-
-## Associational / predictive branch requirements
-
-### Modeling standard
-
-Use **CatBoost** as the primary modeling engine for the prediction path.
-
-First implementation target:
-- `CatBoostClassifier` for classification
-- `CatBoostRegressor` for regression and direct prediction tasks
-
-Forecasting may initially be implemented as a supervised tabular problem using lagged features and forecast horizons, provided the output is labeled `INSTRUMENTAL / HEURISTIC PREDICTION` and not causal.
-
-### Allowed outputs
-
-- correlations
-- regression summaries
-- feature importance
-- predictive rankings
-- calibrated probabilities
-- forecasts
-- model quality metrics
-
-### Forbidden outputs
-
-- causal language without explicit qualification
-- claims that changing a feature will change the outcome
-- policy recommendations framed as intervention effects
+- intervention-effect claims
+- actual-cause verdicts
+- direct mechanism claims presented as established
+- policy recommendations narrated as proven effects
 
 ### Communication rule
 
-Associational answers must clearly say they describe patterns or predictors, not causes.
+Rung-1 answers must clearly state that they are observational unless the user is in an ordinary conceptual chat mode.
 
 ---
 
-## Diagnostic branch requirements
+## Rung 2 branch requirements
 
-Diagnostic questions should start with observational decomposition when possible.
-
-### Required first-pass checks
-
-- what changed over time?
-- which segments contributed most?
-- which metrics moved together?
-- were there operational anomalies?
-
-### Root-cause / mechanism mode
-
-If the problem is mechanistic or dependency-driven, the system should produce:
-
-- likely upstream changes
-- propagated path or dependency chain
-- confidence level
-- explicit uncertainty
-
-### Stop condition
-
-If the user does not appear to want a counterfactual answer, stop at the observational or root-cause-conjecture stage and include this disclaimer:
-
-> These represent observational regularities, but are not severely tested causal claims.
-
-### Escalation condition
-
-If the user asks for a but-for, effect-size, intervention, or attribution answer, the system must reframe the request into an explicit causal question and enter the causal workflow.
-
----
-
-## Causal branch requirements
-
-### Required setup before estimation
-
-Do not run causal estimation until all of the following are explicit:
-
-- treatment
+Before estimation, the system must make explicit:
+- intervention/treatment
 - outcome
 - unit of analysis
 - time horizon / analysis window
+- assumptions or graph structure needed for identification
 
-If any are missing, return `UNFALSIFIABLE CONJECTURE`.
-
-### Temporal-order rule
-
-Do not support a causal claim unless treatment precedes outcome or temporal ordering is otherwise defendable from the data design.
-
-### Observational-suitability rule
-
-Block or downgrade causal inference when any of these conditions hold:
-
-- no pre-treatment covariates
-- strong unresolved selection bias
-- post-treatment controls only
-- too little data
-- treatment is nearly deterministic
-- overlap / positivity is implausible
-
-In those cases return `SEVERE TESTING NOT POSSIBLE WITH CURRENT DATA` and recommend better data, an experiment, or a quasi-experimental design.
-
-### Graph requirement
-
-A causal estimate requires a defensible DAG or equivalent causal structure with explicit assumptions.
-
-### Identification rule
-
-If no identification strategy is available, return a non-identifiable answer and do not substitute an observational result.
+If these are missing, the system should clarify or block rather than silently downgrading the question to rung 1.
 
 ---
 
-## Causal estimation standard
+## Rung 3 branch requirements
 
-### Primary stack
+Before estimation, the system must make explicit:
+- the factual case or realized outcome being explained
+- the alternative action/state
+- the unit/case identity
+- the structural assumptions supporting counterfactual reasoning
 
-Use:
-- **DoWhy** for graph-aware causal orchestration, identification, and refutation
-- **EconML DML** for the primary backdoor estimation path
-
-### Default backdoor policy
-
-For backdoor-adjustable questions, the default estimation path should be:
-
-1. define the causal model in DoWhy
-2. identify the estimand in DoWhy
-3. estimate the effect using an EconML DML estimator through the DoWhy-compatible estimation path
-4. store the estimator configuration and assumptions in the result package
-
-### Additional identification paths
-
-The following paths may be added as explicit workflows rather than automatic estimator switching:
-
-- IV
-- diff-in-diff
-- panel methods
-- RDD
-- frontdoor
-- natural experiments
+If these are missing, the system should clarify or block rather than substituting a looser “why” narrative.
 
 ---
 
-## Robustness standard
+## Canonical examples
 
-Run, where available and defensible:
+- “What is Pearl’s ladder of causation?”
+  - mode: ordinary chat
+  - route: `continue_chat`
 
-- placebo treatment test
-- random common cause test
-- subset stability
-- sensitivity to hidden confounding
-- negative controls when available
+- “What correlates with churn?”
+  - mode: analytical
+  - rung: `rung_1_observational`
+  - route: `open_rung1_analysis`
 
-### Final causal conclusion rule
+- “Forecast next month’s sales.”
+  - mode: analytical
+  - rung: `rung_1_observational`
+  - task form: `predict`
+  - route: `open_rung1_analysis`
 
-- pass / stable -> `CORROBORATED CAUSAL CONJECTURE`
-- mixed / fragile -> `WEAKLY CORROBORATED`
-- failed robustness -> `FALSIFIED CAUSAL CONJECTURE`
+- “Why did churn spike in March?”
+  - default rung: `rung_1_observational`
+  - task form: `explain`
+  - route: `open_rung1_analysis`
 
-The final answer must explicitly connect its label to the robustness results and stated assumptions.
+- “What happens if we cut price by 10%?”
+  - rung: `rung_2_interventional`
+  - route: `open_rung2_study`
+
+- “Would churn have been lower if we had not changed onboarding?”
+  - rung: `rung_3_counterfactual`
+  - route: `open_rung3_study`
+
+- “We observed churn rose after onboarding changed; what mechanism caused it?”
+  - rung need: not yet safely answerable at rung 1 as phrased
+  - guardrail: `unsupported_direct_mechanism`
+  - route: `ask_clarification`
 
 ---
 
 ## Current implementation delta to close later
 
-The current codebase does **not** yet fully match this spec.
+The current codebase does **not** yet match this spec.
 
-Notable gaps to close in the implementation pass:
-
-- reduce question-type prompting further so unclear requests default to observational analysis unless a predictive or causal ask is explicit
-- ensure diagnostic "why" routing remains staged observational diagnosis with optional causal escalation
-- install and capability-check CatBoost and EconML in the Python runtime(s)
-- update causal estimation from linear regression / propensity weighting default paths to DoWhy + EconML DML for the default backdoor path
-- add explicit temporal-order and severe-test feasibility gates before causal estimation
-- add sensitivity-to-hidden-confounding and negative-control hooks where supported
-- update tests, docs, and answer labels to match this decision tree exactly
+Notable gaps:
+- mixed intent enums are still present in code and schema
+- the current code still includes predictive-specific routing and workspace logic
+- the current docs and code still use causal-first naming in places where the new architecture is rung-first and study-neutral
+- the old observational mechanism policy is too narrow and should be replaced by a generalized presupposition guardrail
+- some current prompts still tell the assistant to think in descriptive/diagnostic/predictive buckets first
 
 ---
 
 ## Implementation principle
 
-When the tree and the user-facing prose disagree, the tree wins.
+When the user wording and the required rung disagree, the required rung wins.
 
-When an estimator can produce a number but the decision tree says the claim is not supported, the claim must be blocked or downgraded rather than narrated optimistically.
+When a lower-rung workflow can produce a plausible story but not a warranted higher-rung answer, the system must challenge or reframe the question instead of narrating the higher-rung claim optimistically.

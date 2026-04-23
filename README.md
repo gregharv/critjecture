@@ -23,13 +23,19 @@ The project is built as a `pnpm` monorepo with a Next.js web app in `apps/web` a
 Critjecture should not stop at "ask a question, get an answer." The intended product direction is:
 
 - interactive business-data exploration through governed chat
+- a **rung-first analytical control plane** that distinguishes:
+  - ordinary conceptual chat
+  - **rung 1** observational analysis
+  - **rung 2** interventional study
+  - **rung 3** counterfactual / actual-cause study
+- separation of **required Pearl rung**, **task form**, and **causal-presupposition guardrails** rather than one mixed intent taxonomy
 - conversion of successful analyses into typed workflow definitions
 - validation of required inputs before each run
 - repeat execution of approved workflows, including scheduled runs
 - standardized output delivery such as summaries, documents, charts, and webhooks
 - durable operational history showing what ran, what data was used, what changed, and what was sent
 
-That direction keeps the current chat experience, but moves the product toward repeatable business processes rather than a thin wrapper around a general model.
+That direction keeps the current chat experience, but moves the product toward repeatable business processes and rung-aware analytical workflows rather than a thin wrapper around a general model.
 
 ## Commercial Packaging Direction
 
@@ -63,7 +69,7 @@ The chat UI uses `@mariozechner/pi-web-ui` with Critjecture-owned styling. The a
 
 When a question depends on company data, the assistant searches the current organization's approved files for the authenticated role, stages selected files into the sandbox, and then uses analysis or generation tools as needed.
 
-This chat surface remains the primary entry point. Privileged users can now turn successful chat-driven analyses into governed workflows, run them manually from `/workflows`, and optionally enable scheduled execution behind explicit feature flags.
+This chat surface remains the primary entry point. In the current codebase, some analytical work is still split across chat, predictive, and causal surfaces, but the target architecture is a rung-first model where ordinary chat remains separate from one unified observational-analysis surface and from higher-rung study flows. Privileged users can also turn successful chat-driven analyses into governed workflows, run them manually from `/workflows`, and optionally enable scheduled execution behind explicit feature flags.
 
 ### Roles
 

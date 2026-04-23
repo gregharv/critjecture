@@ -1,4 +1,8 @@
-import type { CausalIntentClassification, EpistemicPosture } from "@/lib/causal-intent-types";
+import type {
+  AnalyticalClarificationClassification,
+  AnalyticalClarificationKind as ClarificationKind,
+  AnalyticalClarificationPosture as EpistemicPosture,
+} from "@/lib/analytical-clarification-types";
 import {
   buildObservationalMechanismPolicyInstruction,
   classifyObservationalMechanismClarificationReply,
@@ -58,6 +62,7 @@ export function looksLikeStandaloneAnalyticalRequest(message: string) {
 function looksLikeShortClarificationReply(
   message: string,
   lastQuestion?: string | null,
+  clarificationKind?: ClarificationKind | null,
 ) {
   const trimmed = message.trim();
 
@@ -67,8 +72,8 @@ function looksLikeShortClarificationReply(
 
   const wordCount = trimmed.split(/\s+/).length;
   const loadedCausalFollowUp =
-    Boolean(lastQuestion) &&
-    isLoadedMechanismReframeQuestion(lastQuestion) &&
+    (clarificationKind === "loaded_presupposition_reframe" ||
+      (Boolean(lastQuestion) && isLoadedMechanismReframeQuestion(lastQuestion))) &&
     wordCount <= 18 &&
     !trimmed.includes("?") &&
     !STANDALONE_ANALYTICAL_REQUEST_PATTERNS.some((pattern) => pattern.test(trimmed));
@@ -80,15 +85,20 @@ function looksLikeShortClarificationReply(
   return wordCount <= 8 && !looksLikeStandaloneAnalyticalRequest(trimmed);
 }
 
-function contextualizeClarificationReply(lastQuestion: string | null | undefined, latestMessage: string) {
+function contextualizeClarificationReply(
+  lastQuestion: string | null | undefined,
+  latestMessage: string,
+  clarificationKind?: ClarificationKind | null,
+) {
   const question = lastQuestion?.trim() ?? "";
   const latest = latestMessage.trim();
 
-  if (!question || !latest || !looksLikeShortClarificationReply(latest, question)) {
+  if (!latest || !looksLikeShortClarificationReply(latest, question, clarificationKind)) {
     return latest;
   }
 
   const observationalMechanismPreference = classifyObservationalMechanismClarificationReply({
+    clarificationKind,
     lastQuestion: question,
     latestMessage: latest,
   });
@@ -148,9 +158,10 @@ export function buildEffectiveAnalyticalPrompt(
   pendingContext: string | null | undefined,
   latestMessage: string,
   lastQuestion?: string | null,
+  clarificationKind?: ClarificationKind | null,
 ) {
   const rawLatest = latestMessage.trim();
-  const latest = contextualizeClarificationReply(lastQuestion, rawLatest);
+  const latest = contextualizeClarificationReply(lastQuestion, rawLatest, clarificationKind);
   const context = pendingContext?.trim() ?? "";
 
   if (!latest) {
@@ -274,7 +285,7 @@ function hasLoadedQuestionFraming(message: string) {
 }
 
 function detectEpistemicRisk(input: {
-  classification: CausalIntentClassification;
+  classification: AnalyticalClarificationClassification;
   goal: AnalyticalGoal;
   hasData: boolean;
   message: string;
@@ -306,14 +317,14 @@ function detectEpistemicRisk(input: {
 }
 
 function resolveEpistemicPosture(input: {
-  classification: CausalIntentClassification;
+  classification: AnalyticalClarificationClassification;
   previousPosture?: EpistemicPosture | null;
   risk: EpistemicRisk;
   goal: AnalyticalGoal;
 }) {
   const currentPosture = (() => {
     if (input.risk === "causal_overreach" || input.goal === "causal") {
-      return "causal_risk" as const;
+      return "guardrail" as const;
     }
 
     if (input.risk === "predictive_vs_causal" || input.goal === "predictive") {
@@ -354,7 +365,7 @@ function buildEpistemicRiskLead(input: {
   posture: EpistemicPosture;
   seed: string;
 }) {
-  if (input.posture === "causal_risk") {
+  if (input.posture === "guardrail") {
     return chooseVariant(`${input.seed}:risk:causal-overreach`, [
       "Before we jump from a pattern to a causal story, I'd rather pin down what kind of answer you want.",
       "I don't want to overread an observed pattern as a causal explanation too quickly.",
@@ -364,9 +375,9 @@ function buildEpistemicRiskLead(input: {
 
   if (input.posture === "predictive") {
     return chooseVariant(`${input.seed}:risk:predictive-vs-causal`, [
-      "We can look at what predicts the outcome, but that's not automatically the same as what causes it.",
-      "A predictive read and a causal read are different, so I'd like to pin down which one you want.",
-      "Before we blur predictors with causes, let's pin down the kind of answer you're after.",
+      "We can look at what predicts the outcome, but that's not automatically the same as what would change it.",
+      "A rung-1 observational read and a higher-rung answer are different, so I'd like to pin down which one you want.",
+      "Before we blur predictors with intervention claims, let's pin down the kind of answer you're after.",
     ]);
   }
 
@@ -384,19 +395,19 @@ function buildEpistemicRiskLead(input: {
 export function buildAnalyticalClarificationBannerEyebrow(posture: EpistemicPosture, message: string) {
   const seed = normalizeText(message);
 
-  if (posture === "causal_risk") {
+  if (posture === "guardrail") {
     return chooseVariant(`${seed}:banner-eyebrow:causal-risk`, [
-      "Checking the causal framing",
+      "Checking the higher-rung framing",
       "Pressure-testing the causal story",
-      "Checking causal assumptions",
+      "Checking higher-rung assumptions",
     ]);
   }
 
   if (posture === "predictive") {
     return chooseVariant(`${seed}:banner-eyebrow:predictive`, [
-      "Separating prediction from causation",
-      "Clarifying the predictive target",
-      "Checking the predictive framing",
+      "Separating rung-1 from higher-rung",
+      "Clarifying the observational target",
+      "Checking the rung-1 framing",
     ]);
   }
 
@@ -429,19 +440,19 @@ export function buildAnalyticalClarificationBannerLead(
 ) {
   const seed = normalizeText(message);
 
-  if (posture === "causal_risk") {
+  if (posture === "guardrail") {
     return chooseVariant(`${seed}:banner:causal-risk`, [
-      "Before I analyze this, I want to pressure-test the causal framing a bit.",
-      "Before I analyze this, I want to check the causal framing before we run with it.",
-      "Before I analyze this, I want to make sure we are not jumping from a pattern to a causal story too quickly.",
+      "Before I analyze this, I want to pressure-test the higher-rung framing a bit.",
+      "Before I analyze this, I want to check whether this really needs a causal framing before we run with it.",
+      "Before I analyze this, I want to make sure we are not jumping from a pattern to a higher-rung story too quickly.",
     ]);
   }
 
   if (posture === "predictive") {
     return chooseVariant(`${seed}:banner:predictive`, [
-      "Before I analyze this, I want to separate prediction from causation.",
-      "Before I analyze this, I want to pin down whether you want a predictive read or a causal one.",
-      "Before I analyze this, I want to be clear on whether we're predicting an outcome or explaining a cause.",
+      "Before I analyze this, I want to separate a rung-1 observational read from a higher-rung claim.",
+      "Before I analyze this, I want to pin down whether you want an observational read or a higher-rung one.",
+      "Before I analyze this, I want to be clear on whether we're forecasting an outcome or asking what would change it.",
     ]);
   }
 
@@ -508,17 +519,8 @@ function buildConversationalContextLead(input: {
   return "";
 }
 
-export type ClarificationKind =
-  | "goal_disambiguation"
-  | "metric_needed"
-  | "time_window_needed"
-  | "grouping_needed"
-  | "data_source_needed"
-  | "loaded_causal_reframe"
-  | "next_detail";
-
 export type ClarificationIntent = {
-  classification: CausalIntentClassification;
+  classification: AnalyticalClarificationClassification;
   clarificationKind: ClarificationKind;
   epistemicPosture: EpistemicPosture;
   goal: AnalyticalGoal;
@@ -542,8 +544,8 @@ function resolveClarificationKind(input: {
   posture: EpistemicPosture;
   timeWindow: string | null;
 }) {
-  if (input.posture === "causal_risk" && input.loadedQuestionFraming) {
-    return "loaded_causal_reframe" as const;
+  if (input.posture === "guardrail" && input.loadedQuestionFraming) {
+    return "loaded_presupposition_reframe" as const;
   }
 
   if (!input.goal) {
@@ -571,7 +573,7 @@ function resolveClarificationKind(input: {
 
 export function buildClarificationIntent(
   message: string,
-  classification: CausalIntentClassification,
+  classification: AnalyticalClarificationClassification,
   previousPosture?: EpistemicPosture | null,
 ): ClarificationIntent {
   const metric = classification.proposedOutcomeLabel ?? null;
@@ -638,7 +640,7 @@ export function buildDeterministicClarificationQuestion(intent: ClarificationInt
     question: withLead(question),
   });
 
-  if (intent.clarificationKind === "loaded_causal_reframe") {
+  if (intent.clarificationKind === "loaded_presupposition_reframe") {
     return result(
       chooseVariant(`${intent.seed}:loaded-question`, [
         "Do you want to first test whether this relationship could be explained by a shared driver or confounding pattern, or are you only asking for plausible mechanism hypotheses?",
@@ -672,18 +674,18 @@ export function buildDeterministicClarificationQuestion(intent: ClarificationInt
     if (intent.metric) {
       return result(
         chooseVariant(`${intent.seed}:unclear:metric`, [
-          `Are you trying to explain a change in ${intent.metric}, get a quick summary of it, figure out what predicts it, or test whether something caused it?`,
-          `Would you like a quick summary of ${intent.metric}, an explanation for a change in it, a look at what predicts it, or a causal read on whether something drove it?`,
-          `Are you mostly after a summary of ${intent.metric}, an explanation for it, a predictive view of it, or a causal answer about what changed it?`,
+          `Are you trying to explain a change in ${intent.metric}, get a quick summary of it, figure out what predicts it, or test whether something would change it?`,
+          `Would you like a quick summary of ${intent.metric}, an explanation for a change in it, a look at what predicts it, or a higher-rung read on what would change it?`,
+          `Are you mostly after a summary of ${intent.metric}, an explanation for it, an observational view of it, or a higher-rung answer about what would change it?`,
         ]),
       );
     }
 
     return result(
       chooseVariant(`${intent.seed}:unclear:general`, [
-        "What are you most trying to understand here—what changed, what might explain a pattern, what predicts something, or whether something caused it?",
-        "What would be most useful here: a quick summary of what changed, an explanation for a pattern, a predictive read, or a causal answer?",
-        "Are you trying to figure out what happened, what might explain it, what predicts it, or whether something actually caused it?",
+        "What are you most trying to understand here—what changed, what might explain a pattern, what predicts something, or whether something would change it?",
+        "What would be most useful here: a quick summary of what changed, an explanation for a pattern, an observational read, or a higher-rung answer?",
+        "Are you trying to figure out what happened, what might explain it, what predicts it, or what would change it under a different action?",
       ]),
     );
   }
@@ -809,7 +811,7 @@ export function buildDeterministicClarificationQuestion(intent: ClarificationInt
 
 export function buildConversationalClarificationQuestion(
   message: string,
-  classification: CausalIntentClassification,
+  classification: AnalyticalClarificationClassification,
   previousPosture?: EpistemicPosture | null,
 ) {
   return buildDeterministicClarificationQuestion(

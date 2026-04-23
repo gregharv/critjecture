@@ -1,4 +1,7 @@
+import { loadEnvConfig } from "@next/env";
 import { defineConfig, devices } from "@playwright/test";
+
+loadEnvConfig(__dirname);
 
 const baseURL = "http://127.0.0.1:3101";
 
@@ -14,6 +17,7 @@ export default defineConfig({
     command: "pnpm dev --hostname 127.0.0.1 --port 3101",
     cwd: __dirname,
     env: {
+      ...process.env,
       CRITJECTURE_DEPLOYMENT_MODE: "single_org",
       CRITJECTURE_INTERN_EMAIL: "intern@example.com",
       CRITJECTURE_INTERN_NAME: "Intern User",
@@ -29,7 +33,6 @@ export default defineConfig({
       AUTH_SECRET: "playwright-test-secret",
       DATABASE_URL: "./.playwright-storage/critjecture-v2.sqlite",
       NODE_ENV: "test",
-      OPENAI_API_KEY: "test-openai-key",
     },
     reuseExistingServer: !process.env.CI,
     stdout: "pipe",

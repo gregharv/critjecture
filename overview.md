@@ -4,6 +4,8 @@ Critjecture is an auditable AI data analyst for business teams. It helps people 
 
 The current shipped experience is chat-first, but the product direction is to go beyond one-off conversations. Critjecture is intended to become a governed workflow system where successful analyses can be saved as typed recipes, validated against required inputs, rerun reliably, and delivered as standardized outputs.
 
+The current architectural direction is also **rung-first**. That means Critjecture should first distinguish ordinary conceptual chat from dataset-backed analysis, then classify analytical questions by the **minimum Pearl rung required for a non-misleading answer**: rung 1 observational, rung 2 interventional, or rung 3 counterfactual / actual-cause reasoning. Task form and causal-presupposition guardrails are treated as separate axes rather than being mixed into one flat intent taxonomy.
+
 The product is intentionally opinionated. It is not a general autonomous agent. It is a governed answer system built around role-aware access control, constrained tool execution, visible tool traces, and customer-controlled deployment options.
 
 ## 1. Product Position
@@ -17,7 +19,7 @@ Critjecture is designed to give organizations:
 * **Deployment flexibility** for hosted dedicated customer cells, customer-managed installs, and stricter private environments.
 * **A path from exploration to repeatability** so valuable analyses can become governed operating workflows rather than staying trapped in chat history.
 
-This is the core distinction in the product: Critjecture is not just a chat workspace with company knowledge. It is a governed system for producing business-data answers under explicit policy, execution, and audit constraints.
+This is the core distinction in the product: Critjecture is not just a chat workspace with company knowledge. It is a governed system for producing business-data answers under explicit policy, execution, audit, and epistemic-claim constraints.
 
 ## 2. Core Architecture And Control Plane
 

@@ -51,7 +51,6 @@ import type {
   WorkflowDraftFromChatTurn,
 } from "@/lib/workflow-builder-types";
 import type {
-  DataAnalysisToolResponse,
   GeneratedAssetToolResponse,
   SandboxToolResponse,
 } from "@/lib/sandbox-tool-types";
@@ -71,8 +70,16 @@ import {
   buildAnalyticalClarificationBannerLead,
   buildEffectiveAnalyticalPrompt,
 } from "@/lib/analytical-clarification";
+import type {
+  AnalysisIntakeResponse,
+  ClarificationKind as AnalysisClarificationKind,
+  EpistemicPosture as AnalysisEpistemicPosture,
+} from "@/lib/analysis-routing-types";
 import { buildChatSystemPrompt } from "@/lib/chat-system-prompt";
-import type { CausalIntakeResponse, EpistemicPosture } from "@/lib/causal-intent-types";
+import type {
+  AnalyticalClarificationKind as ClarificationKind,
+  AnalyticalClarificationPosture as EpistemicPosture,
+} from "@/lib/analytical-clarification-types";
 import { classifyObservationalMechanismClarificationReply } from "@/lib/observational-mechanism-response-policy";
 import type {
   GetKnowledgeFilePreviewResponse,
@@ -81,11 +88,11 @@ import type {
   ListKnowledgeFilesResponse,
 } from "@/lib/knowledge-types";
 import {
-  applyPredictiveChatReturnFromUrl,
-  createPredictiveChatTools,
-} from "@/lib/predictive-chat";
-import { registerPredictivePlanningMessageRenderers } from "@/lib/predictive-planning-messages";
-import { registerPredictiveWorkspaceStatusMessageRenderers } from "@/lib/predictive-workspace-status-messages";
+  applyObservationalChatReturnFromUrl,
+  createObservationalChatTools,
+} from "@/lib/observational-chat";
+import { registerObservationalPlanningMessageRenderers } from "@/lib/observational-planning-messages";
+import { registerObservationalWorkspaceStatusMessageRenderers } from "@/lib/observational-workspace-status-messages";
 import type { UserRole } from "@/lib/roles";
 
 type ChatShellState = {
@@ -141,6 +148,76 @@ type AnalyticalClarificationBannerState = {
   lead: string;
   question: string;
 };
+
+function mapLegacyClarificationKindToAnalysis(
+  value: ClarificationKind | null | undefined,
+): AnalysisClarificationKind | null {
+  switch (value) {
+    case "goal_disambiguation":
+      return "goal_disambiguation";
+    case "data_source_needed":
+      return "dataset_scope_needed";
+    case "loaded_presupposition_reframe":
+      return "presupposition_reframe";
+    case "next_detail":
+    case "grouping_needed":
+    case "metric_needed":
+    case "time_window_needed":
+      return "next_detail";
+    default:
+      return null;
+  }
+}
+
+function mapLegacyPostureToAnalysis(
+  value: EpistemicPosture | null | undefined,
+): AnalysisEpistemicPosture | null {
+  switch (value) {
+    case "predictive":
+    case "diagnostic":
+      return "observational";
+    case "guardrail":
+      return "guardrail";
+    case "data_limited":
+      return "data_limited";
+    case "exploratory":
+      return "ordinary_chat";
+    default:
+      return null;
+  }
+}
+
+function mapAnalysisClarificationKindToLegacy(value: AnalysisClarificationKind): ClarificationKind {
+  switch (value) {
+    case "dataset_scope_needed":
+      return "data_source_needed";
+    case "presupposition_reframe":
+      return "loaded_presupposition_reframe";
+    case "next_detail":
+      return "next_detail";
+    case "rung_1_vs_rung_2":
+    case "rung_1_vs_rung_3":
+    case "goal_disambiguation":
+    default:
+      return "goal_disambiguation";
+  }
+}
+
+function mapAnalysisPostureToLegacy(value: AnalysisEpistemicPosture): EpistemicPosture {
+  switch (value) {
+    case "observational":
+      return "diagnostic";
+    case "interventional":
+    case "counterfactual":
+    case "guardrail":
+      return "guardrail";
+    case "data_limited":
+      return "data_limited";
+    case "ordinary_chat":
+    default:
+      return "exploratory";
+  }
+}
 
 type ConversationBootstrapState = {
   createdAt: string;
@@ -1238,17 +1315,19 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
   const runDataAnalysisFailureStreakRef = useRef(0);
   const pendingChatTurnRef = useRef<PendingChatTurn | null>(null);
   const pendingAnalyticalClarificationRef = useRef<{
+    clarificationKind: ClarificationKind | null;
     conversationId: string | null;
     posture: EpistemicPosture | null;
     question: string | null;
     text: string | null;
-  }>({ conversationId: null, posture: null, question: null, text: null });
+  }>({ clarificationKind: null, conversationId: null, posture: null, question: null, text: null });
   const plannerSearchesRef = useRef<PendingPlannerSearch[]>([]);
   const pendingSelectionRef = useRef<FileSelectionEventDetail | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const syntheticContinuationRef = useRef(false);
   const toolbarMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState("");
+  const activeConversationTitleRef = useRef("");
   const [analyticalClarificationBanner, setAnalyticalClarificationBanner] =
     useState<AnalyticalClarificationBannerState | null>(null);
   const [fileMentionMenu, setFileMentionMenu] = useState<FileMentionMenuState | null>(null);
@@ -1278,6 +1357,10 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
     error: null,
     ready: false,
   });
+
+  useEffect(() => {
+    activeConversationTitleRef.current = activeConversationTitle;
+  }, [activeConversationTitle]);
 
   const cancelScheduledFileMentionPreviewHide = useCallback(() => {
     if (fileMentionPreviewHideTimeoutRef.current === null) {
@@ -1663,8 +1746,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
         registerCritjectureToolRenderers(webUi);
         registerCritjectureMessageRenderers(webUi);
         registerAskUserMessageRenderers(webUi);
-        registerPredictivePlanningMessageRenderers(webUi);
-        registerPredictiveWorkspaceStatusMessageRenderers(webUi);
+        registerObservationalPlanningMessageRenderers(webUi);
+        registerObservationalWorkspaceStatusMessageRenderers(webUi);
 
         const postAuditJson = async <TResponse,>(
           url: string,
@@ -1726,7 +1809,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
 
           return {
             id: conversationIdRef.current,
-            title: activeConversationTitle.trim() || buildConversationTitle(messages),
+            title: activeConversationTitleRef.current.trim() || buildConversationTitle(messages),
             model: agent.state.model,
             thinkingLevel: agent.state.thinkingLevel,
             messages,
@@ -1840,14 +1923,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             ? `/chat?conversation=${encodeURIComponent(conversationIdRef.current)}`
             : "/chat";
 
-        const applyPendingPredictiveChatReturn = () => {
+        const applyPendingObservationalChatReturn = () => {
           if (!agent) {
             return;
           }
 
           const currentAgent = agent;
 
-          applyPredictiveChatReturnFromUrl({
+          applyObservationalChatReturnFromUrl({
             getCurrentUrl: () => new URL(window.location.href),
             getMessages: () => currentAgent.state.messages as AgentMessage[],
             replaceHistoryUrl: (url) => {
@@ -1867,6 +1950,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           if (synthetic) {
             return {
               continueInChat: true,
+              displayInput: input,
               resolvedInput: input,
             };
           }
@@ -1876,6 +1960,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           if (!userPromptText) {
             return {
               continueInChat: true,
+              displayInput: input,
               resolvedInput: input,
             };
           }
@@ -1885,15 +1970,33 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               ? pendingAnalyticalClarificationRef.current
               : null;
 
+          const effectivePromptText = buildEffectiveAnalyticalPrompt(
+            pendingClarification?.text,
+            userPromptText,
+            pendingClarification?.question,
+            pendingClarification?.clarificationKind,
+          );
+          const resolvedClarificationInput = buildEffectiveAnalyticalPrompt(
+            null,
+            userPromptText,
+            pendingClarification?.question,
+            pendingClarification?.clarificationKind,
+          );
+
+          const resolvedObservationalMechanismPreference = pendingClarification
+            ? classifyObservationalMechanismClarificationReply({
+                clarificationKind: pendingClarification.clarificationKind,
+                lastQuestion: pendingClarification.question,
+                latestMessage: userPromptText,
+              })
+            : "none";
+
           const resolvedObservationalMechanismReply =
-            pendingClarification?.question &&
-            classifyObservationalMechanismClarificationReply({
-              lastQuestion: pendingClarification.question,
-              latestMessage: userPromptText,
-            }) !== "none";
+            resolvedObservationalMechanismPreference !== "none";
 
           if (pendingClarification && resolvedObservationalMechanismReply) {
             pendingAnalyticalClarificationRef.current = {
+              clarificationKind: null,
               conversationId: null,
               posture: null,
               question: null,
@@ -1902,34 +2005,35 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             setAnalyticalClarificationBanner(null);
             return {
               continueInChat: true,
-              resolvedInput: input,
+              displayInput: input,
+              resolvedInput: typeof input === "string" ? resolvedClarificationInput : input,
             };
           }
-
-          const effectivePromptText = buildEffectiveAnalyticalPrompt(
-            pendingClarification?.text,
-            userPromptText,
-            pendingClarification?.question,
-          );
           const resolvedInput = typeof input === "string" ? effectivePromptText : input;
 
           try {
-            const response = await fetch("/api/causal/intake", {
+            const response = await fetch("/api/analysis/intake", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
                 clarificationState: pendingClarification?.posture
-                  ? { epistemicPosture: pendingClarification.posture }
+                  ? {
+                      clarificationKind: mapLegacyClarificationKindToAnalysis(
+                        pendingClarification.clarificationKind,
+                      ),
+                      epistemicPosture: mapLegacyPostureToAnalysis(pendingClarification.posture),
+                    }
                   : null,
                 message: effectivePromptText,
               }),
             });
-            const data = (await response.json()) as CausalIntakeResponse | { error: string } | null;
+            const data = (await response.json()) as AnalysisIntakeResponse | { error: string } | null;
 
             if (!response.ok || typeof data !== "object" || data === null || !("decision" in data)) {
               pendingAnalyticalClarificationRef.current = {
+                clarificationKind: null,
                 conversationId: null,
                 posture: null,
                 question: null,
@@ -1938,12 +2042,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               setAnalyticalClarificationBanner(null);
               return {
                 continueInChat: true,
+                displayInput: input,
                 resolvedInput,
               };
             }
 
-            if (data.decision === "open_causal_study") {
+            if (data.decision === "open_rung2_study" || data.decision === "open_rung3_study") {
               pendingAnalyticalClarificationRef.current = {
+                clarificationKind: null,
                 conversationId: null,
                 posture: null,
                 question: null,
@@ -1953,19 +2059,23 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               appendUserTextMessage(userPromptText);
               appendAssistantTextMessage(
                 [
-                  "This question needs the causal workspace rather than a chat-side answer.",
-                  `I created a study for it: /causal/studies/${data.studyId}`,
+                  data.decision === "open_rung3_study"
+                    ? "This question needs the rung-3 counterfactual study workspace rather than a chat-side answer."
+                    : "This question needs the rung-2 interventional study workspace rather than a chat-side answer.",
+                  `I created a study for it: /analysis/studies/${data.studyId}`,
                   "Open that link when you want to continue.",
                 ].join(" "),
               );
               return {
                 continueInChat: false,
+                displayInput: input,
                 resolvedInput,
               };
             }
 
-            if (data.decision === "open_predictive_analysis") {
+            if (data.decision === "continue_chat") {
               pendingAnalyticalClarificationRef.current = {
+                clarificationKind: null,
                 conversationId: null,
                 posture: null,
                 question: null,
@@ -1974,29 +2084,55 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               setAnalyticalClarificationBanner(null);
               return {
                 continueInChat: true,
+                displayInput: input,
+                resolvedInput,
+              };
+            }
+
+            if (data.decision === "open_rung1_analysis") {
+              pendingAnalyticalClarificationRef.current = {
+                clarificationKind: null,
+                conversationId: null,
+                posture: null,
+                question: null,
+                text: null,
+              };
+              setAnalyticalClarificationBanner(null);
+              appendUserTextMessage(userPromptText);
+              appendAssistantTextMessage(
+                [
+                  "This question fits the rung-1 observational workspace rather than a chat-side answer.",
+                  `Open it here: ${data.nextPath}`,
+                  "Use that workspace for associations, predictors, and forecasts that should remain observational rather than causal.",
+                ].join(" "),
+              );
+              return {
+                continueInChat: false,
+                displayInput: input,
                 resolvedInput,
               };
             }
 
             if (data.decision === "ask_clarification") {
               pendingAnalyticalClarificationRef.current = {
+                clarificationKind: mapAnalysisClarificationKindToLegacy(
+                  data.clarificationState.clarificationKind,
+                ),
                 conversationId: conversationIdRef.current,
-                posture: data.clarificationState.epistemicPosture,
+                posture: mapAnalysisPostureToLegacy(data.clarificationState.epistemicPosture),
                 question: data.question,
                 text: effectivePromptText,
               };
               setAnalyticalClarificationBanner({
                 conversationId: conversationIdRef.current,
                 eyebrow:
-                  data.ui?.eyebrow?.trim() ||
                   buildAnalyticalClarificationBannerEyebrow(
-                    data.clarificationState.epistemicPosture,
+                    mapAnalysisPostureToLegacy(data.clarificationState.epistemicPosture),
                     effectivePromptText,
                   ),
                 lead:
-                  data.ui?.lead?.trim() ||
                   buildAnalyticalClarificationBannerLead(
-                    data.clarificationState.epistemicPosture,
+                    mapAnalysisPostureToLegacy(data.clarificationState.epistemicPosture),
                     effectivePromptText,
                   ),
                 question: data.question,
@@ -2005,12 +2141,14 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               appendAssistantTextMessage(data.question);
               return {
                 continueInChat: false,
+                displayInput: input,
                 resolvedInput,
               };
             }
 
             if (data.decision === "blocked") {
               pendingAnalyticalClarificationRef.current = {
+                clarificationKind: null,
                 conversationId: null,
                 posture: null,
                 question: null,
@@ -2021,11 +2159,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               appendAssistantTextMessage(data.message);
               return {
                 continueInChat: false,
+                displayInput: input,
                 resolvedInput,
               };
             }
 
             pendingAnalyticalClarificationRef.current = {
+              clarificationKind: null,
               conversationId: null,
               posture: null,
               question: null,
@@ -2034,11 +2174,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             setAnalyticalClarificationBanner(null);
             return {
               continueInChat: true,
+              displayInput: input,
               resolvedInput,
             };
           } catch (caughtError) {
             console.error("Intent routing failed; continuing in chat.", caughtError);
             pendingAnalyticalClarificationRef.current = {
+              clarificationKind: null,
               conversationId: null,
               posture: null,
               question: null,
@@ -2047,6 +2189,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
             setAnalyticalClarificationBanner(null);
             return {
               continueInChat: true,
+              displayInput: input,
               resolvedInput,
             };
           }
@@ -2065,7 +2208,7 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           }
 
           const resolvedInput = routeResult.resolvedInput;
-          queueChatTurn(resolvedInput, synthetic);
+          queueChatTurn(routeResult.displayInput ?? resolvedInput, synthetic);
 
           if (synthetic) {
             syntheticContinuationRef.current = true;
@@ -2255,8 +2398,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           pushPlannerSearch,
           requestAskUserInput,
         });
-        const { openPredictiveWorkspaceTool, updatePredictivePlanTool } =
-          createPredictiveChatTools({
+        const { openObservationalWorkspaceTool, updateObservationalPlanTool } =
+          createObservationalChatTools({
             Type,
             getConversationReturnToChatHref,
             getMessages: () => (agent ? (agent.state.messages as AgentMessage[]) : []),
@@ -2299,8 +2442,8 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
               braveSearchTool,
               braveGroundingTool,
               askUserTool,
-              updatePredictivePlanTool,
-              openPredictiveWorkspaceTool,
+              updateObservationalPlanTool,
+              openObservationalWorkspaceTool,
               runDataAnalysisTool,
               generateVisualGraphTool,
               generateDocumentTool,
@@ -2804,13 +2947,13 @@ export function ChatShellWithRole({ organizationSlug, role, userId }: ChatShellP
           braveSearchTool,
           braveGroundingTool,
           askUserTool,
-          updatePredictivePlanTool,
-          openPredictiveWorkspaceTool,
+          updateObservationalPlanTool,
+          openObservationalWorkspaceTool,
           runDataAnalysisTool,
           generateVisualGraphTool,
           generateDocumentTool,
         ]);
-        applyPendingPredictiveChatReturn();
+        applyPendingObservationalChatReturn();
         hostRef.current.replaceChildren(element);
         cleanup = () => {
           window.removeEventListener(
