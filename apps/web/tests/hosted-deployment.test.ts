@@ -198,7 +198,7 @@ describe("hosted deployment hardening", () => {
         globalActiveRuns: 4,
         perUserActiveRuns: 1,
       });
-      expect(health.persistence.databasePath).toContain("critjecture.sqlite");
+      expect(health.persistence.databasePath).toContain("critjecture-v2.sqlite");
       expect(health.persistence.storageRoot).toContain(environment.storageRoot);
       expect(health.checks.find((check) => check.name === "persistence")).toMatchObject({
         status: "ok",

@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 const mocks = vi.hoisted(() => {
   const execFile = vi.fn();
   const execFileAsync = vi.fn();
-  execFile[Symbol.for("nodejs.util.promisify.custom")] = execFileAsync;
+  (execFile as unknown as Record<symbol, typeof execFileAsync>)[Symbol.for("nodejs.util.promisify.custom")] = execFileAsync;
   return { execFile, execFileAsync };
 });
 
@@ -31,7 +31,7 @@ import {
   resetTestAppState,
 } from "@/tests/helpers/test-environment";
 
-async function ensureUserExists(input: { email: string; name: string; userId: string }) {
+async function ensureUserExists(input: { email: string; name: string | null; userId: string }) {
   const db = await getAppDatabase();
   const now = Date.now();
   const existingUsers = await db.select().from(users).where(eq(users.id, input.userId));
@@ -117,9 +117,8 @@ async function seedPredictiveDataset(input: { organizationId: string; organizati
       physicalType: "timestamp",
       semanticType: "time",
       columnOrder: 0,
-      nullCount: 0,
-      distinctCount: 120,
-      statsJson: "{}",
+      nullable: false,
+      metadataJson: "{}",
       createdAt: now,
     },
     {
@@ -131,9 +130,8 @@ async function seedPredictiveDataset(input: { organizationId: string; organizati
       physicalType: "float64",
       semanticType: "numeric",
       columnOrder: 1,
-      nullCount: 0,
-      distinctCount: 30,
-      statsJson: "{}",
+      nullable: false,
+      metadataJson: "{}",
       createdAt: now,
     },
     {
@@ -145,9 +143,8 @@ async function seedPredictiveDataset(input: { organizationId: string; organizati
       physicalType: "string",
       semanticType: "categorical",
       columnOrder: 2,
-      nullCount: 0,
-      distinctCount: 4,
-      statsJson: "{}",
+      nullable: false,
+      metadataJson: "{}",
       createdAt: now,
     },
     {
@@ -159,9 +156,8 @@ async function seedPredictiveDataset(input: { organizationId: string; organizati
       physicalType: "integer",
       semanticType: "boolean",
       columnOrder: 3,
-      nullCount: 0,
-      distinctCount: 2,
-      statsJson: "{}",
+      nullable: false,
+      metadataJson: "{}",
       createdAt: now,
     },
   ]);

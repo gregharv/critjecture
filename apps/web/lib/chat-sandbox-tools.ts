@@ -4,7 +4,7 @@ import type {
   SandboxToolResponse,
 } from "@/lib/sandbox-tool-types";
 
-type TypeboxLike = any;
+type TypeboxLike = typeof import("@mariozechner/pi-ai")["Type"];
 
 type ToolContentPart =
   | {

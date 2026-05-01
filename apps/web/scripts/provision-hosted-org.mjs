@@ -98,8 +98,10 @@ async function main() {
     parseConfiguredFilePath(process.env.CRITJECTURE_STORAGE_ROOT, repositoryRoot) ??
     path.join(repositoryRoot, "storage");
   const dbPath =
-    parseConfiguredFilePath(process.env.DATABASE_URL, repositoryRoot) ??
-    path.join(storageRoot, "critjecture.sqlite");
+    parseConfiguredFilePath(
+      process.env.CRITJECTURE_LEGACY_DATABASE_URL ?? process.env.LEGACY_DATABASE_URL ?? process.env.DATABASE_URL,
+      repositoryRoot,
+    ) ?? path.join(storageRoot, "critjecture.sqlite");
 
   await mkdir(path.dirname(dbPath), { recursive: true });
   await mkdir(storageRoot, { recursive: true });

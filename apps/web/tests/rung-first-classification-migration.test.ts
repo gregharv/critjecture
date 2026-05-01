@@ -95,7 +95,7 @@ describe("rung-first classification schema migration", () => {
           "counterfactual",
           0.91,
           "legacy counterfactual classification",
-          "open_rung2_study",
+          "open_causal_study",
           1,
         );
 
@@ -127,7 +127,7 @@ describe("rung-first classification schema migration", () => {
           "predictive",
           0.72,
           "legacy predictive classification",
-          "open_rung1_analysis",
+          "open_predictive_analysis",
           2,
         );
 

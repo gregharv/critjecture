@@ -12,7 +12,7 @@ import {
   buildObservationalWorkspaceStatusAssistantSummary,
 } from "@/lib/observational-workspace-status-messages";
 
-type TypeboxLike = any;
+type TypeboxLike = typeof import("@mariozechner/pi-ai")["Type"];
 
 type ObservationalPlanningToolParams = {
   candidateDrivers?: string[];

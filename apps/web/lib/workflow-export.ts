@@ -258,7 +258,7 @@ async function resolvePythonSandboxRequirements() {
   return ["matplotlib>=3.10.8", "polars>=1.39.3", "reportlab>=4.4.10"].join("\n");
 }
 
-function buildRunnerScript(manifest: WorkflowExportManifest) {
+function buildRunnerScript() {
   return `from __future__ import annotations
 
 import json
@@ -426,7 +426,7 @@ export async function exportWorkflowZip(input: {
       fileName: "requirements.txt",
     },
     {
-      content: buildRunnerScript(manifest),
+      content: buildRunnerScript(),
       fileName: "runner/run_workflow.py",
     },
     ...detail.currentVersion.contracts.recipe.steps.map((step, index) => ({

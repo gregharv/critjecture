@@ -3,12 +3,9 @@ import type {
   CompanyKnowledgeMatch,
 } from "@/lib/company-knowledge-types";
 import type { AskUserOption } from "@/lib/ask-user-messages";
-import {
-  createAskUserSelectionMessage,
-} from "@/lib/ask-user-messages";
 import type { UserRole } from "@/lib/roles";
 
-type TypeboxLike = any;
+type TypeboxLike = typeof import("@mariozechner/pi-ai")["Type"];
 
 type SearchToolResponse = {
   candidateFiles: CompanyKnowledgeCandidateFile[];

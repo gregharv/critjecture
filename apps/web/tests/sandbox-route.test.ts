@@ -40,7 +40,7 @@ describe("sandbox-route helpers", () => {
   });
 
   it("truncates very long sandbox summaries", () => {
-    const longText = "x".repeat(2000);
+    const longText = "x".repeat(13000);
 
     expect(buildSandboxSummary(longText, "")).toContain("… [truncated]");
   });
