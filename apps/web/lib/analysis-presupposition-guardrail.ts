@@ -147,7 +147,7 @@ export function buildGuardrailClarification(input: {
       epistemicPosture: "guardrail" as const,
       question: matchesAny(normalized, HYPOTHESIS_BRAINSTORM_CUES)
         ? "Do you want a short list of conjectural mechanisms only, clearly labeled as hypotheses rather than established causes?"
-        : "Do you want a careful observational explanation with hypotheses only, or do you want to frame this as a higher-rung intervention/counterfactual study instead of assuming the mechanism is already established?",
+        : "Do you want to first check shared driver, confounding pattern, or omitted context alternatives and keep mechanisms as hypotheses only, or do you want to frame this as a higher-rung intervention/counterfactual study instead of assuming the mechanism is already established?",
     };
   }
 
